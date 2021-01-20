@@ -1,0 +1,101 @@
+# Node data
+# The positioning of the baths relative to the home ($H) can be adjusted by changing the x and y values below (in cm).
+# The neighbors can be changed to expand the number of bath, which will likely never happen. and shouldn't be changed unless you are very familiar with the code base.
+
+[[bath]]
+name = "MCL_16"
+x = -0.1
+y = -0.4
+is_rinse = false
+neighbors = ["Rinse 1"]
+
+[[bath]]
+name = "HNO3"
+x = -10.2
+y = -0.4
+is_rinse = false
+neighbors = ["Rinse 2"]
+
+[[bath]]
+name = "Zn"
+x = -20.2
+y = -0.5
+is_rinse = false
+neighbors = ["Rinse 3"]
+
+[[bath]]
+name = "HF"
+x = -30.3
+y = -0.5
+is_rinse = false
+neighbors = ["Rinse 4"]
+
+[[bath]]
+name = "Ni"
+x = -40.3
+y = -0.5
+is_rinse = false
+neighbors = ["Rinse 5"]
+
+[[bath]]
+name = "Pd"
+x = -50.4
+y = -0.5
+is_rinse = false
+neighbors = ["Rinse 6"]
+
+[[bath]]
+name = "Au"
+x = -60.5
+y = -0.5
+is_rinse = false
+neighbors = ["Rinse 7"]
+
+[[bath]]
+name = "Rinse 1"
+x = 0.0
+y = -13.3
+is_rinse = true
+neighbors = ["MCL_16", "Rinse 2"]
+
+[[bath]]
+name = "Rinse 2"
+x = -10.1
+y = -13.3
+is_rinse = true
+neighbors = ["HNO3", "Rinse 1", "Rinse 3"]
+
+[[bath]]
+name = "Rinse 3"
+x = -20.1
+y = -12.4
+is_rinse = true
+neighbors = ["Zn", "Rinse 2", "Rinse 4"]
+
+[[bath]]
+name = "Rinse 4"
+x = -30.2
+y = -13.4
+is_rinse = true
+neighbors = ["HF", "Rinse 3", "Rinse 5"]
+
+[[bath]]
+name = "Rinse 5"
+x = -40.3
+y = -13.3
+is_rinse = true
+neighbors = ["Ni", "Rinse 4", "Rinse 6"]
+
+[[bath]]
+name = "Rinse 6"
+x = -50.4
+y = -13.5
+is_rinse = true
+neighbors = ["Pd", "Rinse 5", "Rinse 7"]
+
+[[bath]]
+name = "Rinse 7"
+x = -60.5
+y = -13.5
+is_rinse = true
+neighbors = ["Au", "Rinse 6"]
