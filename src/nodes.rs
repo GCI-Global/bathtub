@@ -35,10 +35,15 @@ pub struct Node {
     pub neighbors: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct Nodes {
     pub node: Vec<Node>,
 }
 
+#[derive(Debug, Clone)]
+pub struct NodeGrid2d {
+    pub grid: Vec<Vec<Node>>,
+}
 
 impl Nodes {
     pub fn new() -> Nodes {
@@ -82,7 +87,45 @@ impl Nodes {
         }
         Nodes {node: nodes}
     }
+
     
+}
+
+// A 2d vector grid split on the y axis where:
+// vec![x x x x x x]
+// vec![x x x x x x]
+impl NodeGrid2d {
+    fn new(grid: Vec<Vec<Node>>) -> NodeGrid2d {
+        NodeGrid2d {
+            grid,
+        }
+    }
+    pub fn from_nodes(nodes: Nodes) -> NodeGrid2d {
+        let mut node_vec = nodes.node.clone();
+        // sort by y
+        node_vec.retain(|n| n.z == 0.0);
+        node_vec.sort_by(|a, b| (b.y).total_cmp(&a.y));
+        // split into many y vecs
+        let mut test_value: f32 = node_vec[0].y;
+        let mut push_vec: usize = 0;
+        let mut build_grid: Vec<Vec<Node>> = vec![Vec::new()];
+        for node in node_vec {
+            if (node.y - test_value).abs() < 2.0 {
+                build_grid[push_vec].push(node);
+            } else {
+                push_vec += 1;
+                test_value = node.y;
+                build_grid.push(Vec::new());
+                build_grid[push_vec].push(node);
+            }
+
+        }
+        for i in 0..build_grid.len() {
+            build_grid[i].sort_by(|a, b| (b.x).total_cmp(&a.x));
+        }
+        let ng2d = NodeGrid2d::new(build_grid);
+        ng2d
+    }
 }
 
 pub fn gen_nodes() -> Nodes {

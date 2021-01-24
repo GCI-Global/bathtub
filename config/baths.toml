@@ -1,6 +1,9 @@
 # Node data
 # The positioning of the baths relative to the home ($H) can be adjusted by changing the x and y values below (in cm).
-# The neighbors can be changed to expand the number of bath, which will likely never happen. and shouldn't be changed unless you are very familiar with the code base.
+# Negative y is towards the front, negative x is towards the right
+# The neighbors likely will never have to be changed. It allows for adding more baths
+# Ordering baths in sequential order in the config is recommended, but not needed. The ordering s built from x y coords.
+
 
 [[bath]]
 name = "MCL_16"
