@@ -90,7 +90,7 @@ fn send<T: SerialPort>(port: &mut T, gcode: String) -> Result<(), String> {
             port.write(&buf[..]).unwrap();
         }
         // Now send Gcode command
-        buf = gcode.as_bytes().to_owned();
+        buf = gcode.append("\n").as_bytes().to_owned();
         port.write(&buf[..]).unwrap();
         let mut output = String::from("");
         while !output.contains("ok") {
