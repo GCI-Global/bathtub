@@ -1,19 +1,19 @@
-//#![feature(total_cmp)]
-extern crate serial;
+#![feature(total_cmp)]
+//extern crate serial;
 
-use std::thread;
-use std::io;
-use std::time::Duration;
+//use std::thread;
+//use std::io;
+//use std::time::Duration;
 
-use serial::prelude::*;
-use std::str;
+//use serial::prelude::*;
+//use std::str;
 
-mod paths;
+//mod paths;
 
 mod nodes;
-use nodes::NodeGrid2d;
-/*
-use iced::{button, Button, Scrollable, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Element, Application, Settings, Text};
+use nodes::{Node, NodeGrid2d};
+
+use iced::{button, Button, Scrollable, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
 
 pub fn main() -> iced::Result {
     Bathtub::run(Settings::default())
@@ -25,19 +25,16 @@ enum Bathtub {
     Loaded(State)
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct State {
     scroll: scrollable::State,
-    bath_btns: Vec<BathBtn>,
+    //bath_btns: (NodeGrid2d, Vec<Vec<button::State>>),
+    bath_btns: Vec<Vec<(Node, button::State)>>,
 }
 
 #[derive(Debug, Clone)]
 struct LoadState {
     node_grid2d: NodeGrid2d,
-}
-
-struct BatbBtn {
-    btn: button::State
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +45,7 @@ enum LoadError {
 #[derive(Debug, Clone)]
 enum Message {
     Loaded(Result<LoadState, LoadError>),
+    ButtonPressed(String),
 }
 
 impl Application for Bathtub {
@@ -70,13 +68,29 @@ impl Application for Bathtub {
         match self {
             Bathtub::Loading => {
                 match message {
-                    Message::Loaded(Ok(_state)) => {
+                    Message::Loaded(Ok(state)) => {
                         *self = Bathtub::Loaded(State {
-                            ..State::default()
+                            bath_btns: state.node_grid2d.grid.into_iter()
+                                .fold(Vec::new(), |mut vec, axis| {
+                                    vec.push(
+                                        axis.into_iter()
+                                            .fold(Vec::new(), |mut axis_vec, node| {
+                                                axis_vec.push((node, button::State::new()));
+                                                axis_vec
+                                            })
+                                    );
+                                    vec
+                                }),
+                            scroll: scrollable::State::new()
                         });
                     }
                     Message::Loaded(Err(_)) => {
-                        *self = Bathtub::Loaded(State::default());
+                        panic!("somehow loaded had an error")
+                        // need to add correct fail state, following is from the Todos example
+                        //*self = Bathtub::Loaded(State::default());
+                    }
+                    Message::ButtonPressed(btn_name) => {
+                        println!("{} was pressed", btn_name);
                     }
                 }
                 Command::none()
@@ -99,12 +113,26 @@ impl Application for Bathtub {
                     .width(Length::Fill)
                     .size(100)
                     .color([0.5, 0.5, 0.5])
-                    .horizontal_alignment(HorizontalAlignment::Center);
-                
+                    .horizontal_alignment(HorizontalAlignment::Center); 
+               
+                let button_grid = bath_btns.into_iter()
+                    .fold(Column::new(), |column, grid| {
+                        column.push(grid.into_iter()
+                            .fold(Row::new(), |row, node_tup| {
+                                row.push(
+                                    Button::new(&mut node_tup.1, Text::new(&node_tup.0.name))
+                                        .on_press(Message::ButtonPressed(node_tup.0.name.clone()))
+                                )
+                            })
+                        )
+                    });
+
                 let content = Column::new()
                     .max_width(800)
                     .spacing(20)
-                    .push(title);
+                    .push(title)
+                    .push(button_grid);
+
                 Scrollable::new(scroll)
                     .padding(40)
                     .push(
@@ -143,8 +171,8 @@ fn loading_message<'a>() -> Element<'a, Message> {
     .center_y()
     .into()
 }
-*/
 
+/*
 //Code for interacting with tubby. will make UI that will interact with this later
 fn main() {
     
@@ -216,7 +244,7 @@ fn interact<T: SerialPort>(port: &mut T, gcode_path: &Vec<String>) -> io::Result
     println!("{}", output);
     Ok(())
 }
-
+*/
 // Ideas
 // Things that should be in the config file
 // 1. Add the path to the serial port (i think linux is /dev/ttyUSB0) not sure about windows yet
