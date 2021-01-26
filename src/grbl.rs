@@ -4,41 +4,15 @@ use std::time::Duration;
 use serial::prelude::*;
 use serial::SystemPort;
 
-#[derive(Debug)]
-struct Status {
-    status: String,
-    x: f32,
-    y: f32,
-    z: f32,
+#[derive(Debug, Clone)]
+pub struct Status {
+    pub status: String,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
-/*
-fn main()  {
-        let mut port = serial::open("/dev/ttyUSB0").expect("unable to find tty or tty in use by other application");
-        port.reconfigure(&|settings| {
-            settings.set_baud_rate(serial::Baud115200).unwrap();
-            settings.set_char_size(serial::Bits8);
-            settings.set_parity(serial::ParityNone);
-            settings.set_stop_bits(serial::Stop1);
-            settings.set_flow_control(serial::FlowNone);
-
-            Ok(())
-        }).unwrap();
-        port.set_timeout(Duration::from_secs(60)).unwrap();
-
-    send(&mut port, "G90 Y-13.3\n".to_string()).unwrap();
-    println!("{:?}", status(&mut port));
-    println!("{:?}", status(&mut port));
-    println!("{:?}", status(&mut port));
-    println!("{:?}", status(&mut port));
-    send(&mut port, "G90 Y0\n".to_string()).unwrap();
-    loop {
-        println!("{:?}", status(&mut port));
-    }
-}
-*/
-
-fn get_port() -> SystemPort {
+pub fn get_port() -> SystemPort {
         let mut port = serial::open("/dev/ttyUSB0").expect("unable to find tty or tty in use by other application");
         port.reconfigure(&|settings| {
             settings.set_baud_rate(serial::Baud115200).unwrap();
@@ -54,7 +28,7 @@ fn get_port() -> SystemPort {
 }
 
 
-fn status<T: SerialPort>(port: &mut T) -> Status {
+pub fn status<T: SerialPort>(port: &mut T) -> Status {
     port.flush().unwrap();
     let mut buf: Vec<u8> = "?\n".as_bytes().to_owned();
     let mut output = String::new();
@@ -78,7 +52,7 @@ fn status<T: SerialPort>(port: &mut T) -> Status {
 }
 
 // ***** need to update to actually print if error *****
-fn send<T: SerialPort>(port: &mut T, gcode: String) -> Result<(), String> {
+pub fn send<T: SerialPort>(port: &mut T, gcode: String) -> Result<(), String> {
 
         let mut buf: Vec<u8> = "\r\n".as_bytes().to_owned(); //wake GRBL
         port.write(&buf[..]).unwrap();
@@ -90,7 +64,7 @@ fn send<T: SerialPort>(port: &mut T, gcode: String) -> Result<(), String> {
             port.write(&buf[..]).unwrap();
         }
         // Now send Gcode command
-        buf = gcode.append("\n").as_bytes().to_owned();
+        buf = format!("{}\n", gcode).as_bytes().to_owned();
         port.write(&buf[..]).unwrap();
         let mut output = String::from("");
         while !output.contains("ok") {

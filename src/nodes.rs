@@ -1,6 +1,7 @@
 use toml;
 use serde::Deserialize;
 use std::fs;
+use std::collections::HashMap;
 
 // Baths are Deserialized from config file, nodes are a generated 3d graph on nodes from the 2d
 // baths structs
@@ -35,7 +36,7 @@ pub struct Node {
     pub neighbors: Vec<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Nodes {
     pub node: Vec<Node>,
 }
@@ -130,6 +131,14 @@ impl NodeGrid2d {
 
 pub fn gen_nodes() -> Nodes {
     Nodes::to_nodes(get_baths_config())
+}
+
+pub fn get_nodemap(nodes: Nodes) -> HashMap<String, usize> {
+    nodes.node.into_iter().enumerate()
+        .fold(HashMap::new(), |mut node_map, (i, node)| {
+            node_map.insert(node.name.clone(), i);
+            node_map
+        })
 }
 
 fn get_baths_config() -> Baths {

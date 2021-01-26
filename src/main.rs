@@ -1,6 +1,12 @@
 #![feature(total_cmp)]
 mod nodes;
-use nodes::{Node, NodeGrid2d};
+mod grbl;
+mod paths;
+use grbl::Status;
+use nodes::{Node, Nodes, NodeGrid2d};
+use serial::SystemPort;
+use std::fmt;
+use std::collections::HashMap;
 
 use iced::{button, Button, Scrollable, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
 
@@ -8,21 +14,27 @@ pub fn main() -> iced::Result {
     Bathtub::run(Settings::default())
 }
 
-#[derive(Debug)]
+//#[derive(Debug)]
 enum Bathtub {
     Loading,
     Loaded(State)
 }
 
-#[derive(Debug)]
 struct State {
     scroll: scrollable::State,
     //bath_btns: (NodeGrid2d, Vec<Vec<button::State>>),
     bath_btns: Vec<Vec<(Node, button::State)>>,
+    title: String,
+    nodes: Nodes,
+    node_map: HashMap<String, usize>,
+    current_node: Node,
+    port: SystemPort,
 }
 
 #[derive(Debug, Clone)]
 struct LoadState {
+    nodes: Nodes,
+    node_map: HashMap<String, usize>,
     node_grid2d: NodeGrid2d,
 }
 
@@ -70,7 +82,12 @@ impl Application for Bathtub {
                                     );
                                     vec
                                 }),
-                            scroll: scrollable::State::new()
+                            scroll: scrollable::State::new(),
+                            title: "None".to_string(),
+                            nodes: state.nodes.clone(),
+                            node_map: state.node_map.clone(),
+                            current_node: state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone(),
+                            port: grbl::get_port(),
                         });
                     }
                     Message::Loaded(Err(_)) => {
@@ -79,13 +96,26 @@ impl Application for Bathtub {
                         //*self = Bathtub::Loaded(State::default());
                     }
                     Message::ButtonPressed(btn_name) => {
+                        // This is not used, might not be necessary
                         println!("{} was pressed", btn_name);
                     }
                 }
                 Command::none()
             }
-            Bathtub::Loaded(_state) => {
-                // placeholder
+            Bathtub::Loaded(state) => {
+                match message {
+                    Message::ButtonPressed(btn) => {
+                        state.title = btn.clone();
+                        let next_node = &state.nodes.node[state.node_map.get(&format!("{}_inBath",btn.clone())).unwrap().clone()];
+                        let node_paths = paths::gen_node_paths(&state.nodes, &state.current_node, next_node);
+                        let gcode_paths = paths::gen_gcode_paths(&node_paths);
+                        for gcode_path in gcode_paths {
+                            grbl::send(&mut state.port, gcode_path).unwrap();
+                        }
+                        state.current_node = next_node.clone();
+                    },
+                    _ => (),
+                }
                 Command::none()
             }
         }
@@ -97,8 +127,13 @@ impl Application for Bathtub {
             Bathtub::Loaded(State {
                                 scroll,
                                 bath_btns,
+                                port,
+                                nodes,
+                                node_map,
+                                current_node,
+                                title,
             }) => {
-                let title = Text::new("Bathtub")
+                let title = Text::new(title.clone())
                     .width(Length::Fill)
                     .size(100)
                     .color([0.5, 0.5, 0.5])
@@ -109,10 +144,12 @@ impl Application for Bathtub {
                         column.push(grid.into_iter()
                             .fold(Row::new(), |row, node_tup| {
                                 row.push(
-                                    Button::new(&mut node_tup.1, Text::new(&node_tup.0.name))
+                                    Button::new(&mut node_tup.1, Text::new(&node_tup.0.name).horizontal_alignment(HorizontalAlignment::Center))
+                                        .padding(20)
+                                        .width(Length::Fill)
                                         .on_press(Message::ButtonPressed(node_tup.0.name.clone()))
                                 )
-                            })
+                            }).padding(3)
                         )
                     });
 
@@ -134,8 +171,10 @@ impl Application for Bathtub {
 }
 
 impl LoadState {
-    fn new(node_grid2d: NodeGrid2d) -> LoadState {
+    fn new(nodes: Nodes, node_map: HashMap<String, usize>, node_grid2d: NodeGrid2d) -> LoadState {
         LoadState {
+            nodes,
+            node_map,
             node_grid2d,
         }
     }
@@ -143,8 +182,12 @@ impl LoadState {
     // This is just a placeholder. Will eventually read data from server
     async fn load() -> Result<LoadState, LoadError> {
         let nodes = nodes::gen_nodes();
+        
         Ok(
-            LoadState::new(NodeGrid2d::from_nodes(nodes.clone()))
+            LoadState::new(nodes.clone(),
+                nodes::get_nodemap(nodes.clone()),
+                NodeGrid2d::from_nodes(nodes)
+            )
         )
     }
 }
