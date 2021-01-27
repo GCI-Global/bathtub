@@ -1,5 +1,5 @@
 extern crate serial;
-use std::{thread, io, str};
+use std::{thread, str};
 use std::time::Duration;
 use serial::prelude::*;
 use serial::SystemPort;

@@ -5,10 +5,9 @@ mod paths;
 use grbl::Status;
 use nodes::{Node, Nodes, NodeGrid2d};
 use serial::SystemPort;
-use std::fmt;
 use std::collections::HashMap;
 
-use iced::{button, Button, Scrollable, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
+use iced::{button, Button, time, Scrollable, Subscription, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
 
 pub fn main() -> iced::Result {
     Bathtub::run(Settings::default())
@@ -28,7 +27,9 @@ struct State {
     nodes: Nodes,
     node_map: HashMap<String, usize>,
     current_node: Node,
+    status: Option<Status>,
     in_bath: bool,
+    connected: bool,
     port: SystemPort,
 }
 
@@ -41,7 +42,7 @@ struct LoadState {
 
 #[derive(Debug, Clone)]
 enum LoadError {
-    Placeholder,
+    _Placeholder,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,7 @@ enum Message {
     Loaded(Result<LoadState, LoadError>),
     ButtonPressed(String),
     ToggleBath(bool),
+    Tick,
 }
 
 impl Application for Bathtub {
@@ -65,6 +67,20 @@ impl Application for Bathtub {
 
     fn title(&self) -> String {
         String::from("Bathtub")
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        match self {
+            Bathtub::Loaded(state) => {
+                if state.connected {
+                    return time::every(std::time::Duration::from_secs(1))
+                        .map(|_| Message::Tick)
+                } else {
+                    return Subscription::none();
+                }
+            },
+            _ => Subscription::none(),
+        }
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
@@ -85,11 +101,13 @@ impl Application for Bathtub {
                                     vec
                                 }),
                             scroll: scrollable::State::new(),
-                            title: "None".to_string(),
+                            title: "Click button to start".to_string(),
                             nodes: state.nodes.clone(),
                             node_map: state.node_map.clone(),
                             current_node: state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone(),
                             in_bath: true,
+                            status: None,
+                            connected: false,
                             port: grbl::get_port(),
                         });
                     }
@@ -106,13 +124,15 @@ impl Application for Bathtub {
                         //this is not used
                         ()
                     }
+                    Message::Tick => {
+                        // this is not used
+                    }
                 }
                 Command::none()
             }
             Bathtub::Loaded(state) => {
                 match message {
                     Message::ButtonPressed(btn) => {
-                        state.title = btn.clone();
                         let enter_bath: String;
                         let mut send_result: Result<(), grbl::Errors>;
                         if state.in_bath {enter_bath = "_inBath".to_string();} else {enter_bath = "".to_string();}
@@ -122,18 +142,22 @@ impl Application for Bathtub {
                         for gcode_path in gcode_paths {
                             send_result = grbl::send(&mut state.port, gcode_path.clone());
                             if send_result.is_err() {
+                                state.title = "Homeing".to_string();
                                 grbl::home(&mut state.port).unwrap();
+                                state.connected = true;
                                 state.current_node = state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();
                                 grbl::send(&mut state.port, gcode_path).unwrap();
                             }
-                            //Ok(_) => (),
-                            //Err(_) => {grbl::home(&mut port); state.current_node = state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();}
-                        
                         }
                         state.current_node = next_node.clone();
                     },
                     Message::ToggleBath(boolean) => {
                         state.in_bath = boolean;
+                    },
+                    Message::Tick => {
+                        state.status = Some(grbl::status(&mut state.port));
+                        let current = state.status.clone().unwrap();
+                        state.title = format!("{}ing at ({},{},{})", current.status, current.x, current.y, current.z);
                     }
                     _ => (),
                 }
@@ -148,16 +172,13 @@ impl Application for Bathtub {
             Bathtub::Loaded(State {
                                 scroll,
                                 bath_btns,
-                                port,
-                                nodes,
-                                node_map,
-                                current_node,
                                 in_bath,
                                 title,
+                                ..
             }) => {
                 let title = Text::new(title.clone())
                     .width(Length::Fill)
-                    .size(100)
+                    .size(50)
                     .color([0.5, 0.5, 0.5])
                     .horizontal_alignment(HorizontalAlignment::Center); 
                
