@@ -13,6 +13,11 @@ pub struct Status {
     pub z: f32,
 }
 
+#[derive(Debug)]
+pub enum Errors {
+    HomeRequired,
+}
+
 pub fn get_port() -> SystemPort {
         let mut try_port = serial::open("/dev/ttyUSB0");
         if try_port.is_err() {
@@ -65,7 +70,7 @@ pub fn status<T: SerialPort>(port: &mut T) -> Status {
 }
 
 // ***** need to update to actually print if error *****
-pub fn send(port: &mut SystemPort, gcode: String) -> Result<(), String> {
+pub fn send(port: &mut SystemPort, gcode: String) -> Result<(), Errors> {
         // test for if port lost
         if port.read_cd().is_err() {
             *port = get_port();
@@ -76,9 +81,7 @@ pub fn send(port: &mut SystemPort, gcode: String) -> Result<(), String> {
 
         // Initialise GRBL if not already
         if port.read(&mut buf[..]).unwrap() == 1 { // 1 means not conncted for GRBL
-            port.read(&mut buf[..]).unwrap();
-            buf = "$H\n".as_bytes().to_owned();
-            port.write(&buf[..]).unwrap();
+            return Err(Errors::HomeRequired);
         }
         // Now send Gcode command
         buf = format!("{}\n", gcode).as_bytes().to_owned();
@@ -88,5 +91,18 @@ pub fn send(port: &mut SystemPort, gcode: String) -> Result<(), String> {
             port.read(&mut buf[..]).unwrap();
             output.push_str(str::from_utf8(&buf[..]).unwrap());
         }
+    Ok(())
+}
+pub fn home(port: &mut SystemPort) -> Result<(), String> {
+    if port.read_cd().is_err() {
+        *port = get_port();
+    }
+    let mut buf: Vec<u8> = "\r\n".as_bytes().to_owned(); //wake GRBL
+    port.write(&buf[..]).unwrap();
+
+    // Initialise GRBL if not already
+    port.read(&mut buf[..]).unwrap();
+    buf = "$H\n".as_bytes().to_owned();
+    port.write(&buf[..]).unwrap();
     Ok(())
 }

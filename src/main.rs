@@ -8,7 +8,7 @@ use serial::SystemPort;
 use std::fmt;
 use std::collections::HashMap;
 
-use iced::{button, Button, Scrollable, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
+use iced::{button, Button, Scrollable, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
 
 pub fn main() -> iced::Result {
     Bathtub::run(Settings::default())
@@ -28,6 +28,7 @@ struct State {
     nodes: Nodes,
     node_map: HashMap<String, usize>,
     current_node: Node,
+    in_bath: bool,
     port: SystemPort,
 }
 
@@ -47,6 +48,7 @@ enum LoadError {
 enum Message {
     Loaded(Result<LoadState, LoadError>),
     ButtonPressed(String),
+    ToggleBath(bool),
 }
 
 impl Application for Bathtub {
@@ -87,6 +89,7 @@ impl Application for Bathtub {
                             nodes: state.nodes.clone(),
                             node_map: state.node_map.clone(),
                             current_node: state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone(),
+                            in_bath: true,
                             port: grbl::get_port(),
                         });
                     }
@@ -99,6 +102,10 @@ impl Application for Bathtub {
                         // This is not used, might not be necessary
                         println!("{} was pressed", btn_name);
                     }
+                    Message::ToggleBath(_bool) => {
+                        //this is not used
+                        ()
+                    }
                 }
                 Command::none()
             }
@@ -106,14 +113,28 @@ impl Application for Bathtub {
                 match message {
                     Message::ButtonPressed(btn) => {
                         state.title = btn.clone();
-                        let next_node = &state.nodes.node[state.node_map.get(&format!("{}_inBath",btn.clone())).unwrap().clone()];
+                        let enter_bath: String;
+                        let mut send_result: Result<(), grbl::Errors>;
+                        if state.in_bath {enter_bath = "_inBath".to_string();} else {enter_bath = "".to_string();}
+                        let next_node = &state.nodes.node[state.node_map.get(&format!("{}{}",btn.clone(), enter_bath)).unwrap().clone()];
                         let node_paths = paths::gen_node_paths(&state.nodes, &state.current_node, next_node);
                         let gcode_paths = paths::gen_gcode_paths(&node_paths);
                         for gcode_path in gcode_paths {
-                            grbl::send(&mut state.port, gcode_path).unwrap();
+                            send_result = grbl::send(&mut state.port, gcode_path.clone());
+                            if send_result.is_err() {
+                                grbl::home(&mut state.port).unwrap();
+                                state.current_node = state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();
+                                grbl::send(&mut state.port, gcode_path).unwrap();
+                            }
+                            //Ok(_) => (),
+                            //Err(_) => {grbl::home(&mut port); state.current_node = state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();}
+                        
                         }
                         state.current_node = next_node.clone();
                     },
+                    Message::ToggleBath(boolean) => {
+                        state.in_bath = boolean;
+                    }
                     _ => (),
                 }
                 Command::none()
@@ -131,6 +152,7 @@ impl Application for Bathtub {
                                 nodes,
                                 node_map,
                                 current_node,
+                                in_bath,
                                 title,
             }) => {
                 let title = Text::new(title.clone())
@@ -152,12 +174,17 @@ impl Application for Bathtub {
                             }).padding(3)
                         )
                     });
-
+                let inbath_toggle = Checkbox::new(
+                  in_bath.clone(),
+                  "Enter Bath",
+                  Message::ToggleBath,
+                );
                 let content = Column::new()
                     .max_width(800)
                     .spacing(20)
                     .push(title)
-                    .push(button_grid);
+                    .push(button_grid)
+                    .push(inbath_toggle);
 
                 Scrollable::new(scroll)
                     .padding(40)
