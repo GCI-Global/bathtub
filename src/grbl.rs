@@ -3,6 +3,7 @@ use std::{thread, io, str};
 use std::time::Duration;
 use serial::prelude::*;
 use serial::SystemPort;
+use std::io::{Read, Write};
 
 #[derive(Debug, Clone)]
 pub struct Status {
@@ -13,7 +14,19 @@ pub struct Status {
 }
 
 pub fn get_port() -> SystemPort {
-        let mut port = serial::open("/dev/ttyUSB0").expect("unable to find tty or tty in use by other application");
+        let mut try_port = serial::open("/dev/ttyUSB0");
+        if try_port.is_err() {
+            let mut i = 1;
+            while try_port.is_err() && i < 10000{
+                try_port = serial::open(&format!("/dev/ttyUSB{}",i));
+                i+=1;
+            }
+            if i == 10000 {
+                panic!("unable to find USB port");
+            }
+        }
+        let mut port = try_port.expect("port error");
+        
         port.reconfigure(&|settings| {
             settings.set_baud_rate(serial::Baud115200).unwrap();
             settings.set_char_size(serial::Bits8);
@@ -52,7 +65,11 @@ pub fn status<T: SerialPort>(port: &mut T) -> Status {
 }
 
 // ***** need to update to actually print if error *****
-pub fn send<T: SerialPort>(port: &mut T, gcode: String) -> Result<(), String> {
+pub fn send(port: &mut SystemPort, gcode: String) -> Result<(), String> {
+        // test for if port lost
+        if port.read_cd().is_err() {
+            *port = get_port();
+        }
 
         let mut buf: Vec<u8> = "\r\n".as_bytes().to_owned(); //wake GRBL
         port.write(&buf[..]).unwrap();

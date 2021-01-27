@@ -9,6 +9,13 @@ struct NodeDistance {
 }
 
 pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
+    // return start node if start == stop
+    if start.name == stop.name {
+        return Nodes {
+            node: vec![start.clone()]
+        }
+    }
+
     // Assign relevant nodes a distance from the start node
     let mut distance_nodes: Vec<NodeDistance> = vec![];
     for node in &nodes.node {
