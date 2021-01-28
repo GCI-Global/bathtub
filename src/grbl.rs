@@ -1,9 +1,15 @@
 extern crate serial;
 use std::{thread, str};
 use std::time::Duration;
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 use serial::prelude::*;
 use serial::SystemPort;
 use std::io::{Read, Write};
+
+use chrono::prelude::*;
+use std::io::BufReader;
+use std::io::BufRead;
 
 #[derive(Debug, Clone)]
 pub struct Status {
@@ -13,9 +19,21 @@ pub struct Status {
     pub z: f32,
 }
 
-#[derive(Debug)]
-pub enum Errors {
-    HomeRequired,
+pub fn create_connection() -> (Sender<String>, std::sync::mpsc::Receiver<(chrono::DateTime<chrono::Local>, String, String)>) {
+    let (cnc_tx, ui_rx) = mpsc::channel();
+    let (ui_tx, cnc_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut port = get_port();
+        let mut grbl_response: (DateTime<Local>, String, String);
+        loop {
+            if let Ok(command) = ui_rx.try_recv() {
+                grbl_response = send(&mut port, command);
+                ui_tx.send(grbl_response).unwrap();
+            }
+        }
+    });
+
+    (cnc_tx, cnc_rx)
 }
 
 pub fn get_port() -> SystemPort {
@@ -46,63 +64,23 @@ pub fn get_port() -> SystemPort {
 }
 
 
-pub fn status<T: SerialPort>(port: &mut T) -> Status {
-    port.flush().unwrap();
-    let mut buf: Vec<u8> = "?\n".as_bytes().to_owned();
-    let mut output = String::new();
+pub fn send(port: &mut SystemPort, gcode: String) -> (DateTime<Local>, String, String) {
+    let mut buf = format!("{}\n", gcode.clone()).as_bytes().to_owned();
     port.write(&buf[..]).unwrap();
-    thread::sleep(Duration::from_millis(500));
-    while !output.contains(">\r\n"){
-        port.read(&mut buf[..]).unwrap();
-        output.push_str(str::from_utf8(&buf[..]).unwrap());
-    }
-    // Parse input string
-    let split_output: Vec<&str> = output.split("|").collect();
-    let status: Vec<&str> = split_output[0].split("\n").collect();
-    let split_coords: Vec<&str> = split_output[1].split(",").collect();
-    Status {
-        //status: split_output[0].replace("<","").to_string(),
-        status: status.last().unwrap().replace("<","").to_string(),
-        x: split_coords[0][5..].parse().unwrap(),
-        y: split_coords[1].parse().unwrap(),
-        z: split_coords[2].parse().unwrap(),
-    }
-}
-
-// ***** need to update to actually print if error *****
-pub fn send(port: &mut SystemPort, gcode: String) -> Result<(), Errors> {
-        // test for if port lost
-        if port.read_cd().is_err() {
-            *port = get_port();
+    let mut reader = BufReader::new(port);
+    let mut line: String;
+    let mut output: Vec<String> = Vec::new();
+    buf = Vec::new();
+    loop {
+        reader.read_until(0xD, &mut buf).unwrap();
+        line = str::from_utf8(&buf).unwrap().to_string();
+        if  line.contains("\u{0}\r") {
+            return (Local::now(), gcode, "init".to_string());
         }
-
-        let mut buf: Vec<u8> = "\r\n".as_bytes().to_owned(); //wake GRBL
-        port.write(&buf[..]).unwrap();
-
-        // Initialise GRBL if not already
-        if port.read(&mut buf[..]).unwrap() == 1 { // 1 means not conncted for GRBL
-            return Err(Errors::HomeRequired);
+        if  line.contains("\r") {
+            output.push(line.replace("\r",""));
+            return (Local::now(), gcode.replace("\n","\\n"), output.into_iter().fold(String::new(), |mut string, part| {string.push_str(&part[..]); string}));
         }
-        // Now send Gcode command
-        buf = format!("{}\n", gcode).as_bytes().to_owned();
-        port.write(&buf[..]).unwrap();
-        let mut output = String::from("");
-        while !output.contains("ok") {
-            port.read(&mut buf[..]).unwrap();
-            output.push_str(str::from_utf8(&buf[..]).unwrap());
-        }
-    Ok(())
-}
-pub fn home(port: &mut SystemPort) -> Result<(), String> {
-    if port.read_cd().is_err() {
-        *port = get_port();
+        output.push(line);
     }
-    let mut buf: Vec<u8> = "\r\n".as_bytes().to_owned(); //wake GRBL
-    port.write(&buf[..]).unwrap();
-
-    // Initialise GRBL if not already
-    port.read(&mut buf[..]).unwrap();
-    buf = "$H\n".as_bytes().to_owned();
-    port.write(&buf[..]).unwrap();
-    Ok(())
 }
