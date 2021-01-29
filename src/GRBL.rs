@@ -2,24 +2,34 @@ extern crate serial;
 use std::{thread, str};
 use std::time::Duration;
 use std::sync::mpsc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Sender, Receiver, SendError, TryRecvError};
 use serial::prelude::*;
 use serial::SystemPort;
-use std::io::{Read, Write};
+use std::io::Write;
 
 use chrono::prelude::*;
 use std::io::BufReader;
 use std::io::BufRead;
 
-#[derive(Debug, Clone)]
-pub struct Status {
-    pub status: String,
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+
+// used to clean up code when this file is imporded into another
+#[derive(Debug)]
+pub struct Grbl {
+    pub sender: Sender<String>,
+    pub receiver: Receiver<(chrono::DateTime<chrono::Local>, String, String)>,
 }
 
-pub fn create_connection() -> (Sender<String>, std::sync::mpsc::Receiver<(chrono::DateTime<chrono::Local>, String, String)>) {
+impl Grbl {
+    pub fn send(&self, gcode: String) -> Result<(), SendError<String>> {
+        self.sender.send(gcode)
+    }
+    pub fn try_recv(&self) -> Result<(chrono::DateTime<chrono::Local>, String, String), TryRecvError> {
+        self.receiver.try_recv()
+    }
+}
+
+// Create new thread that, locks usb serial connection + used to send+recv gcode
+pub fn new() -> Grbl {
     let (cnc_tx, ui_rx) = mpsc::channel();
     let (ui_tx, cnc_rx) = mpsc::channel();
     thread::spawn(move || {
@@ -30,13 +40,17 @@ pub fn create_connection() -> (Sender<String>, std::sync::mpsc::Receiver<(chrono
                 grbl_response = send(&mut port, command);
                 ui_tx.send(grbl_response).unwrap();
             }
+            thread::sleep(Duration::from_millis(10));
         }
     });
-
-    (cnc_tx, cnc_rx)
+    Grbl {
+        sender: cnc_tx,
+        receiver: cnc_rx
+    }
 }
 
-pub fn get_port() -> SystemPort {
+// used by new() to get the usb serial connection
+fn get_port() -> SystemPort {
         let mut try_port = serial::open("/dev/ttyUSB0");
         if try_port.is_err() {
             let mut i = 1;
@@ -49,7 +63,7 @@ pub fn get_port() -> SystemPort {
             }
         }
         let mut port = try_port.expect("port error");
-        
+        // default port settings for grbl, maybe should be configurable?
         port.reconfigure(&|settings| {
             settings.set_baud_rate(serial::Baud115200).unwrap();
             settings.set_char_size(serial::Bits8);
@@ -63,7 +77,7 @@ pub fn get_port() -> SystemPort {
         port
 }
 
-
+// used by the new() thread to send to grbl and parse response
 pub fn send(port: &mut SystemPort, gcode: String) -> (DateTime<Local>, String, String) {
     let mut buf = format!("{}\n", gcode.clone()).as_bytes().to_owned();
     port.write(&buf[..]).unwrap();
@@ -72,8 +86,12 @@ pub fn send(port: &mut SystemPort, gcode: String) -> (DateTime<Local>, String, S
     let mut output: Vec<String> = Vec::new();
     buf = Vec::new();
     loop {
+        // read until caridge return kek from grbl
         reader.read_until(0xD, &mut buf).unwrap();
         line = str::from_utf8(&buf).unwrap().to_string();
+        // the first reponse from grbl initializing the connection is a bit weird, it has multiple
+        // caridge returns, lockily it is the only one with a unicode 'null' char. GRBL doesnt do
+        // anything with this first command, so we can mostly ignore it.
         if  line.contains("\u{0}\r") {
             return (Local::now(), gcode, "init".to_string());
         }
