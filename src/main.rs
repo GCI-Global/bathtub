@@ -5,8 +5,6 @@ mod paths;
 use nodes::{Node, Nodes, NodeGrid2d};
 use GRBL::Grbl;
 use std::collections::HashMap;
-use std::thread;
-use std::time::Duration;
 use regex::Regex;
 
 use iced::{button, Button, time, Scrollable, Subscription, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
@@ -161,19 +159,22 @@ impl Application for Bathtub {
                     },
                     Message::Tick => {
                         state.grbl.send("?".to_string()).unwrap();
-                        for _i in 0..10 {
+                        for _i in 0..3 {
                             match state.grbl.try_recv() {
                                 Ok((_,cmd, msg)) if cmd == "?".to_string() => {
-                                    println!("{} -> {}", cmd, msg);
                                     if let Some(caps) = state.status_regex.captures(&msg[..]) {
-                                        println!("caps: {:?}", &caps);
-                                        state.title = format!("{} state at ({},{},{})", &caps["status"], &caps["X"], &caps["Y"], &caps["Z"]);
+                                        state.title = format!(
+                                            "{} state at ({:.3}, {:.3}, {:.3})",
+                                            &caps["status"],
+                                            &caps["X"].parse::<f32>().unwrap() + 1.0, //adjust to match Gcode inputs
+                                            &caps["Y"].parse::<f32>().unwrap() + 1.0,
+                                            &caps["Z"].parse::<f32>().unwrap() + 1.0
+                                        );
                                     }
                                 }
                                 // do nothing for now. Will likely create a log of gcode commands
                                 // in future
-                                Ok((time, cmd, msg)) => {println!("{}: {} -> {}", time, cmd, msg);}
-                                Err(err) => {println!("{:?}", err);}
+                                _ => {()}
                             }
                         }
                     }
