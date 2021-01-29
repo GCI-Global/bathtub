@@ -1,11 +1,13 @@
 #![feature(total_cmp)]
 mod nodes;
-mod grbl;
+mod GRBL;
 mod paths;
-use grbl::Status;
 use nodes::{Node, Nodes, NodeGrid2d};
-use serial::SystemPort;
+use GRBL::Grbl;
 use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
+use regex::Regex;
 
 use iced::{button, Button, time, Scrollable, Subscription, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
 
@@ -27,11 +29,12 @@ struct State {
     nodes: Nodes,
     node_map: HashMap<String, usize>,
     current_node: Node,
-    status: Option<Status>,
     in_bath: bool,
+    grbl: Grbl,
+    status_regex: Regex,
     connected: bool,
-    port: SystemPort,
 }
+
 
 #[derive(Debug, Clone)]
 struct LoadState {
@@ -73,7 +76,7 @@ impl Application for Bathtub {
         match self {
             Bathtub::Loaded(state) => {
                 if state.connected {
-                    return time::every(std::time::Duration::from_secs(1))
+                    return time::every(std::time::Duration::from_millis(50))
                         .map(|_| Message::Tick)
                 } else {
                     return Subscription::none();
@@ -82,7 +85,7 @@ impl Application for Bathtub {
             _ => Subscription::none(),
         }
     }
-
+    
     fn update(&mut self, message: Message) -> Command<Message> {
         match self {
             Bathtub::Loading => {
@@ -101,14 +104,15 @@ impl Application for Bathtub {
                                     vec
                                 }),
                             scroll: scrollable::State::new(),
-                            title: "Click button to start".to_string(),
+                            title: "Click any button to start".to_string(),
                             nodes: state.nodes.clone(),
                             node_map: state.node_map.clone(),
                             current_node: state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone(),
                             in_bath: true,
-                            status: None,
                             connected: false,
-                            port: grbl::get_port(),
+                            grbl: GRBL::new(),
+                            status_regex: Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)").unwrap(),
+
                         });
                     }
                     Message::Loaded(Err(_)) => {
@@ -133,21 +137,22 @@ impl Application for Bathtub {
             Bathtub::Loaded(state) => {
                 match message {
                     Message::ButtonPressed(btn) => {
+                        // requires homing first
+                        if !state.connected {
+                            state.title = "Running Homing Cycle".to_string();
+                            state.grbl.send("$H".to_string()).unwrap();
+                            //thread::sleep(Duration::from_millis(2000));
+                            state.connected = true;
+                        }
+                        // create path & gcode commands to be send
                         let enter_bath: String;
-                        let mut send_result: Result<(), grbl::Errors>;
                         if state.in_bath {enter_bath = "_inBath".to_string();} else {enter_bath = "".to_string();}
                         let next_node = &state.nodes.node[state.node_map.get(&format!("{}{}",btn.clone(), enter_bath)).unwrap().clone()];
                         let node_paths = paths::gen_node_paths(&state.nodes, &state.current_node, next_node);
                         let gcode_paths = paths::gen_gcode_paths(&node_paths);
+                        // send gcode
                         for gcode_path in gcode_paths {
-                            send_result = grbl::send(&mut state.port, gcode_path.clone());
-                            if send_result.is_err() {
-                                state.title = "Homeing".to_string();
-                                grbl::home(&mut state.port).unwrap();
-                                state.connected = true;
-                                state.current_node = state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();
-                                grbl::send(&mut state.port, gcode_path).unwrap();
-                            }
+                            state.grbl.send(gcode_path).unwrap();
                         }
                         state.current_node = next_node.clone();
                     },
@@ -155,9 +160,22 @@ impl Application for Bathtub {
                         state.in_bath = boolean;
                     },
                     Message::Tick => {
-                        state.status = Some(grbl::status(&mut state.port));
-                        let current = state.status.clone().unwrap();
-                        state.title = format!("{}ing at ({},{},{})", current.status, current.x, current.y, current.z);
+                        state.grbl.send("?".to_string()).unwrap();
+                        for _i in 0..10 {
+                            match state.grbl.try_recv() {
+                                Ok((_,cmd, msg)) if cmd == "?".to_string() => {
+                                    println!("{} -> {}", cmd, msg);
+                                    if let Some(caps) = state.status_regex.captures(&msg[..]) {
+                                        println!("caps: {:?}", &caps);
+                                        state.title = format!("{} state at ({},{},{})", &caps["status"], &caps["X"], &caps["Y"], &caps["Z"]);
+                                    }
+                                }
+                                // do nothing for now. Will likely create a log of gcode commands
+                                // in future
+                                Ok((time, cmd, msg)) => {println!("{}: {} -> {}", time, cmd, msg);}
+                                Err(err) => {println!("{:?}", err);}
+                            }
+                        }
                     }
                     _ => (),
                 }
@@ -237,8 +255,7 @@ impl LoadState {
                 NodeGrid2d::from_nodes(nodes)
             )
         )
-    }
-}
+    }}
 
 fn loading_message<'a>() -> Element<'a, Message> {
     Container::new(
@@ -252,79 +269,6 @@ fn loading_message<'a>() -> Element<'a, Message> {
     .into()
 }
 
-/*
-//Code for interacting with tubby. will make UI that will interact with this later
-fn main() {
-    
-    let start = 15;
-    let finish = 12;
-
-    let nodes = nodes::gen_nodes();
-    // gen node grid for UI
-    let nodes = nodes::gen_nodes();
-    let node_grid2d = NodeGrid2d::from_nodes(nodes.clone());
-    for node_vec in node_grid2d.grid {
-        for node in node_vec {
-            println!("{}", node.name);
-        }
-        println!("------")
-    }
-    // stop gen node grid
-    println!("From {} to {}", &nodes.node[start].name, &nodes.node[finish].name);
-    let node_paths = paths::gen_node_paths(&nodes, &nodes.node[start], &nodes.node[finish]);
-    for node in &node_paths.node {
-        println!("{}", node.name);
-    };
-    let gcode_path = paths::gen_gcode_paths(&node_paths);
-
-    // This is for interacting with Tubby, will get back to later
-    let mut port = serial::open("/dev/ttyUSB0").expect("unable to find tty");
-    interact(&mut port, &gcode_path).unwrap();
-}
- //This sends data to tubby. Likely needs to placed in separate module. WIll uncomment after UI is finished.
-fn interact<T: SerialPort>(port: &mut T, gcode_path: &Vec<String>) -> io::Result<()> {
-    port.reconfigure(&|settings| {
-        settings.set_baud_rate(serial::Baud115200).unwrap();
-        settings.set_char_size(serial::Bits8);
-        settings.set_parity(serial::ParityNone);
-        settings.set_stop_bits(serial::Stop1);
-        settings.set_flow_control(serial::FlowNone);
-
-        Ok(())
-    }).unwrap();
-    port.set_timeout(Duration::from_secs(60)).unwrap();
-    
-    // Initialize GRBL
-    let mut buf: Vec<u8> = "\r\n\r\n".as_bytes().to_owned(); //wake GRBL then wait for server to start
-    port.write(&buf[..]).unwrap();
-    thread::sleep(Duration::from_secs(2));
-    port.flush().unwrap();
-    buf = "$H\n".as_bytes().to_owned(); //Unlock head
-    println!("{:?}", &buf[..]);
-    port.write(&buf[..]).unwrap();
-    port.read(&mut buf[..]).unwrap(); //Should be able to parse this in the future for sucess/fail messages
-
-    //send to above rinse 1
-    buf = "G90 X0 Y-13.5 Z0\n".as_bytes().to_owned();
-    port.write(&buf[..]).unwrap();
-    thread::sleep(Duration::from_secs(2));
-    let mut output = String::from("");
-    for gcode in gcode_path {
-        println!("{}",gcode);
-        buf = gcode.as_bytes().to_owned();
-        port.write(&buf[..]).unwrap();
-        while !output.contains("ok") {
-            port.read(&mut buf[..]).unwrap();
-            output = format!("{}{}", output, str::from_utf8(&buf[..]).unwrap());
-            //println!("{}", output);
-        }
-        output.clear();
-        port.flush().unwrap();
-    }
-    println!("{}", output);
-    Ok(())
-}
-*/
 // Ideas
 // Things that should be in the config file
 // 1. Add the path to the serial port (i think linux is /dev/ttyUSB0) not sure about windows yet
