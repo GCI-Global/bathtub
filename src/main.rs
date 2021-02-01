@@ -1,13 +1,13 @@
 #![feature(total_cmp)]
 mod nodes;
-mod GRBL;
+mod grbl;
 mod paths;
 use nodes::{Node, Nodes, NodeGrid2d};
-use GRBL::Grbl;
+use grbl::Grbl;
 use std::collections::HashMap;
 use regex::Regex;
 
-use iced::{button, Button, time, Scrollable, Subscription, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
+use iced::{button, Button, time, Scrollable, Subscription, Font, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
 
 pub fn main() -> iced::Result {
     Bathtub::run(Settings::default())
@@ -21,7 +21,6 @@ enum Bathtub {
 
 struct State {
     scroll: scrollable::State,
-    //bath_btns: (NodeGrid2d, Vec<Vec<button::State>>),
     bath_btns: Vec<Vec<(Node, button::State)>>,
     title: String,
     nodes: Nodes,
@@ -102,13 +101,13 @@ impl Application for Bathtub {
                                     vec
                                 }),
                             scroll: scrollable::State::new(),
-                            title: "Click any button to start".to_string(),
+                            title: "Click any button\nto start homing cycle".to_string(),
                             nodes: state.nodes.clone(),
                             node_map: state.node_map.clone(),
                             current_node: state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone(),
-                            in_bath: true,
+                            in_bath: false,
                             connected: false,
-                            grbl: GRBL::new(),
+                            grbl: grbl::new(),
                             status_regex: Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)").unwrap(),
 
                         });
@@ -137,9 +136,8 @@ impl Application for Bathtub {
                     Message::ButtonPressed(btn) => {
                         // requires homing first
                         if !state.connected {
-                            state.title = "Running Homing Cycle".to_string();
+                            state.title = "Running Homing Cycle\nPlease wait".to_string();
                             state.grbl.send("$H".to_string()).unwrap();
-                            //thread::sleep(Duration::from_millis(2000));
                             state.connected = true;
                         }
                         // create path & gcode commands to be send
@@ -164,7 +162,7 @@ impl Application for Bathtub {
                                 Ok((_,cmd, msg)) if cmd == "?".to_string() => {
                                     if let Some(caps) = state.status_regex.captures(&msg[..]) {
                                         state.title = format!(
-                                            "{} state at ({:.3}, {:.3}, {:.3})",
+                                            "{} state at\n({:.3}, {:.3}, {:.3})",
                                             &caps["status"],
                                             &caps["X"].parse::<f32>().unwrap() + 1.0, //adjust to match Gcode inputs
                                             &caps["Y"].parse::<f32>().unwrap() + 1.0,
@@ -197,8 +195,9 @@ impl Application for Bathtub {
             }) => {
                 let title = Text::new(title.clone())
                     .width(Length::Fill)
-                    .size(50)
+                    .size(40)
                     .color([0.5, 0.5, 0.5])
+                    .font(MONOSPACE_TYPEWRITTER)
                     .horizontal_alignment(HorizontalAlignment::Center); 
                
                 let button_grid = bath_btns.into_iter()
@@ -270,7 +269,12 @@ fn loading_message<'a>() -> Element<'a, Message> {
     .into()
 }
 
+const MONOSPACE_TYPEWRITTER: Font = Font::External {
+    name: "MonospaceTypewritter",
+    bytes: include_bytes!("../fonts/MonospaceTypewriter.ttf"),
+};
+
 // Ideas
 // Things that should be in the config file
-// 1. Add the path to the serial port (i think linux is /dev/ttyUSB0) not sure about windows yet
+// 1. auto find usb port, or error if not available
 // 2. All usb settings should come from the config file
