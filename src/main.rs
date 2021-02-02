@@ -89,13 +89,13 @@ impl Application for Bathtub {
                 match message {
                     Message::Loaded(Ok(state)) => {
                         *self = Bathtub::Loaded(State {
+                            // create state, but as buttons need to be modifyable in coord plane,
+                            // we need a none value for coords that should be displyed as empty
                             bath_btns: state.node_grid2d.grid.into_iter()
                                 .fold(Vec::new(), |mut vec, axis| {
                                     vec.push(
                                         axis.into_iter()
-                                            // this might not work
                                             .fold(Vec::new(), |mut axis_vec, node| {
-                                                println!("{:?}", node);
                                                 if let Some(n) = node {
                                                     axis_vec.push(Some((n, button::State::new())));
                                                 } else {
@@ -206,7 +206,6 @@ impl Application for Bathtub {
                     .font(MONOSPACE_TYPEWRITTER)
                     .horizontal_alignment(HorizontalAlignment::Center); 
 
-                //println!("{:?}", bath_btns);
                 let button_grid = bath_btns.into_iter()
                     .fold(Column::new(), |column, grid| {
                         column.push(grid.into_iter()
@@ -287,8 +286,3 @@ const MONOSPACE_TYPEWRITTER: Font = Font::External {
     name: "MonospaceTypewritter",
     bytes: include_bytes!("../fonts/MonospaceTypewriter.ttf"),
 };
-
-// Ideas
-// Things that should be in the config file
-// 1. auto find usb port, or error if not available
-// 2. All usb settings should come from the config file
