@@ -1,15 +1,13 @@
 #![feature(total_cmp)]
 mod nodes;
-mod GRBL;
+mod grbl;
 mod paths;
 use nodes::{Node, Nodes, NodeGrid2d};
-use GRBL::Grbl;
+use grbl::Grbl;
 use std::collections::HashMap;
-use std::thread;
-use std::time::Duration;
 use regex::Regex;
 
-use iced::{button, Button, time, Scrollable, Subscription, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
+use iced::{button, Button, time, Scrollable, Subscription, Space, Font, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
 
 pub fn main() -> iced::Result {
     Bathtub::run(Settings::default())
@@ -23,8 +21,7 @@ enum Bathtub {
 
 struct State {
     scroll: scrollable::State,
-    //bath_btns: (NodeGrid2d, Vec<Vec<button::State>>),
-    bath_btns: Vec<Vec<(Node, button::State)>>,
+    bath_btns: Vec<Vec<Option<(Node, button::State)>>>,
     title: String,
     nodes: Nodes,
     node_map: HashMap<String, usize>,
@@ -96,21 +93,27 @@ impl Application for Bathtub {
                                 .fold(Vec::new(), |mut vec, axis| {
                                     vec.push(
                                         axis.into_iter()
+                                            // this might not work
                                             .fold(Vec::new(), |mut axis_vec, node| {
-                                                axis_vec.push((node, button::State::new()));
+                                                println!("{:?}", node);
+                                                if let Some(n) = node {
+                                                    axis_vec.push(Some((n, button::State::new())));
+                                                } else {
+                                                    axis_vec.push(None);
+                                                }
                                                 axis_vec
                                             })
                                     );
                                     vec
                                 }),
                             scroll: scrollable::State::new(),
-                            title: "Click any button to start".to_string(),
+                            title: "Click any button\nto start homing cycle".to_string(),
                             nodes: state.nodes.clone(),
                             node_map: state.node_map.clone(),
                             current_node: state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone(),
-                            in_bath: true,
+                            in_bath: false,
                             connected: false,
-                            grbl: GRBL::new(),
+                            grbl: grbl::new(),
                             status_regex: Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)").unwrap(),
 
                         });
@@ -139,9 +142,8 @@ impl Application for Bathtub {
                     Message::ButtonPressed(btn) => {
                         // requires homing first
                         if !state.connected {
-                            state.title = "Running Homing Cycle".to_string();
+                            state.title = "Running Homing Cycle\nPlease wait".to_string();
                             state.grbl.send("$H".to_string()).unwrap();
-                            //thread::sleep(Duration::from_millis(2000));
                             state.connected = true;
                         }
                         // create path & gcode commands to be send
@@ -161,19 +163,22 @@ impl Application for Bathtub {
                     },
                     Message::Tick => {
                         state.grbl.send("?".to_string()).unwrap();
-                        for _i in 0..10 {
+                        for _i in 0..3 {
                             match state.grbl.try_recv() {
                                 Ok((_,cmd, msg)) if cmd == "?".to_string() => {
-                                    println!("{} -> {}", cmd, msg);
                                     if let Some(caps) = state.status_regex.captures(&msg[..]) {
-                                        println!("caps: {:?}", &caps);
-                                        state.title = format!("{} state at ({},{},{})", &caps["status"], &caps["X"], &caps["Y"], &caps["Z"]);
+                                        state.title = format!(
+                                            "{} state at\n({:.3}, {:.3}, {:.3})",
+                                            &caps["status"],
+                                            &caps["X"].parse::<f32>().unwrap() + 1.0, //adjust to match Gcode inputs
+                                            &caps["Y"].parse::<f32>().unwrap() + 1.0,
+                                            &caps["Z"].parse::<f32>().unwrap() + 1.0
+                                        );
                                     }
                                 }
                                 // do nothing for now. Will likely create a log of gcode commands
                                 // in future
-                                Ok((time, cmd, msg)) => {println!("{}: {} -> {}", time, cmd, msg);}
-                                Err(err) => {println!("{:?}", err);}
+                                _ => {()}
                             }
                         }
                     }
@@ -196,23 +201,32 @@ impl Application for Bathtub {
             }) => {
                 let title = Text::new(title.clone())
                     .width(Length::Fill)
-                    .size(50)
+                    .size(40)
                     .color([0.5, 0.5, 0.5])
+                    .font(MONOSPACE_TYPEWRITTER)
                     .horizontal_alignment(HorizontalAlignment::Center); 
-               
+
+                //println!("{:?}", bath_btns);
                 let button_grid = bath_btns.into_iter()
                     .fold(Column::new(), |column, grid| {
                         column.push(grid.into_iter()
                             .fold(Row::new(), |row, node_tup| {
-                                row.push(
-                                    Button::new(&mut node_tup.1, Text::new(&node_tup.0.name).horizontal_alignment(HorizontalAlignment::Center))
-                                        .padding(20)
-                                        .width(Length::Fill)
-                                        .on_press(Message::ButtonPressed(node_tup.0.name.clone()))
-                                )
+                                if let Some(nt) = node_tup {
+                                    row.push(
+                                        Button::new(&mut nt.1, Text::new(&nt.0.name).horizontal_alignment(HorizontalAlignment::Center))
+                                            .padding(15)
+                                            .width(Length::Fill)
+                                            .on_press(Message::ButtonPressed(nt.0.name.clone()))
+                                    )
+                                } else {
+                                    row.push(Column::new()
+                                            .width(Length::Fill)
+                                    )
+                                }
                             }).padding(3)
                         )
                     });
+
                 let inbath_toggle = Checkbox::new(
                   in_bath.clone(),
                   "Enter Bath",
@@ -269,7 +283,12 @@ fn loading_message<'a>() -> Element<'a, Message> {
     .into()
 }
 
+const MONOSPACE_TYPEWRITTER: Font = Font::External {
+    name: "MonospaceTypewritter",
+    bytes: include_bytes!("../fonts/MonospaceTypewriter.ttf"),
+};
+
 // Ideas
 // Things that should be in the config file
-// 1. Add the path to the serial port (i think linux is /dev/ttyUSB0) not sure about windows yet
+// 1. auto find usb port, or error if not available
 // 2. All usb settings should come from the config file

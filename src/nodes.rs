@@ -3,47 +3,31 @@ use serde::Deserialize;
 use std::fs;
 use std::collections::HashMap;
 
-// Baths are Deserialized from config file, nodes are a generated 3d graph on nodes from the 2d
-// baths structs
-#[derive(Deserialize, Debug)]
-struct Bath {
-    name: String,
-    x: f32,
-    y: f32,
-    is_rinse: bool,
-    neighbors: Vec<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct Baths {
-    bath: Vec<Bath>,
-}
-
 #[derive(Clone, Debug)]
 pub struct Actions {
     gcode: String,
     seconds: f32,
 }
 
-#[derive(Clone, Debug)]
+// Baths are Deserialized from config file, nodes are a generated 3d graph on nodes from the 2d
+#[derive(Clone, Debug, Deserialize)]
 pub struct Node {
     pub name: String,
     pub x: f32,
     pub y:f32,
     pub z: f32,
     pub is_rinse: bool,
-    pub actions: Option<Vec<Actions>>,
     pub neighbors: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Nodes {
     pub node: Vec<Node>,
 }
 
 #[derive(Debug, Clone)]
 pub struct NodeGrid2d {
-    pub grid: Vec<Vec<Node>>,
+    pub grid: Vec<Vec<Option<Node>>>,
 }
 
 impl Nodes {
@@ -52,51 +36,49 @@ impl Nodes {
             node: vec![]
         }
     }
-    fn to_nodes(baths: Baths) -> Nodes {
-        let mut nodes: Vec<Node> = vec![];
+    fn to_nodes(nodes: Nodes) -> Nodes {
+        let mut new_nodes: Vec<Node> = vec![];
         let mut new_neighbors: Vec<String>;
         //let bath_iter = baths.bath.into_iter();
-        for bath in baths.bath {
+        for node in nodes.node {
             // create node for head in bath
             
-            nodes.push(
+            new_nodes.push(
                 Node {
-                    name: format!("{}_inBath", bath.name),
-                    x: bath.x,
-                    y: bath.y,
-                    z: -10.0,
-                    is_rinse: bath.is_rinse,
-                    actions: None,
-                    neighbors: vec![bath.name.clone()]
+                    name: format!("{}_inBath", node.name),
+                    x: node.x,
+                    y: node.y,
+                    z: node.z,
+                    is_rinse: node.is_rinse,
+                    neighbors: vec![node.name.clone()]
                 }
             );
 
             // create node for head above bath
-            new_neighbors = bath.neighbors;
-            new_neighbors.push(format!("{}_inBath", &bath.name));
-            nodes.push(
+            new_neighbors = node.neighbors;
+            new_neighbors.push(format!("{}_inBath", &node.name));
+            new_nodes.push(
                 Node {
-                    name: bath.name,
-                    x: bath.x,
-                    y: bath.y,
+                    name: node.name,
+                    x: node.x,
+                    y: node.y,
                     z: 0.0,
-                    is_rinse : bath.is_rinse,
-                    actions: None,
+                    is_rinse : node.is_rinse,
                     neighbors: new_neighbors,
                 }
             )
         }
-        Nodes {node: nodes}
+        Nodes {node: new_nodes}
     }
 
     
 }
 
-// A 2d vector grid split on the y axis where:
-// vec![x x x x x x]
-// vec![x x x x x x]
+// A 2d positioning relative grid split on the y axis where:
+// vec![Node Node None Node]
+// vec![None None Node Node]
 impl NodeGrid2d {
-    fn new(grid: Vec<Vec<Node>>) -> NodeGrid2d {
+    fn new(grid: Vec<Vec<Option<Node>>>) -> NodeGrid2d {
         NodeGrid2d {
             grid,
         }
@@ -124,8 +106,29 @@ impl NodeGrid2d {
         for i in 0..build_grid.len() {
             build_grid[i].sort_by(|a, b| (b.x).total_cmp(&a.x));
         }
-        let ng2d = NodeGrid2d::new(build_grid);
-        ng2d
+        // find index of longest axis
+        let longest_axis = build_grid.clone().into_iter()
+            .max_by(|x, y| x.len().cmp(&y.len())).unwrap();
+
+        // normalize row lengths with 'None' values
+        let mut relative_grid: Vec<Vec<Option<Node>>> = build_grid.clone().into_iter()
+            .fold(Vec::new(), |mut row, axis_vec| {
+                row.push(axis_vec.into_iter()
+                    .fold(Vec::new(), |mut axis, node| {
+                        axis.push(Some(node));
+                        axis
+                    })
+                );
+                row
+            });
+        for i in 0..build_grid.len() {
+            for j in 0..longest_axis.len() {
+                if j == relative_grid[i].len() || longest_axis[j].x - relative_grid[i][j].clone().unwrap().x > 2.0 {
+                    relative_grid[i].insert(j, None)
+                }
+           }
+        }
+        NodeGrid2d::new(relative_grid)
     }
 }
 
@@ -141,8 +144,8 @@ pub fn get_nodemap(nodes: Nodes) -> HashMap<String, usize> {
         })
 }
 
-fn get_baths_config() -> Baths {
+fn get_baths_config() -> Nodes {
     let baths_toml = &fs::read_to_string("config/baths.toml")
         .expect("Unable to open config/baths.toml");
-    toml::from_str::<Baths>(baths_toml).unwrap()
+    toml::from_str::<Nodes>(baths_toml).unwrap()
 }
