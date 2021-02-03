@@ -1,247 +1,130 @@
-#![feature(total_cmp)]
-mod nodes;
-mod grbl;
-mod paths;
-use nodes::{Node, Nodes, NodeGrid2d};
-use grbl::Grbl;
-use std::collections::HashMap;
-use regex::Regex;
+use iced::{Scrollable, HorizontalAlignment, VerticalAlignment, TextInput, Button, button, text_input, scrollable, PickList, Row, pick_list, Application, Container, Text, Element, Column, Command, Settings, Length};
 
-use iced::{button, Button, time, Scrollable, Subscription, Space, Font, Checkbox, scrollable, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
-
-pub fn main() -> iced::Result {
-    Bathtub::run(Settings::default())
-}
-
-//#[derive(Debug)]
-enum Bathtub {
+enum App {
     Loading,
     Loaded(State)
 }
 
 struct State {
     scroll: scrollable::State,
-    bath_btns: Vec<Vec<Option<(Node, button::State)>>>,
-    title: String,
-    nodes: Nodes,
-    node_map: HashMap<String, usize>,
-    current_node: Node,
-    in_bath: bool,
-    grbl: Grbl,
-    status_regex: Regex,
-    connected: bool,
+    add_button: button::State,
+    steps: Vec<Step>
 }
-
 
 #[derive(Debug, Clone)]
 struct LoadState {
-    nodes: Nodes,
-    node_map: HashMap<String, usize>,
-    node_grid2d: NodeGrid2d,
+    // fill with async loaded things
 }
 
 #[derive(Debug, Clone)]
 enum LoadError {
-    _Placeholder,
+    // Placeholder for if async load fails
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     Loaded(Result<LoadState, LoadError>),
-    ButtonPressed(String),
-    ToggleBath(bool),
-    Tick,
+    StepMessage(usize, StepMessage),
+    AddStep,
 }
 
-impl Application for Bathtub {
+pub fn main() -> iced::Result {
+    App::run(Settings::default())
+}
+
+impl Application for App {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Flags = ();
 
-    fn new(_flags: ()) -> (Bathtub, Command<Message>) {
+    fn new(_flags: ()) -> (App, Command<Message>) {
         (
-            Bathtub::Loading,
+            App::Loading,
             Command::perform(LoadState::load(), Message::Loaded),
         )
     }
 
     fn title(&self) -> String {
-        String::from("Bathtub")
+        String::from("Application Boiler Plate")
     }
 
-    fn subscription(&self) -> Subscription<Message> {
-        match self {
-            Bathtub::Loaded(state) => {
-                if state.connected {
-                    return time::every(std::time::Duration::from_millis(50))
-                        .map(|_| Message::Tick)
-                } else {
-                    return Subscription::none();
-                }
-            },
-            _ => Subscription::none(),
-        }
-    }
-    
     fn update(&mut self, message: Message) -> Command<Message> {
         match self {
-            Bathtub::Loading => {
+            App::Loading => {
                 match message {
-                    Message::Loaded(Ok(state)) => {
-                        *self = Bathtub::Loaded(State {
-                            // create state, but as buttons need to be modifyable in coord plane,
-                            // we need a none value for coords that should be displyed as empty
-                            bath_btns: state.node_grid2d.grid.into_iter()
-                                .fold(Vec::new(), |mut vec, axis| {
-                                    vec.push(
-                                        axis.into_iter()
-                                            .fold(Vec::new(), |mut axis_vec, node| {
-                                                if let Some(n) = node {
-                                                    axis_vec.push(Some((n, button::State::new())));
-                                                } else {
-                                                    axis_vec.push(None);
-                                                }
-                                                axis_vec
-                                            })
-                                    );
-                                    vec
-                                }),
+                    Message::Loaded(Ok(_load_state)) => {
+                        *self = App::Loaded(State{
+                            // return a State struct to be viewed
                             scroll: scrollable::State::new(),
-                            title: "Click any button\nto start homing cycle".to_string(),
-                            nodes: state.nodes.clone(),
-                            node_map: state.node_map.clone(),
-                            current_node: state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone(),
-                            in_bath: false,
-                            connected: false,
-                            grbl: grbl::new(),
-                            status_regex: Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)").unwrap(),
-
-                        });
-                    }
+                            add_button: button::State::new(),
+                            steps: vec![Step::new(1)],
+                        })
+                    },
                     Message::Loaded(Err(_)) => {
-                        panic!("somehow loaded had an error")
-                        // need to add correct fail state, following is from the Todos example
-                        //*self = Bathtub::Loaded(State::default());
-                    }
-                    Message::ButtonPressed(btn_name) => {
-                        // This is not used, might not be necessary
-                        println!("{} was pressed", btn_name);
-                    }
-                    Message::ToggleBath(_bool) => {
-                        //this is not used
-                        ()
-                    }
-                    Message::Tick => {
-                        // this is not used
-                    }
-                }
-                Command::none()
-            }
-            Bathtub::Loaded(state) => {
-                match message {
-                    Message::ButtonPressed(btn) => {
-                        // requires homing first
-                        if !state.connected {
-                            state.title = "Running Homing Cycle\nPlease wait".to_string();
-                            state.grbl.send("$H".to_string()).unwrap();
-                            state.connected = true;
-                        }
-                        // create path & gcode commands to be send
-                        let enter_bath: String;
-                        if state.in_bath {enter_bath = "_inBath".to_string();} else {enter_bath = "".to_string();}
-                        let next_node = &state.nodes.node[state.node_map.get(&format!("{}{}",btn.clone(), enter_bath)).unwrap().clone()];
-                        let node_paths = paths::gen_node_paths(&state.nodes, &state.current_node, next_node);
-                        let gcode_paths = paths::gen_gcode_paths(&node_paths);
-                        // send gcode
-                        for gcode_path in gcode_paths {
-                            state.grbl.send(gcode_path).unwrap();
-                        }
-                        state.current_node = next_node.clone();
+                        // what to do in the case async load fails
                     },
-                    Message::ToggleBath(boolean) => {
-                        state.in_bath = boolean;
-                    },
-                    Message::Tick => {
-                        state.grbl.send("?".to_string()).unwrap();
-                        for _i in 0..3 {
-                            match state.grbl.try_recv() {
-                                Ok((_,cmd, msg)) if cmd == "?".to_string() => {
-                                    if let Some(caps) = state.status_regex.captures(&msg[..]) {
-                                        state.title = format!(
-                                            "{} state at\n({:.3}, {:.3}, {:.3})",
-                                            &caps["status"],
-                                            &caps["X"].parse::<f32>().unwrap() + 1.0, //adjust to match Gcode inputs
-                                            &caps["Y"].parse::<f32>().unwrap() + 1.0,
-                                            &caps["Z"].parse::<f32>().unwrap() + 1.0
-                                        );
-                                    }
-                                }
-                                // do nothing for now. Will likely create a log of gcode commands
-                                // in future
-                                _ => {()}
-                            }
-                        }
-                    }
                     _ => (),
                 }
-                Command::none()
             }
+            App::Loaded(state) => {
+                match message {
+                    Message::StepMessage(i, StepMessage::Delete) => {
+                        state.steps.remove(i);
+                        for i in 0..state.steps.len() {
+                            state.steps[i].step_num = i + 1;
+                        }
+                    },
+                    Message::StepMessage(i, msg) => {
+                        if let Some(step) = state.steps.get_mut(i) {
+                            step.update(msg)
+                        }
+                    },
+                    Message::AddStep => state.steps.push(Step::new(state.steps.len() + 1)),
+                    _ => (),
+                }
+            }
+
         }
+        Command::none()
     }
-    
     fn view(&mut self) -> Element<Message> {
         match self {
-            Bathtub::Loading => loading_message(),
-            Bathtub::Loaded(State {
-                                scroll,
-                                bath_btns,
-                                in_bath,
-                                title,
-                                ..
+            App::Loading => loading_message(),
+            App::Loaded(State {
+                    // have state variables to be accessable 
+                    scroll,
+                    add_button,
+                    steps,
+                    ..
             }) => {
-                let title = Text::new(title.clone())
-                    .width(Length::Fill)
-                    .size(40)
-                    .color([0.5, 0.5, 0.5])
-                    .font(MONOSPACE_TYPEWRITTER)
-                    .horizontal_alignment(HorizontalAlignment::Center); 
+                let title = Text::new("Recipie");
 
-                let button_grid = bath_btns.into_iter()
-                    .fold(Column::new(), |column, grid| {
-                        column.push(grid.into_iter()
-                            .fold(Row::new(), |row, node_tup| {
-                                if let Some(nt) = node_tup {
-                                    row.push(
-                                        Button::new(&mut nt.1, Text::new(&nt.0.name).horizontal_alignment(HorizontalAlignment::Center))
-                                            .padding(15)
-                                            .width(Length::Fill)
-                                            .on_press(Message::ButtonPressed(nt.0.name.clone()))
-                                    )
-                                } else {
-                                    row.push(Column::new()
-                                            .width(Length::Fill)
-                                    )
-                                }
-                            }).padding(3)
-                        )
-                    });
+                let steps: Element<_> =
+                    steps.iter_mut().enumerate()
+                        .fold( Column::new().spacing(15), |column, (i, step)| {
+                            column.push(step.view().map(move |msg| {
+                                Message::StepMessage(i, msg)
+                            }))
+                        })
+                        .into();
 
-                let inbath_toggle = Checkbox::new(
-                  in_bath.clone(),
-                  "Enter Bath",
-                  Message::ToggleBath,
-                );
+                let add_btn = Button::new(
+                    add_button,
+                    Text::new("+")
+                ).padding(20).on_press(Message::AddStep);
+
                 let content = Column::new()
                     .max_width(800)
                     .spacing(20)
                     .push(title)
-                    .push(button_grid)
-                    .push(inbath_toggle);
-
+                    .push(steps)
+                    .push(add_btn);
                 Scrollable::new(scroll)
                     .padding(40)
                     .push(
-                        Container::new(content).width(Length::Fill).center_x(),
+                        Container::new(content)
+                            .width(Length::Fill)
+                            .center_x()
                     )
                     .into()
             }
@@ -249,40 +132,268 @@ impl Application for Bathtub {
     }
 }
 
-impl LoadState {
-    fn new(nodes: Nodes, node_map: HashMap<String, usize>, node_grid2d: NodeGrid2d) -> LoadState {
-        LoadState {
-            nodes,
-            node_map,
-            node_grid2d,
+#[derive(Debug, Clone)]
+struct Step {
+    step_num: usize,
+    destination_state: pick_list::State<Baths>,
+    selected_destination: Option<Baths>,
+    actions_state: pick_list::State<Actions>,
+    selected_action: Option<Actions>,
+    input: text_input::State,
+    input_value: String,
+    units_state: pick_list::State<Units>,
+    selected_units: Option<Units>,
+    delete_btn: button::State,
+}
+
+#[derive(Debug, Clone)]
+pub enum StepMessage {
+    NewDestination(Baths),
+    NewAction(Actions),
+    NewUnit(Units),
+    InputChanged(String),
+    Delete,
+}
+
+impl Step {
+    fn new(step_num: usize) -> Self {
+        Step {
+            step_num,
+            destination_state: pick_list::State::default(),
+            selected_destination: None,
+            actions_state: pick_list::State::default(),
+            selected_action: Some(Actions::default()),
+            units_state: pick_list::State::default(),
+            selected_units: Some(Units::default()),
+            input_value: "".to_string(),
+            input: text_input::State::new(),
+            delete_btn: button::State::new(),
         }
     }
 
-    // This is just a placeholder. Will eventually read data from server
-    async fn load() -> Result<LoadState, LoadError> {
-        let nodes = nodes::gen_nodes();
-        
-        Ok(
-            LoadState::new(nodes.clone(),
-                nodes::get_nodemap(nodes.clone()),
-                NodeGrid2d::from_nodes(nodes)
-            )
-        )
-    }}
+    fn update(&mut self, message: StepMessage) {
+        match message {
+            StepMessage::NewDestination(destination) => {
+                self.selected_destination = Some(destination);
+            },
+            StepMessage::NewAction(action) => {
+                self.selected_action = Some(action);
+            },
+            StepMessage::NewUnit(unit) => {
+                self.selected_units = Some(unit);
+            },
+            StepMessage::InputChanged(input) => {
+                self.input_value = input;
+            },
+            StepMessage::Delete => {}
+        }
+    }
 
+    fn view(&mut self) -> Element<StepMessage> {
+        Row::new()
+            .push( // Step num
+                Column::new()
+                    .push(
+                    Text::new(format!("{}", self.step_num))
+                        .size(20)
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                ).padding(10).width(Length::Units(55))
+            )
+            .push( // Destination
+                Column::new()
+                    .push(Text::new("Destination"))
+                    .push(PickList::new(
+                        &mut self.destination_state,
+                        &Baths::ALL[..],
+                        self.selected_destination,
+                        StepMessage::NewDestination,
+                    ).padding(10))
+            ).push( // actions
+                Column::new()
+                    .push(Text::new("Action"))
+                    .push(
+                        Row::new()
+                            .push(PickList::new(
+                                &mut self.actions_state,
+                                &Actions::ALL[..],
+                                self.selected_action,
+                                StepMessage::NewAction,
+                            ).padding(10))
+                            .push(TextInput::new(
+                                &mut self.input,
+                                "0 - 100",
+                                &self.input_value,
+                                StepMessage::InputChanged,
+                            ).padding(10).width(Length::Units(100)))
+                            .push(PickList::new(
+                                &mut self.units_state,
+                                &Units::ALL[..],
+                                self.selected_units,
+                                StepMessage::NewUnit,
+                            ).padding(10))
+                            .push(
+                                Button::new(&mut self.delete_btn, Text::new("X"))
+                                    .on_press(StepMessage::Delete)
+                            )
+                    )
+        ).into()
+        
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Baths {
+    Mcl16,
+    HNO3,
+    Zn,
+    HF,
+    Ni,
+    Pd,
+    Au,
+    Rinse1,
+    Rinse2,
+    Rinse3,
+    Rinse4,
+    Rinse5,
+    Rinse6,
+    Rinse7,
+}
+
+impl Baths {
+    const ALL: [Baths; 14] = [
+        Baths::Mcl16,
+        Baths::HNO3,
+        Baths::Zn,
+        Baths::HF,
+        Baths::Ni,
+        Baths::Pd,
+        Baths::Au,
+        Baths::Rinse1,
+        Baths::Rinse2,
+        Baths::Rinse3,
+        Baths::Rinse4,
+        Baths::Rinse5,
+        Baths::Rinse6,
+        Baths::Rinse7
+    ];
+}
+
+impl Default for Baths {
+    fn default() -> Baths {
+        Baths::Mcl16
+    }
+}
+
+impl std::fmt::Display for Baths {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Baths::Mcl16 => "MCL-16",
+                Baths::HNO3 => "HNO₃",
+                Baths::Zn => "Zn",
+                Baths::HF => "HF",
+                Baths::Ni => "Ni",
+                Baths::Pd => "Pd",
+                Baths::Au => "Au",
+                Baths::Rinse1 => "Rinse 1",
+                Baths::Rinse2 => "Rinse 2",
+                Baths::Rinse3 => "Rinse 3",
+                Baths::Rinse4 => "Rinse 4",
+                Baths::Rinse5 => "Rinse 5",
+                Baths::Rinse6 => "Rinse 6",
+                Baths::Rinse7 => "Rinse 7",
+            }
+        )
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Actions {
+    Rest,
+    Swish,
+}
+
+impl Actions {
+    const ALL: [Actions; 2] = [
+        Actions::Rest,
+        Actions::Swish,
+    ];
+}
+
+impl Default for Actions {
+    fn default() -> Actions {
+        Actions::Rest
+    }
+}
+
+impl std::fmt::Display for Actions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Actions::Rest => "Rest",
+                Actions::Swish => "Swish",
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Units {
+    Minutes,
+    Seconds,
+    Milliseconds,
+}
+
+impl Units {
+    const ALL: [Units; 3] = [
+        Units::Minutes,
+        Units::Seconds,
+        Units::Milliseconds,
+    ];
+}
+
+impl Default for Units {
+    fn default() -> Units {
+        Units::Seconds
+    }
+}
+
+impl std::fmt::Display for Units {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Units::Minutes => "Minutes",
+                Units::Seconds => "Seconds",
+                Units::Milliseconds => "Milliseconds",
+            }
+        )
+    }
+}
+
+impl LoadState {
+    // this is the function that is called to load data
+    async fn load() -> Result<LoadState, LoadError> {
+        Ok(LoadState{})
+    }
+}
+
+// what is displayed while waiting for the `async fn load()`
 fn loading_message<'a>() -> Element<'a, Message> {
     Container::new(
-            Text::new("Loading...")
-                .horizontal_alignment(HorizontalAlignment::Center)
-                .size(50),
+        Text::new("Loading...")
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .size(50),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .center_y()
     .into()
 }
-
-const MONOSPACE_TYPEWRITTER: Font = Font::External {
-    name: "MonospaceTypewritter",
-    bytes: include_bytes!("../fonts/MonospaceTypewriter.ttf"),
-};
