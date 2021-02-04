@@ -139,10 +139,12 @@ struct Step {
     selected_destination: Option<Baths>,
     actions_state: pick_list::State<Actions>,
     selected_action: Option<Actions>,
-    input: text_input::State,
-    input_value: String,
-    units_state: pick_list::State<Units>,
-    selected_units: Option<Units>,
+    secs: text_input::State,
+    secs_value: String,
+    mins: text_input::State,
+    mins_value: String,
+    hours: text_input::State,
+    hours_value: String,
     delete_btn: button::State,
 }
 
@@ -150,8 +152,15 @@ struct Step {
 pub enum StepMessage {
     NewDestination(Baths),
     NewAction(Actions),
-    NewUnit(Units),
-    InputChanged(String),
+    SecsChanged(String),
+    MinsChanged(String),
+    HoursChanged(String),
+    HoursIncrement,
+    HoursDecrement,
+    MinsIncrement,
+    MinsDecrement,
+    SecsIncrement,
+    SecsDecrement,
     Delete,
 }
 
@@ -163,29 +172,48 @@ impl Step {
             selected_destination: None,
             actions_state: pick_list::State::default(),
             selected_action: Some(Actions::default()),
-            units_state: pick_list::State::default(),
-            selected_units: Some(Units::default()),
-            input_value: "".to_string(),
-            input: text_input::State::new(),
+            secs: text_input::State::new(),
+            secs_value: "".to_string(),
+            mins: text_input::State::new(),
+            mins_value: "".to_string(),
+            hours: text_input::State::new(),
+            hours_value: "".to_string(),
             delete_btn: button::State::new(),
         }
     }
 
     fn update(&mut self, message: StepMessage) {
         match message {
-            StepMessage::NewDestination(destination) => {
-                self.selected_destination = Some(destination);
-            },
-            StepMessage::NewAction(action) => {
-                self.selected_action = Some(action);
-            },
-            StepMessage::NewUnit(unit) => {
-                self.selected_units = Some(unit);
-            },
-            StepMessage::InputChanged(input) => {
-                self.input_value = input;
-            },
-            StepMessage::Delete => {}
+            StepMessage::NewDestination(destination) => self.selected_destination = Some(destination),
+            StepMessage::NewAction(action)           => self.selected_action = Some(action),
+            StepMessage::HoursChanged(hours)         => self.hours_value = hours,
+            StepMessage::MinsChanged(mins)           => self.mins_value = mins,
+            StepMessage::SecsChanged(secs)           => self.secs_value = secs,
+            StepMessage::HoursIncrement              => self.hours_value = (self.hours_value.parse::<usize>().unwrap_or(0) + 1).to_string(),
+            StepMessage::HoursDecrement              => {
+                if self.hours_value != 0.to_string() && self.hours_value != 1.to_string() && self.hours_value != "".to_string() {
+                    self.hours_value = (self.hours_value.parse::<usize>().unwrap_or(1) - 1).to_string();
+                } else{
+                    self.hours_value = "".to_string()
+                }
+            }
+            StepMessage::MinsIncrement               => self.mins_value = (self.mins_value.parse::<usize>().unwrap_or(0) + 1).to_string(),
+            StepMessage::MinsDecrement               => {
+                if self.mins_value != 0.to_string() && self.mins_value != 1.to_string() && self.mins_value != "".to_string() {
+                    self.mins_value = (self.mins_value.parse::<usize>().unwrap_or(1) - 1).to_string()
+                } else{
+                    self.mins_value = "".to_string()
+                }
+            }
+            StepMessage::SecsIncrement               => self.secs_value = (self.secs_value.parse::<usize>().unwrap_or(0) + 1).to_string(),
+            StepMessage::SecsDecrement               => {
+                if self.secs_value != 0.to_string() && self.secs_value != 1.to_string() && self.secs_value != "".to_string() {
+                    self.secs_value = (self.secs_value.parse::<usize>().unwrap_or(1) - 1).to_string()
+                } else{
+                    self.secs_value = "".to_string()
+                }
+            }
+            StepMessage::Delete                      => {}
         }
     }
 
@@ -220,18 +248,33 @@ impl Step {
                                 self.selected_action,
                                 StepMessage::NewAction,
                             ).padding(10))
-                            .push(TextInput::new(
-                                &mut self.input,
-                                "0 - 100",
-                                &self.input_value,
-                                StepMessage::InputChanged,
-                            ).padding(10).width(Length::Units(100)))
-                            .push(PickList::new(
-                                &mut self.units_state,
-                                &Units::ALL[..],
-                                self.selected_units,
-                                StepMessage::NewUnit,
-                            ).padding(10))
+                            .push(TextInput::new( // hours
+                                &mut self.hours,
+                                "Hours",
+                                &self.hours_value,
+                                StepMessage::HoursChanged)
+                                    .on_scroll_up(StepMessage::HoursIncrement)
+                                    .on_scroll_down(StepMessage::HoursDecrement)
+                                    .padding(10)
+                                    .width(Length::Units(100)))
+                            .push((TextInput::new( // mins
+                                &mut self.mins,
+                                "Minutes",
+                                &self.mins_value,
+                                StepMessage::MinsChanged))
+                                    .on_scroll_up(StepMessage::MinsIncrement)
+                                    .on_scroll_down(StepMessage::MinsDecrement)
+                                    .padding(10)
+                                    .width(Length::Units(100)))
+                            .push(TextInput::new( // secs
+                                &mut self.secs,
+                                "Seconds",
+                                &self.secs_value,
+                                StepMessage::SecsChanged)
+                                    .on_scroll_up(StepMessage::SecsIncrement)
+                                    .on_scroll_down(StepMessage::SecsDecrement)
+                                    .padding(10)
+                                    .width(Length::Units(100)))
                             .push(
                                 Button::new(&mut self.delete_btn, Text::new("X"))
                                     .on_press(StepMessage::Delete)
@@ -338,41 +381,6 @@ impl std::fmt::Display for Actions {
             match self {
                 Actions::Rest => "Rest",
                 Actions::Swish => "Swish",
-            }
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Units {
-    Minutes,
-    Seconds,
-    Milliseconds,
-}
-
-impl Units {
-    const ALL: [Units; 3] = [
-        Units::Minutes,
-        Units::Seconds,
-        Units::Milliseconds,
-    ];
-}
-
-impl Default for Units {
-    fn default() -> Units {
-        Units::Seconds
-    }
-}
-
-impl std::fmt::Display for Units {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Units::Minutes => "Minutes",
-                Units::Seconds => "Seconds",
-                Units::Milliseconds => "Milliseconds",
             }
         )
     }
