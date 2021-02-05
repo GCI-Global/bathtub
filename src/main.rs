@@ -1,4 +1,4 @@
-use iced::{Scrollable, HorizontalAlignment, VerticalAlignment, TextInput, Button, button, text_input, scrollable, PickList, Row, pick_list, Application, Container, Text, Element, Column, Command, Settings, Length};
+use iced::{Scrollable, HorizontalAlignment, VerticalAlignment, Space,  TextInput, Button, button, text_input, scrollable, PickList, Row, pick_list, Application, Container, Text, Element, Column, Command, Settings, Length};
 
 enum App {
     Loading,
@@ -8,7 +8,10 @@ enum App {
 struct State {
     scroll: scrollable::State,
     add_button: button::State,
-    steps: Vec<Step>
+    steps: Vec<Step>,
+    recipie_name: text_input::State,
+    recipie_name_value: String,
+    save_button: button::State,
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +28,8 @@ enum LoadError {
 enum Message {
     Loaded(Result<LoadState, LoadError>),
     StepMessage(usize, StepMessage),
+    UserChangedName(String),
+    Save,
     AddStep,
 }
 
@@ -57,6 +62,9 @@ impl Application for App {
                             // return a State struct to be viewed
                             scroll: scrollable::State::new(),
                             add_button: button::State::new(),
+                            recipie_name: text_input::State::new(),
+                            recipie_name_value: "".to_string(),
+                            save_button: button::State::new(),
                             steps: vec![Step::new(1)],
                         })
                     },
@@ -79,7 +87,11 @@ impl Application for App {
                             step.update(msg)
                         }
                     },
-                    Message::AddStep => state.steps.push(Step::new(state.steps.len() + 1)),
+                    Message::AddStep => {
+                        state.steps.push(Step::new(state.steps.len() + 1));
+                        state.scroll.scroll_to_bottom();
+                    },
+                    Message::UserChangedName(new_name) => state.recipie_name_value = new_name,
                     _ => (),
                 }
             }
@@ -93,11 +105,34 @@ impl Application for App {
             App::Loaded(State {
                     // have state variables to be accessable 
                     scroll,
+                    recipie_name,
+                    recipie_name_value,
+                    save_button,
                     add_button,
                     steps,
                     ..
             }) => {
-                let title = Text::new("Recipie");
+                let name_and_save = Row::new()
+                    .push(Space::with_width(Length::Fill))
+                    .push(
+                        TextInput::new(
+                            recipie_name,
+                            "Recipie Name",
+                            recipie_name_value,
+                            Message::UserChangedName)
+                            .padding(10)
+                            .width(Length::Units(300))
+                    ).push(
+                        Button::new(
+                            save_button,
+                            Text::new("Save")
+                                .horizontal_alignment(HorizontalAlignment::Center))
+                            //.height(Length::Units(20))
+                            .padding(10)
+                            .width(Length::Units(100))
+                            .on_press(Message::Save)
+                    ).push(Space::with_width(Length::Fill));
+
 
                 let steps: Element<_> =
                     steps.iter_mut().enumerate()
@@ -108,15 +143,22 @@ impl Application for App {
                         })
                         .into();
 
-                let add_btn = Button::new(
-                    add_button,
-                    Text::new("+")
-                ).padding(20).on_press(Message::AddStep);
+                let add_btn = Row::new()
+                    .push(Space::with_width(Length::Fill))
+                    .push(
+                        Button::new(
+                        add_button,
+                        Text::new("Add Step"))
+                        .padding(10)
+                        .width(Length::Units(100))
+                        .padding(10)
+                        .on_press(Message::AddStep)
+                    ).push(Space::with_width(Length::Fill));
 
                 let content = Column::new()
                     .max_width(800)
                     .spacing(20)
-                    .push(title)
+                    .push(name_and_save)
                     .push(steps)
                     .push(add_btn);
                 Scrollable::new(scroll)
@@ -186,10 +228,34 @@ impl Step {
         match message {
             StepMessage::NewDestination(destination) => self.selected_destination = Some(destination),
             StepMessage::NewAction(action)           => self.selected_action = Some(action),
-            StepMessage::HoursChanged(hours)         => self.hours_value = hours,
-            StepMessage::MinsChanged(mins)           => self.mins_value = mins,
-            StepMessage::SecsChanged(secs)           => self.secs_value = secs,
-            StepMessage::HoursIncrement              => self.hours_value = (self.hours_value.parse::<usize>().unwrap_or(0) + 1).to_string(),
+            StepMessage::HoursChanged(hours)         => {
+                let into_num = hours.parse::<usize>();
+                if hours == "".to_string() {
+                    self.hours_value = "".to_string()
+                } else if into_num.is_ok() {
+                    self.hours_value = into_num.unwrap().min(99).to_string();
+                }
+            },
+            StepMessage::MinsChanged(mins)           => {
+                let into_num = mins.parse::<usize>();
+                if mins == "".to_string() {
+                    self.mins_value = "".to_string()
+                } else if into_num.is_ok() {
+                    self.mins_value = into_num.unwrap().min(59).to_string();
+                }
+            },
+            StepMessage::SecsChanged(secs)           => {
+                let into_num = secs.parse::<usize>();
+                if secs == "".to_string() {
+                    self.secs_value = "".to_string()
+                } else if into_num.is_ok() {
+                    self.secs_value = into_num.unwrap().min(59).to_string();
+                }
+            },
+            StepMessage::HoursIncrement              => self.hours_value = (self.hours_value.parse::<usize>().unwrap_or(0) + 1).min(99).to_string(),
+            StepMessage::MinsIncrement               => self.mins_value = (self.mins_value.parse::<usize>().unwrap_or(0) + 1).min(59).to_string(),
+            StepMessage::SecsIncrement               => self.secs_value = (self.secs_value.parse::<usize>().unwrap_or(0) + 1).min(59).to_string(),
+            StepMessage::Delete                      => {}
             StepMessage::HoursDecrement              => {
                 if self.hours_value != 0.to_string() && self.hours_value != 1.to_string() && self.hours_value != "".to_string() {
                     self.hours_value = (self.hours_value.parse::<usize>().unwrap_or(1) - 1).to_string();
@@ -197,7 +263,6 @@ impl Step {
                     self.hours_value = "".to_string()
                 }
             }
-            StepMessage::MinsIncrement               => self.mins_value = (self.mins_value.parse::<usize>().unwrap_or(0) + 1).to_string(),
             StepMessage::MinsDecrement               => {
                 if self.mins_value != 0.to_string() && self.mins_value != 1.to_string() && self.mins_value != "".to_string() {
                     self.mins_value = (self.mins_value.parse::<usize>().unwrap_or(1) - 1).to_string()
@@ -205,7 +270,6 @@ impl Step {
                     self.mins_value = "".to_string()
                 }
             }
-            StepMessage::SecsIncrement               => self.secs_value = (self.secs_value.parse::<usize>().unwrap_or(0) + 1).to_string(),
             StepMessage::SecsDecrement               => {
                 if self.secs_value != 0.to_string() && self.secs_value != 1.to_string() && self.secs_value != "".to_string() {
                     self.secs_value = (self.secs_value.parse::<usize>().unwrap_or(1) - 1).to_string()
@@ -213,7 +277,6 @@ impl Step {
                     self.secs_value = "".to_string()
                 }
             }
-            StepMessage::Delete                      => {}
         }
     }
 
@@ -276,9 +339,10 @@ impl Step {
                                     .padding(10)
                                     .width(Length::Units(100)))
                             .push(
-                                Button::new(&mut self.delete_btn, Text::new("X"))
+                                Button::new(&mut self.delete_btn, Text::new("X").horizontal_alignment(HorizontalAlignment::Center))
                                     .on_press(StepMessage::Delete)
-                            )
+                                .padding(10)
+                                .width(Length::Units(50)))
                     )
         ).into()
         
