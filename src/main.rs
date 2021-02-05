@@ -11,8 +11,8 @@ enum App {
 
 struct State {
     scroll: scrollable::State,
-    add_button: button::State,
     steps: Vec<Step>,
+    add_step: AddStep,
     recipie_name: text_input::State,
     recipie_name_value: String,
     save_button: button::State,
@@ -32,9 +32,9 @@ enum LoadError {
 enum Message {
     Loaded(Result<LoadState, LoadError>),
     StepMessage(usize, StepMessage),
+    AddStepMessage(AddStepMessage),
     UserChangedName(String),
     Save,
-    AddStep,
 }
 
 pub fn main() -> iced::Result {
@@ -65,18 +65,11 @@ impl Application for App {
                         *self = App::Loaded(State {
                             // return a State struct to be viewed
                             scroll: scrollable::State::new(),
-                            add_button: button::State::new(),
                             recipie_name: text_input::State::new(),
                             recipie_name_value: "".to_string(),
                             save_button: button::State::new(),
-                            steps: vec![Step::new(
-                                1,
-                                None,
-                                None,
-                                0.to_string(),
-                                0.to_string(),
-                                0.to_string(),
-                            )],
+                            steps: Vec::new(),
+                            add_step: AddStep::new(1),
                         })
                     }
                     Message::Loaded(Err(_)) => {
@@ -91,23 +84,23 @@ impl Application for App {
                     for i in 0..state.steps.len() {
                         state.steps[i].step_num = i + 1;
                     }
+                    state.add_step.step_num = state.steps.len() + 1
                 }
                 Message::StepMessage(i, msg) => {
                     if let Some(step) = state.steps.get_mut(i) {
                         step.update(msg)
                     }
                 }
-                Message::AddStep => {
-                    state.steps.push(Step::new(
-                        state.steps.len() + 1,
-                        Some(Baths::Au),
-                        Some(Actions::Rest),
-                        0.to_string(),
-                        30.to_string(),
-                        15.to_string(),
-                    ));
-                    state.scroll.scroll_to_bottom();
+                Message::AddStepMessage(AddStepMessage::Add(d, a, h, m, s)) => {
+                    if let Some(d) = d {
+                        state
+                            .steps
+                            .push(Step::new(state.steps.len() + 1, Some(d), a, h, m, s));
+                        state.scroll.scroll_to_bottom();
+                        state.add_step.step_num = state.steps.len() + 1;
+                    }
                 }
+                Message::AddStepMessage(msg) => state.add_step.update(msg),
                 Message::UserChangedName(new_name) => state.recipie_name_value = new_name,
                 _ => (),
             },
@@ -123,8 +116,8 @@ impl Application for App {
                 recipie_name,
                 recipie_name_value,
                 save_button,
-                add_button,
                 steps,
+                add_step,
                 ..
             }) => {
                 let name_and_save = Row::new()
@@ -151,6 +144,9 @@ impl Application for App {
                     )
                     .push(Space::with_width(Length::Fill));
 
+                let add_step =
+                    Row::new().push(add_step.view().map(move |msg| Message::AddStepMessage(msg)));
+
                 let steps: Element<_> = steps
                     .iter_mut()
                     .enumerate()
@@ -159,23 +155,12 @@ impl Application for App {
                     })
                     .into();
 
-                let add_btn = Row::new()
-                    .push(Space::with_width(Length::Fill))
-                    .push(
-                        Button::new(add_button, Text::new("Add Step"))
-                            .padding(10)
-                            .width(Length::Units(100))
-                            .padding(10)
-                            .on_press(Message::AddStep),
-                    )
-                    .push(Space::with_width(Length::Fill));
-
                 let content = Column::new()
                     .max_width(800)
                     .spacing(20)
                     .push(name_and_save)
                     .push(steps)
-                    .push(add_btn);
+                    .push(add_step);
                 Scrollable::new(scroll)
                     .padding(40)
                     .push(Container::new(content).width(Length::Fill).center_x())
@@ -306,18 +291,22 @@ impl Step {
                     .to_string()
             }
             StepMessage::Delete => {}
-            StepMessage::Okay => self.state = StepState::Idle{
-                edit_btn: button::State::new(),
-            },
-            StepMessage::Edit => self.state = StepState::Editing{
-                destination_state: pick_list::State::default(),
-                actions_state: pick_list::State::default(),
-                okay_btn: button::State::new(),
-                delete_btn: button::State::new(),
-                hours_input: text_input::State::new(),
-                mins_input: text_input::State::new(),
-                secs_input: text_input::State::new(),
-            },
+            StepMessage::Okay => {
+                self.state = StepState::Idle {
+                    edit_btn: button::State::new(),
+                }
+            }
+            StepMessage::Edit => {
+                self.state = StepState::Editing {
+                    destination_state: pick_list::State::default(),
+                    actions_state: pick_list::State::default(),
+                    okay_btn: button::State::new(),
+                    delete_btn: button::State::new(),
+                    hours_input: text_input::State::new(),
+                    mins_input: text_input::State::new(),
+                    secs_input: text_input::State::new(),
+                }
+            }
             StepMessage::HoursDecrement => {
                 if self.hours_value != 0.to_string()
                     && self.hours_value != 1.to_string()
@@ -467,7 +456,8 @@ impl Step {
                     .into()
             }
             StepState::Idle { edit_btn } => {
-                Row::new().height(Length::Units(55))
+                Row::new()
+                    .height(Length::Units(55))
                     .push(
                         // Step num
                         Column::new()
@@ -482,18 +472,24 @@ impl Step {
                     )
                     .push(
                         // Destination
-                        Column::new().padding(5)
+                        Column::new()
+                            .padding(5)
                             .push(Text::new("Destination"))
                             .push(
                                 Text::new(format!("{:?}", self.selected_destination))
                                     .height(Length::Units(55))
                                     .width(Length::Units(100)),
-                            ).height(Length::Fill))
+                            )
+                            .height(Length::Fill),
+                    )
                     .push(
                         // actions
-                        Column::new().height(Length::Fill).padding(5).push(Text::new("Action")).push(
-                            Row::new()
-                                .push(
+                        Column::new()
+                            .height(Length::Fill)
+                            .padding(5)
+                            .push(Text::new("Action"))
+                            .push(
+                                Row::new().push(
                                     Text::new(format!(
                                         "{:?} for {} hours : {} minutes : {} seconds",
                                         self.selected_action,
@@ -503,21 +499,253 @@ impl Step {
                                     ))
                                     .height(Length::Units(55))
                                     .width(Length::Units(450)),
-                                )))
-                        .push(
-                            Button::new(
-                                edit_btn,
-                                Text::new("Edit").horizontal_alignment(
-                                    HorizontalAlignment::Center,
-                                )
-                            )
-                            .padding(10)
-                            .on_press(StepMessage::Edit)
-                            .width(Length::Units(100))
-                            )
+                                ),
+                            ),
+                    )
+                    .push(
+                        Button::new(
+                            edit_btn,
+                            Text::new("Edit").horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .padding(10)
+                        .on_press(StepMessage::Edit)
+                        .width(Length::Units(100)),
+                    )
                     .into()
             }
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AddStep {
+    step_num: usize,
+    destination_state: pick_list::State<Baths>,
+    selected_destination: Option<Baths>,
+    actions_state: pick_list::State<Actions>,
+    selected_action: Option<Actions>,
+    secs: text_input::State,
+    secs_value: String,
+    mins: text_input::State,
+    mins_value: String,
+    hours: text_input::State,
+    hours_value: String,
+    add_btn: button::State,
+}
+
+#[derive(Debug, Clone)]
+pub enum AddStepMessage {
+    Add(Option<Baths>, Option<Actions>, String, String, String),
+    NewDestination(Baths),
+    NewAction(Actions),
+    SecsChanged(String),
+    MinsChanged(String),
+    HoursChanged(String),
+    HoursIncrement,
+    HoursDecrement,
+    MinsIncrement,
+    MinsDecrement,
+    SecsIncrement,
+    SecsDecrement,
+}
+
+impl AddStep {
+    fn new(step_num: usize) -> AddStep {
+        AddStep {
+            step_num,
+            destination_state: pick_list::State::default(),
+            selected_destination: None,
+            actions_state: pick_list::State::default(),
+            selected_action: Some(Actions::default()),
+            secs: text_input::State::new(),
+            secs_value: "".to_string(),
+            mins: text_input::State::new(),
+            mins_value: "".to_string(),
+            hours: text_input::State::new(),
+            hours_value: "".to_string(),
+            add_btn: button::State::new(),
+        }
+    }
+
+    fn update(&mut self, message: AddStepMessage) {
+        match message {
+            AddStepMessage::NewDestination(destination) => {
+                self.selected_destination = Some(destination)
+            }
+            AddStepMessage::NewAction(action) => self.selected_action = Some(action),
+            AddStepMessage::HoursChanged(hours) => {
+                let into_num = hours.parse::<usize>();
+                if hours == "".to_string() {
+                    self.hours_value = "".to_string()
+                } else if into_num.is_ok() {
+                    self.hours_value = into_num.unwrap().min(99).to_string();
+                }
+            }
+            AddStepMessage::MinsChanged(mins) => {
+                let into_num = mins.parse::<usize>();
+                if mins == "".to_string() {
+                    self.mins_value = "".to_string()
+                } else if into_num.is_ok() {
+                    self.mins_value = into_num.unwrap().min(59).to_string();
+                }
+            }
+            AddStepMessage::SecsChanged(secs) => {
+                let into_num = secs.parse::<usize>();
+                if secs == "".to_string() {
+                    self.secs_value = "".to_string()
+                } else if into_num.is_ok() {
+                    self.secs_value = into_num.unwrap().min(59).to_string();
+                }
+            }
+            AddStepMessage::HoursIncrement => {
+                self.hours_value = (self.hours_value.parse::<usize>().unwrap_or(0) + 1)
+                    .min(99)
+                    .to_string()
+            }
+            AddStepMessage::MinsIncrement => {
+                self.mins_value = (self.mins_value.parse::<usize>().unwrap_or(0) + 1)
+                    .min(59)
+                    .to_string()
+            }
+            AddStepMessage::SecsIncrement => {
+                self.secs_value = (self.secs_value.parse::<usize>().unwrap_or(0) + 1)
+                    .min(59)
+                    .to_string()
+            }
+            AddStepMessage::Add(_, _, _, _, _) => {}
+            AddStepMessage::HoursDecrement => {
+                if self.hours_value != 0.to_string()
+                    && self.hours_value != 1.to_string()
+                    && self.hours_value != "".to_string()
+                {
+                    self.hours_value =
+                        (self.hours_value.parse::<usize>().unwrap_or(1) - 1).to_string();
+                } else {
+                    self.hours_value = "".to_string()
+                }
+            }
+            AddStepMessage::MinsDecrement => {
+                if self.mins_value != 0.to_string()
+                    && self.mins_value != 1.to_string()
+                    && self.mins_value != "".to_string()
+                {
+                    self.mins_value =
+                        (self.mins_value.parse::<usize>().unwrap_or(1) - 1).to_string()
+                } else {
+                    self.mins_value = "".to_string()
+                }
+            }
+            AddStepMessage::SecsDecrement => {
+                if self.secs_value != 0.to_string()
+                    && self.secs_value != 1.to_string()
+                    && self.secs_value != "".to_string()
+                {
+                    self.secs_value =
+                        (self.secs_value.parse::<usize>().unwrap_or(1) - 1).to_string()
+                } else {
+                    self.secs_value = "".to_string()
+                }
+            }
+        }
+    }
+
+    fn view(&mut self) -> Element<AddStepMessage> {
+        Row::new()
+            .push(
+                // Step num
+                Column::new()
+                    .push(
+                        Text::new(format!("{}", self.step_num))
+                            .size(20)
+                            .vertical_alignment(VerticalAlignment::Center)
+                            .horizontal_alignment(HorizontalAlignment::Center),
+                    )
+                    .padding(10)
+                    .width(Length::Units(55)),
+            )
+            .push(
+                // Destination
+                Column::new().push(Text::new("Destination")).push(
+                    PickList::new(
+                        &mut self.destination_state,
+                        &Baths::ALL[..],
+                        self.selected_destination,
+                        AddStepMessage::NewDestination,
+                    )
+                    .padding(10),
+                ),
+            )
+            .push(
+                // actions
+                Column::new().push(Text::new("Action")).push(
+                    Row::new()
+                        .push(
+                            PickList::new(
+                                &mut self.actions_state,
+                                &Actions::ALL[..],
+                                self.selected_action,
+                                AddStepMessage::NewAction,
+                            )
+                            .padding(10),
+                        )
+                        .push(
+                            TextInput::new(
+                                // hours
+                                &mut self.hours,
+                                "Hours",
+                                &self.hours_value,
+                                AddStepMessage::HoursChanged,
+                            )
+                            .on_scroll_up(AddStepMessage::HoursIncrement)
+                            .on_scroll_down(AddStepMessage::HoursDecrement)
+                            .padding(10)
+                            .width(Length::Units(100)),
+                        )
+                        .push(
+                            (TextInput::new(
+                                // mins
+                                &mut self.mins,
+                                "Minutes",
+                                &self.mins_value,
+                                AddStepMessage::MinsChanged,
+                            ))
+                            .on_scroll_up(AddStepMessage::MinsIncrement)
+                            .on_scroll_down(AddStepMessage::MinsDecrement)
+                            .padding(10)
+                            .width(Length::Units(100)),
+                        )
+                        .push(
+                            TextInput::new(
+                                // secs
+                                &mut self.secs,
+                                "Seconds",
+                                &self.secs_value,
+                                AddStepMessage::SecsChanged,
+                            )
+                            .on_scroll_up(AddStepMessage::SecsIncrement)
+                            .on_scroll_down(AddStepMessage::SecsDecrement)
+                            .padding(10)
+                            .width(Length::Units(100)),
+                        )
+                        .push(
+                            Button::new(
+                                &mut self.add_btn,
+                                Text::new("Add Step")
+                                    .horizontal_alignment(HorizontalAlignment::Center),
+                            )
+                            .on_press(AddStepMessage::Add(
+                                self.selected_destination,
+                                self.selected_action,
+                                self.hours_value.clone(),
+                                self.mins_value.clone(),
+                                self.secs_value.clone(),
+                            ))
+                            .padding(10)
+                            .width(Length::Units(100)),
+                        ),
+                ),
+            )
+            .into()
     }
 }
 
