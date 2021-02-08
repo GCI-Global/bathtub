@@ -1,5 +1,5 @@
 use iced::{
-    button, pick_list, scrollable, text_input, Application, Button, Column, Command, Container,
+    button, pick_list, Font, scrollable, text_input, Application, Button, Column, Command, Container,
     Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Settings, Space, Text,
     TextInput, VerticalAlignment,
 };
@@ -82,9 +82,25 @@ impl Application for App {
                 Message::StepMessage(i, StepMessage::Delete) => {
                     state.steps.remove(i);
                     for i in 0..state.steps.len() {
-                        state.steps[i].step_num = i + 1;
+                        state.steps[i].step_num = Some(i + 1);
+                    }
+                    for i in 0..state.steps.len() {
+                        state.steps[i].steps_len = state.steps.len();
                     }
                     state.add_step.step_num = state.steps.len() + 1
+                }
+                Message::StepMessage(i, StepMessage::NewNum(num)) => {
+                    state.steps[i].step_num = Some(num);
+                    if num <= i {
+                        for j in num-1..i {
+                            state.steps[j].step_num = Some(state.steps[j].step_num.unwrap() + 1);
+                        }
+                    } else {
+                        for j in i+1..num {
+                            state.steps[j].step_num = Some(state.steps[j].step_num.unwrap() - 1);
+                        }
+                    }
+                    state.steps.sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
                 }
                 Message::StepMessage(i, msg) => {
                     if let Some(step) = state.steps.get_mut(i) {
@@ -95,7 +111,10 @@ impl Application for App {
                     if let Some(d) = d {
                         state
                             .steps
-                            .push(Step::new(state.steps.len() + 1, Some(d), a, h, m, s));
+                            .push(Step::new(Some(state.steps.len() + 1), state.steps.len(), Some(d), a, h, m, s));
+                        for i in 0..state.steps.len() {
+                            state.steps[i].steps_len = state.steps.len();
+                        }
                         state.scroll.scroll_to_bottom();
                         state.add_step.step_num = state.steps.len() + 1;
                     }
@@ -172,7 +191,8 @@ impl Application for App {
 
 #[derive(Debug, Clone)]
 struct Step {
-    step_num: usize,
+    step_num: Option<usize>,
+    steps_len: usize,
     selected_destination: Option<Baths>,
     selected_action: Option<Actions>,
     secs_value: String,
@@ -189,6 +209,7 @@ pub enum StepState {
     Editing {
         destination_state: pick_list::State<Baths>,
         actions_state: pick_list::State<Actions>,
+        step_num_state: pick_list::State<usize>,
         okay_btn: button::State,
         delete_btn: button::State,
         secs_input: text_input::State,
@@ -212,6 +233,7 @@ pub enum StepMessage {
     SecsChanged(String),
     MinsChanged(String),
     HoursChanged(String),
+    NewNum(usize),
     HoursIncrement,
     HoursDecrement,
     MinsIncrement,
@@ -225,7 +247,9 @@ pub enum StepMessage {
 
 impl Step {
     fn new(
-        step_num: usize,
+        step_num: Option<usize>,
+        steps_len: usize,
+
         selected_destination: Option<Baths>,
         selected_action: Option<Actions>,
         hours_value: String,
@@ -234,6 +258,7 @@ impl Step {
     ) -> Self {
         Step {
             step_num,
+            steps_len,
             selected_destination,
             selected_action,
             secs_value,
@@ -300,6 +325,7 @@ impl Step {
                 self.state = StepState::Editing {
                     destination_state: pick_list::State::default(),
                     actions_state: pick_list::State::default(),
+                    step_num_state: pick_list::State::default(),
                     okay_btn: button::State::new(),
                     delete_btn: button::State::new(),
                     hours_input: text_input::State::new(),
@@ -340,6 +366,7 @@ impl Step {
                     self.secs_value = "".to_string()
                 }
             }
+            StepMessage::NewNum(_) => {}
         }
     }
 
@@ -347,6 +374,7 @@ impl Step {
         match &mut self.state {
             StepState::Editing {
                 destination_state,
+                step_num_state,
                 actions_state,
                 okay_btn,
                 delete_btn,
@@ -359,13 +387,13 @@ impl Step {
                         // Step num
                         Column::new()
                             .push(
-                                Text::new(format!("{}", self.step_num))
-                                    .size(20)
-                                    .vertical_alignment(VerticalAlignment::Center)
-                                    .horizontal_alignment(HorizontalAlignment::Center),
+                                PickList::new(
+                                    step_num_state,
+                                    (1..self.steps_len +1 ).collect::<Vec<usize>>(),
+                                    self.step_num,
+                                    StepMessage::NewNum,
+                                ).padding(10).width(Length::Units(55))
                             )
-                            .padding(10)
-                            .width(Length::Units(55)),
                     )
                     .push(
                         // Destination
@@ -376,7 +404,7 @@ impl Step {
                                 self.selected_destination,
                                 StepMessage::NewDestination,
                             )
-                            .padding(10),
+                            .padding(10)
                         ),
                     )
                     .push(
@@ -434,8 +462,7 @@ impl Step {
                                 .push(
                                     Button::new(
                                         okay_btn,
-                                        Text::new("Ok")
-                                            .horizontal_alignment(HorizontalAlignment::Center),
+                                        okay_icon(),
                                     )
                                     .on_press(StepMessage::Okay)
                                     .padding(10)
@@ -444,8 +471,8 @@ impl Step {
                                 .push(
                                     Button::new(
                                         delete_btn,
-                                        Text::new("Del")
-                                            .horizontal_alignment(HorizontalAlignment::Center),
+                                        delete_icon(),
+                                            //.horizontal_alignment(HorizontalAlignment::Center),
                                     )
                                     .on_press(StepMessage::Delete)
                                     .padding(10)
@@ -462,7 +489,7 @@ impl Step {
                         // Step num
                         Column::new()
                             .push(
-                                Text::new(format!("{}", self.step_num))
+                                Text::new(format!("{}", self.step_num.unwrap()))
                                     .size(20)
                                     .vertical_alignment(VerticalAlignment::Center)
                                     .horizontal_alignment(HorizontalAlignment::Center),
@@ -473,12 +500,11 @@ impl Step {
                     .push(
                         // Destination
                         Column::new()
-                            .padding(5)
                             .push(Text::new("Destination"))
                             .push(
                                 Text::new(format!("{:?}", self.selected_destination))
                                     .height(Length::Units(55))
-                                    .width(Length::Units(100)),
+                                    .width(Length::Units(120)),
                             )
                             .height(Length::Fill),
                     )
@@ -486,10 +512,9 @@ impl Step {
                         // actions
                         Column::new()
                             .height(Length::Fill)
-                            .padding(5)
                             .push(Text::new("Action"))
                             .push(
-                                Row::new().push(
+                                Row::new().height(Length::Units(100)).push(
                                     Text::new(format!(
                                         "{:?} for {} hours : {} minutes : {} seconds",
                                         self.selected_action,
@@ -497,20 +522,21 @@ impl Step {
                                         self.mins_value,
                                         self.secs_value
                                     ))
-                                    .height(Length::Units(55))
-                                    .width(Length::Units(450)),
-                                ),
-                            ),
-                    )
+                                    //.height(Length::Units(300))
+                                    .width(Length::Units(455)),
+                                )
+                            
+                    
                     .push(
                         Button::new(
                             edit_btn,
-                            Text::new("Edit").horizontal_alignment(HorizontalAlignment::Center),
+                            Text::new("Edit").vertical_alignment(VerticalAlignment::Center).horizontal_alignment(HorizontalAlignment::Center),
                         )
                         .padding(10)
                         .on_press(StepMessage::Edit)
+                        //.height(Length::Units(75))
                         .width(Length::Units(100)),
-                    )
+                    )))
                     .into()
             }
         }
@@ -864,4 +890,27 @@ fn loading_message<'a>() -> Element<'a, Message> {
     .height(Length::Fill)
     .center_y()
     .into()
+}
+
+
+// Fonts
+const ICONS: Font = Font::External {
+    name: "Icons",
+    bytes: include_bytes!("../fonts/icons.ttf"),
+};
+
+fn icon(unicode: char) -> Text {
+    Text::new(&unicode.to_string())
+        .font(ICONS)
+        .width(Length::Units(20))
+        .horizontal_alignment(HorizontalAlignment::Center)
+        .size(20)
+}
+
+fn okay_icon() -> Text {
+    icon('\u{F00C}')
+}
+
+fn delete_icon() -> Text {
+    icon('\u{F1F8}')
 }
