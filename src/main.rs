@@ -483,6 +483,17 @@ impl Step {
                     .into()
             }
             StepState::Idle { edit_btn } => {
+                let e = "".to_string(); //empty
+                let step_time_text = match (self.hours_value.clone(), self.mins_value.clone(), self.secs_value.clone()) {
+                (h, m, s) if h == e && m == e && s == e=> format!("{} for 0 seconds", self.selected_action.unwrap()),
+                (h, m, s) if h == e && m == e => format!("{} for {} second{}", self.selected_action.unwrap(), s, ns(&s)),
+                (h, m, s) if h == e && s == e => format!("{} for {} minute{}", self.selected_action.unwrap(), m, ns(&m)),
+                (h, m, s) if m == e && s == e => format!("{} for {} hour{}", self.selected_action.unwrap(), h, ns(&h)),
+                (h, m, s) if h == e => format!("{} for {} minute{} and {} second{}", self.selected_action.unwrap(), m, ns(&m), s, ns(&s)),
+                (h, m, s) if m == e => format!("{} for {} hour{} and {} second{}", self.selected_action.unwrap(), h, ns(&h), s, ns(&s)),
+                (h, m, s) if s == e => format!("{} for {} hour{} and {} minute{}", self.selected_action.unwrap(), h, ns(&h), m, ns(&m)),
+                (h, m, s) => format!("{} for {} hour{}, {} minute{} and {} second{}", self.selected_action.unwrap(), h, ns(&h), m, ns(&m), s, ns(&s)),
+                };
                 Row::new()
                     .height(Length::Units(55))
                     .push(
@@ -502,7 +513,7 @@ impl Step {
                         Column::new()
                             .push(Text::new("Destination"))
                             .push(
-                                Text::new(format!("{:?}", self.selected_destination))
+                                Text::new(format!("{:?}", self.selected_destination.unwrap()))
                                     .height(Length::Units(55))
                                     .width(Length::Units(120)),
                             )
@@ -514,10 +525,11 @@ impl Step {
                             .height(Length::Fill)
                             .push(Text::new("Action"))
                             .push(
+                                /*
                                 Row::new().height(Length::Units(100)).push(
                                     Text::new(format!(
                                         "{:?} for {} hours : {} minutes : {} seconds",
-                                        self.selected_action,
+                                        self.selected_action.unwrap(),
                                         self.hours_value,
                                         self.mins_value,
                                         self.secs_value
@@ -525,6 +537,9 @@ impl Step {
                                     //.height(Length::Units(300))
                                     .width(Length::Units(455)),
                                 )
+                                */
+                                Row::new().push(
+                                Text::new(step_time_text).width(Length::Units(455)))
                             
                     
                     .push(
@@ -892,16 +907,19 @@ fn loading_message<'a>() -> Element<'a, Message> {
     .into()
 }
 
+fn ns(string: &String) -> String { // needs s ?
+    if string.parse::<usize>().unwrap_or(0) > 1 {"s".to_string()} else {"".to_string()}
+}
 
 // Fonts
-const ICONS: Font = Font::External {
+const ICONS_FONT: Font = Font::External {
     name: "Icons",
     bytes: include_bytes!("../fonts/icons.ttf"),
 };
 
 fn icon(unicode: char) -> Text {
     Text::new(&unicode.to_string())
-        .font(ICONS)
+        .font(ICONS_FONT)
         .width(Length::Units(20))
         .horizontal_alignment(HorizontalAlignment::Center)
         .size(20)
