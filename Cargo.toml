@@ -13,3 +13,4 @@ serde = { version = "1.0.120", features = ["derive"] }
 iced = { path = "../iced" , features = ["tokio"] }
 chrono = "0.4.19"
 regex = "1.4.3"
+csv = "1.1.5"

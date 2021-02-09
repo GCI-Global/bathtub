@@ -1,8 +1,10 @@
 use iced::{
-    button, pick_list, Font, scrollable, text_input, Application, Button, Column, Command, Container,
-    Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Settings, Space, Text,
-    TextInput, VerticalAlignment,
+    button, pick_list, scrollable, text_input, Align, Application, Button, Column, Command,
+    Container, Element, Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Settings,
+    Space, Text, TextInput, VerticalAlignment,
 };
+use std::fs::File;
+//use std::io::prelude::*;
 
 enum App {
     Loading,
@@ -69,7 +71,7 @@ impl Application for App {
                             recipie_name_value: "".to_string(),
                             save_button: button::State::new(),
                             steps: Vec::new(),
-                            add_step: AddStep::new(1),
+                            add_step: AddStep::new(1, 0),
                         })
                     }
                     Message::Loaded(Err(_)) => {
@@ -87,40 +89,60 @@ impl Application for App {
                     for i in 0..state.steps.len() {
                         state.steps[i].steps_len = state.steps.len();
                     }
-                    state.add_step.step_num = state.steps.len() + 1
+                    state.add_step.step_num = Some(state.steps.len() + 1);
+                    state.add_step.steps_len = state.steps.len();
                 }
                 Message::StepMessage(i, StepMessage::NewNum(num)) => {
                     state.steps[i].step_num = Some(num);
                     if num <= i {
-                        for j in num-1..i {
+                        for j in num - 1..i {
                             state.steps[j].step_num = Some(state.steps[j].step_num.unwrap() + 1);
                         }
                     } else {
-                        for j in i+1..num {
+                        for j in i + 1..num {
                             state.steps[j].step_num = Some(state.steps[j].step_num.unwrap() - 1);
                         }
                     }
-                    state.steps.sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
+                    state
+                        .steps
+                        .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
                 }
                 Message::StepMessage(i, msg) => {
                     if let Some(step) = state.steps.get_mut(i) {
                         step.update(msg)
                     }
                 }
-                Message::AddStepMessage(AddStepMessage::Add(d, a, h, m, s)) => {
+                Message::AddStepMessage(AddStepMessage::Add(d, a, n, h, m, s)) => {
                     if let Some(d) = d {
+                        for i in n.unwrap() - 1..state.steps.len() {
+                            state.steps[i].step_num = Some(state.steps[i].step_num.unwrap() + 1);
+                        }
                         state
                             .steps
-                            .push(Step::new(Some(state.steps.len() + 1), state.steps.len(), Some(d), a, h, m, s));
-                        for i in 0..state.steps.len() {
-                            state.steps[i].steps_len = state.steps.len();
-                        }
+                            .push(Step::new(n, state.steps.len(), Some(d), a, h, m, s));
+
+                        state
+                            .steps
+                            .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
+                        //for i in 0..state.steps.len() {
+                        //    state.steps[i].steps_len = state.steps.len();
+                        //}
                         state.scroll.scroll_to_bottom();
-                        state.add_step.step_num = state.steps.len() + 1;
+                        state.add_step.step_num = Some(state.steps.len() + 1);
+                        state.add_step.steps_len = state.steps.len();
                     }
                 }
                 Message::AddStepMessage(msg) => state.add_step.update(msg),
                 Message::UserChangedName(new_name) => state.recipie_name_value = new_name,
+                Message::Save => {
+                    if state.recipie_name_value != "".to_string() {
+                        let mut recipie = csv::Writer::from_writer(File::create(format!("./recipies/{}", &state.recipie_name_value)).expect("unable to create file"));
+                        for step in state.steps.clone() {
+                            recipie.write_record(&[format!("{}", step.selected_destination.unwrap()), format!("{}", step.selected_action.unwrap()), step.hours_value, step.mins_value, step.secs_value]).unwrap();
+                        }
+                        
+                    }
+                }
                 _ => (),
             },
         }
@@ -163,6 +185,11 @@ impl Application for App {
                     )
                     .push(Space::with_width(Length::Fill));
 
+                let column_text = Row::new()
+                    .push(Space::with_width(Length::Units(70)))
+                    .push(Text::new("Destination").width(Length::Units(125)))
+                    .push(Text::new("Action").width(Length::Units(120)));
+
                 let add_step =
                     Row::new().push(add_step.view().map(move |msg| Message::AddStepMessage(msg)));
 
@@ -178,6 +205,7 @@ impl Application for App {
                     .max_width(800)
                     .spacing(20)
                     .push(name_and_save)
+                    .push(column_text)
                     .push(steps)
                     .push(add_step);
                 Scrollable::new(scroll)
@@ -385,19 +413,20 @@ impl Step {
                 Row::new()
                     .push(
                         // Step num
-                        Column::new()
-                            .push(
-                                PickList::new(
-                                    step_num_state,
-                                    (1..self.steps_len +1 ).collect::<Vec<usize>>(),
-                                    self.step_num,
-                                    StepMessage::NewNum,
-                                ).padding(10).width(Length::Units(55))
+                        Column::new().push(
+                            PickList::new(
+                                step_num_state,
+                                (1..self.steps_len + 1).collect::<Vec<usize>>(),
+                                self.step_num,
+                                StepMessage::NewNum,
                             )
+                            .padding(10)
+                            .width(Length::Units(70)),
+                        ),
                     )
                     .push(
                         // Destination
-                        Column::new().push(Text::new("Destination")).push(
+                        Column::new().push(
                             PickList::new(
                                 destination_state,
                                 &Baths::ALL[..],
@@ -405,11 +434,12 @@ impl Step {
                                 StepMessage::NewDestination,
                             )
                             .padding(10)
+                            .width(Length::Units(110)),
                         ),
                     )
                     .push(
                         // actions
-                        Column::new().push(Text::new("Action")).push(
+                        Column::new().push(
                             Row::new()
                                 .push(
                                     PickList::new(
@@ -418,7 +448,8 @@ impl Step {
                                         self.selected_action,
                                         StepMessage::NewAction,
                                     )
-                                    .padding(10),
+                                    .padding(10)
+                                    .width(Length::Units(110)),
                                 )
                                 .push(
                                     TextInput::new(
@@ -460,19 +491,16 @@ impl Step {
                                     .width(Length::Units(100)),
                                 )
                                 .push(
-                                    Button::new(
-                                        okay_btn,
-                                        okay_icon(),
-                                    )
-                                    .on_press(StepMessage::Okay)
-                                    .padding(10)
-                                    .width(Length::Units(50)),
+                                    Button::new(okay_btn, okay_icon())
+                                        .on_press(StepMessage::Okay)
+                                        .padding(10)
+                                        .width(Length::Units(50)),
                                 )
                                 .push(
                                     Button::new(
                                         delete_btn,
                                         delete_icon(),
-                                            //.horizontal_alignment(HorizontalAlignment::Center),
+                                        //.horizontal_alignment(HorizontalAlignment::Center),
                                     )
                                     .on_press(StepMessage::Delete)
                                     .padding(10)
@@ -484,74 +512,102 @@ impl Step {
             }
             StepState::Idle { edit_btn } => {
                 let e = "".to_string(); //empty
-                let step_time_text = match (self.hours_value.clone(), self.mins_value.clone(), self.secs_value.clone()) {
-                (h, m, s) if h == e && m == e && s == e=> format!("{} for 0 seconds", self.selected_action.unwrap()),
-                (h, m, s) if h == e && m == e => format!("{} for {} second{}", self.selected_action.unwrap(), s, ns(&s)),
-                (h, m, s) if h == e && s == e => format!("{} for {} minute{}", self.selected_action.unwrap(), m, ns(&m)),
-                (h, m, s) if m == e && s == e => format!("{} for {} hour{}", self.selected_action.unwrap(), h, ns(&h)),
-                (h, m, s) if h == e => format!("{} for {} minute{} and {} second{}", self.selected_action.unwrap(), m, ns(&m), s, ns(&s)),
-                (h, m, s) if m == e => format!("{} for {} hour{} and {} second{}", self.selected_action.unwrap(), h, ns(&h), s, ns(&s)),
-                (h, m, s) if s == e => format!("{} for {} hour{} and {} minute{}", self.selected_action.unwrap(), h, ns(&h), m, ns(&m)),
-                (h, m, s) => format!("{} for {} hour{}, {} minute{} and {} second{}", self.selected_action.unwrap(), h, ns(&h), m, ns(&m), s, ns(&s)),
+                let step_time_text = match (
+                    self.hours_value.clone(),
+                    self.mins_value.clone(),
+                    self.secs_value.clone(),
+                ) {
+                    (h, m, s) if h == e && m == e && s == e => {
+                        format!("{} for 0 seconds", self.selected_action.unwrap())
+                    }
+                    (h, m, s) if h == e && m == e => format!(
+                        "{} for {} second{}",
+                        self.selected_action.unwrap(),
+                        s,
+                        ns(&s)
+                    ),
+                    (h, m, s) if h == e && s == e => format!(
+                        "{} for {} minute{}",
+                        self.selected_action.unwrap(),
+                        m,
+                        ns(&m)
+                    ),
+                    (h, m, s) if m == e && s == e => {
+                        format!("{} for {} hour{}", self.selected_action.unwrap(), h, ns(&h))
+                    }
+                    (h, m, s) if h == e => format!(
+                        "{} for {} minute{} and {} second{}",
+                        self.selected_action.unwrap(),
+                        m,
+                        ns(&m),
+                        s,
+                        ns(&s)
+                    ),
+                    (h, m, s) if m == e => format!(
+                        "{} for {} hour{} and {} second{}",
+                        self.selected_action.unwrap(),
+                        h,
+                        ns(&h),
+                        s,
+                        ns(&s)
+                    ),
+                    (h, m, s) if s == e => format!(
+                        "{} for {} hour{} and {} minute{}",
+                        self.selected_action.unwrap(),
+                        h,
+                        ns(&h),
+                        m,
+                        ns(&m)
+                    ),
+                    (h, m, s) => format!(
+                        "{} for {} hour{}, {} minute{} and {} second{}",
+                        self.selected_action.unwrap(),
+                        h,
+                        ns(&h),
+                        m,
+                        ns(&m),
+                        s,
+                        ns(&s)
+                    ),
                 };
                 Row::new()
-                    .height(Length::Units(55))
+                    .align_items(Align::Center)
                     .push(
-                        // Step num
-                        Column::new()
-                            .push(
-                                Text::new(format!("{}", self.step_num.unwrap()))
-                                    .size(20)
-                                    .vertical_alignment(VerticalAlignment::Center)
-                                    .horizontal_alignment(HorizontalAlignment::Center),
-                            )
-                            .padding(10)
-                            .width(Length::Units(50)),
+                        Text::new(format!("{}", self.step_num.unwrap()))
+                            .width(Length::Units(75))
+                            .horizontal_alignment(HorizontalAlignment::Center),
                     )
                     .push(
                         // Destination
-                        Column::new()
-                            .push(Text::new("Destination"))
-                            .push(
-                                Text::new(format!("{:?}", self.selected_destination.unwrap()))
-                                    .height(Length::Units(55))
-                                    .width(Length::Units(120)),
-                            )
-                            .height(Length::Fill),
+                        Column::new().push(
+                            Text::new(format!("{:?}", self.selected_destination.unwrap()))
+                                .width(Length::Units(120))
+                                .vertical_alignment(VerticalAlignment::Center),
+                        ),
                     )
                     .push(
-                        // actions
+                        // action
                         Column::new()
-                            .height(Length::Fill)
-                            .push(Text::new("Action"))
                             .push(
-                                /*
-                                Row::new().height(Length::Units(100)).push(
-                                    Text::new(format!(
-                                        "{:?} for {} hours : {} minutes : {} seconds",
-                                        self.selected_action.unwrap(),
-                                        self.hours_value,
-                                        self.mins_value,
-                                        self.secs_value
-                                    ))
-                                    //.height(Length::Units(300))
+                                Text::new(step_time_text)
+                                    .vertical_alignment(VerticalAlignment::Center)
                                     .width(Length::Units(455)),
-                                )
-                                */
-                                Row::new().push(
-                                Text::new(step_time_text).width(Length::Units(455)))
-                            
-                    
+                            )
+                            .align_items(Align::Center),
+                    )
                     .push(
+                        // edit button
                         Button::new(
                             edit_btn,
-                            Text::new("Edit").vertical_alignment(VerticalAlignment::Center).horizontal_alignment(HorizontalAlignment::Center),
+                            Text::new("Edit")
+                                .vertical_alignment(VerticalAlignment::Center)
+                                .horizontal_alignment(HorizontalAlignment::Center),
                         )
                         .padding(10)
                         .on_press(StepMessage::Edit)
                         //.height(Length::Units(75))
                         .width(Length::Units(100)),
-                    )))
+                    )
                     .into()
             }
         }
@@ -560,28 +616,38 @@ impl Step {
 
 #[derive(Debug, Clone)]
 struct AddStep {
-    step_num: usize,
+    step_num: Option<usize>,
+    steps_len: usize,
     destination_state: pick_list::State<Baths>,
     selected_destination: Option<Baths>,
     actions_state: pick_list::State<Actions>,
+    step_num_state: pick_list::State<usize>,
     selected_action: Option<Actions>,
-    secs: text_input::State,
+    secs_input: text_input::State,
     secs_value: String,
-    mins: text_input::State,
+    mins_input: text_input::State,
     mins_value: String,
-    hours: text_input::State,
+    hours_input: text_input::State,
     hours_value: String,
     add_btn: button::State,
 }
 
 #[derive(Debug, Clone)]
 pub enum AddStepMessage {
-    Add(Option<Baths>, Option<Actions>, String, String, String),
+    Add(
+        Option<Baths>,
+        Option<Actions>,
+        Option<usize>,
+        String,
+        String,
+        String,
+    ),
     NewDestination(Baths),
     NewAction(Actions),
     SecsChanged(String),
     MinsChanged(String),
     HoursChanged(String),
+    NewNum(usize),
     HoursIncrement,
     HoursDecrement,
     MinsIncrement,
@@ -591,18 +657,20 @@ pub enum AddStepMessage {
 }
 
 impl AddStep {
-    fn new(step_num: usize) -> AddStep {
+    fn new(step_num: usize, steps_len: usize) -> AddStep {
         AddStep {
-            step_num,
+            step_num: Some(step_num),
+            steps_len,
             destination_state: pick_list::State::default(),
             selected_destination: None,
             actions_state: pick_list::State::default(),
+            step_num_state: pick_list::State::default(),
             selected_action: Some(Actions::default()),
-            secs: text_input::State::new(),
+            secs_input: text_input::State::new(),
             secs_value: "".to_string(),
-            mins: text_input::State::new(),
+            mins_input: text_input::State::new(),
             mins_value: "".to_string(),
-            hours: text_input::State::new(),
+            hours_input: text_input::State::new(),
             hours_value: "".to_string(),
             add_btn: button::State::new(),
         }
@@ -653,7 +721,7 @@ impl AddStep {
                     .min(59)
                     .to_string()
             }
-            AddStepMessage::Add(_, _, _, _, _) => {}
+            AddStepMessage::Add(_, _, _, _, _, _) => {}
             AddStepMessage::HoursDecrement => {
                 if self.hours_value != 0.to_string()
                     && self.hours_value != 1.to_string()
@@ -687,6 +755,9 @@ impl AddStep {
                     self.secs_value = "".to_string()
                 }
             }
+            AddStepMessage::NewNum(num) => {
+                self.step_num = Some(num);
+            }
         }
     }
 
@@ -694,31 +765,33 @@ impl AddStep {
         Row::new()
             .push(
                 // Step num
-                Column::new()
-                    .push(
-                        Text::new(format!("{}", self.step_num))
-                            .size(20)
-                            .vertical_alignment(VerticalAlignment::Center)
-                            .horizontal_alignment(HorizontalAlignment::Center),
+                Column::new().push(
+                    PickList::new(
+                        &mut self.step_num_state,
+                        (1..self.steps_len + 2).collect::<Vec<usize>>(),
+                        self.step_num,
+                        AddStepMessage::NewNum,
                     )
                     .padding(10)
-                    .width(Length::Units(55)),
+                    .width(Length::Units(70)),
+                ),
             )
             .push(
                 // Destination
-                Column::new().push(Text::new("Destination")).push(
+                Column::new().push(
                     PickList::new(
                         &mut self.destination_state,
                         &Baths::ALL[..],
                         self.selected_destination,
                         AddStepMessage::NewDestination,
                     )
-                    .padding(10),
+                    .padding(10)
+                    .width(Length::Units(110)),
                 ),
             )
             .push(
                 // actions
-                Column::new().push(Text::new("Action")).push(
+                Column::new().push(
                     Row::new()
                         .push(
                             PickList::new(
@@ -727,12 +800,13 @@ impl AddStep {
                                 self.selected_action,
                                 AddStepMessage::NewAction,
                             )
-                            .padding(10),
+                            .padding(10)
+                            .width(Length::Units(110)),
                         )
                         .push(
                             TextInput::new(
                                 // hours
-                                &mut self.hours,
+                                &mut self.hours_input,
                                 "Hours",
                                 &self.hours_value,
                                 AddStepMessage::HoursChanged,
@@ -745,7 +819,7 @@ impl AddStep {
                         .push(
                             (TextInput::new(
                                 // mins
-                                &mut self.mins,
+                                &mut self.mins_input,
                                 "Minutes",
                                 &self.mins_value,
                                 AddStepMessage::MinsChanged,
@@ -758,7 +832,7 @@ impl AddStep {
                         .push(
                             TextInput::new(
                                 // secs
-                                &mut self.secs,
+                                &mut self.secs_input,
                                 "Seconds",
                                 &self.secs_value,
                                 AddStepMessage::SecsChanged,
@@ -777,6 +851,7 @@ impl AddStep {
                             .on_press(AddStepMessage::Add(
                                 self.selected_destination,
                                 self.selected_action,
+                                self.step_num,
                                 self.hours_value.clone(),
                                 self.mins_value.clone(),
                                 self.secs_value.clone(),
@@ -907,8 +982,13 @@ fn loading_message<'a>() -> Element<'a, Message> {
     .into()
 }
 
-fn ns(string: &String) -> String { // needs s ?
-    if string.parse::<usize>().unwrap_or(0) > 1 {"s".to_string()} else {"".to_string()}
+fn ns(string: &String) -> String {
+    // needs s ?
+    if string.parse::<usize>().unwrap_or(0) > 1 {
+        "s".to_string()
+    } else {
+        "".to_string()
+    }
 }
 
 // Fonts
