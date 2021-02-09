@@ -136,11 +136,21 @@ impl Application for App {
                 Message::UserChangedName(new_name) => state.recipie_name_value = new_name,
                 Message::Save => {
                     if state.recipie_name_value != "".to_string() {
-                        let mut recipie = csv::Writer::from_writer(File::create(format!("./recipies/{}", &state.recipie_name_value)).expect("unable to create file"));
+                        let mut recipie = csv::Writer::from_writer(
+                            File::create(format!("./recipies/{}", &state.recipie_name_value))
+                                .expect("unable to create file"),
+                        );
                         for step in state.steps.clone() {
-                            recipie.write_record(&[format!("{}", step.selected_destination.unwrap()), format!("{}", step.selected_action.unwrap()), step.hours_value, step.mins_value, step.secs_value]).unwrap();
+                            recipie
+                                .write_record(&[
+                                    format!("{}", step.selected_destination.unwrap()),
+                                    format!("{}", step.selected_action.unwrap()),
+                                    step.hours_value,
+                                    step.mins_value,
+                                    step.secs_value,
+                                ])
+                                .unwrap();
                         }
-                        
                     }
                 }
                 _ => (),
