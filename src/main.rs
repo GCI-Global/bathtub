@@ -124,9 +124,9 @@ impl Application for App {
                         state
                             .steps
                             .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
-                        //for i in 0..state.steps.len() {
-                        //    state.steps[i].steps_len = state.steps.len();
-                        //}
+                        for i in 0..state.steps.len() {
+                            state.steps[i].steps_len = state.steps.len();
+                        }
                         state.scroll.scroll_to_bottom();
                         state.add_step.step_num = Some(state.steps.len() + 1);
                         state.add_step.steps_len = state.steps.len();
