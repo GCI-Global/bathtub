@@ -12,112 +12,112 @@
 
 [[node]]
 name = "MCL_16"
-x = -0.1
-y = -0.4
+x = -1.1
+y = -1.4
 z = -10.0
 is_rinse = false
 neighbors = ["Rinse 1"]
 
 [[node]]
 name = "HNO3"
-x = -10.2
-y = -0.4
+x = -11.2
+y = -1.4
 z = -10.0
 is_rinse = false
 neighbors = ["Rinse 2"]
 
 [[node]]
 name = "Zn"
-x = -20.2
-y = -0.5
+x = -21.2
+y = -1.5
 z = -10.0
 is_rinse = false
 neighbors = ["Rinse 3"]
 
 [[node]]
 name = "HF"
-x = -30.3
-y = -0.5
+x = -31.3
+y = -1.5
 z = -10.0
 is_rinse = false
 neighbors = ["Rinse 4"]
 
 [[node]]
 name = "Ni"
-x = -40.3
-y = -0.5
+x = -41.3
+y = -1.5
 z = -10.0
 is_rinse = false
 neighbors = ["Rinse 5"]
 
 [[node]]
 name = "Pd"
-x = -50.4
-y = -0.5
+x = -51.4
+y = -1.5
 z = -10.0
 is_rinse = false
 neighbors = ["Rinse 6"]
 
 [[node]]
 name = "Au"
-x = -60.5
-y = -0.5
+x = -61.5
+y = -1.5
 z = -10.0
 is_rinse = false
 neighbors = ["Rinse 7"]
 
 [[node]]
 name = "Rinse 1"
-x = 0.0
-y = -13.3
+x = -1.0
+y = -14.3
 z = -10.0
 is_rinse = true
 neighbors = ["MCL_16", "Rinse 2"]
 
 [[node]]
 name = "Rinse 2"
-x = -10.1
-y = -13.3
+x = -11.1
+y = -14.3
 z = -10.0
 is_rinse = true
 neighbors = ["HNO3", "Rinse 1", "Rinse 3"]
 
 [[node]]
 name = "Rinse 3"
-x = -20.1
-y = -12.4
+x = -21.1
+y = -13.4
 z = -10.0
 is_rinse = true
 neighbors = ["Zn", "Rinse 2", "Rinse 4"]
 
 [[node]]
 name = "Rinse 4"
-x = -30.2
-y = -13.4
+x = -31.2
+y = -14.4
 z = -10.0
 is_rinse = true
 neighbors = ["HF", "Rinse 3", "Rinse 5"]
 
 [[node]]
 name = "Rinse 5"
-x = -40.3
-y = -13.3
+x = -41.3
+y = -14.3
 z = -10.0
 is_rinse = true
 neighbors = ["Ni", "Rinse 4", "Rinse 6"]
 
 [[node]]
 name = "Rinse 6"
-x = -50.4
-y = -13.5
+x = -51.4
+y = -14.5
 z = -10.0
 is_rinse = true
 neighbors = ["Pd", "Rinse 5", "Rinse 7"]
 
 [[node]]
 name = "Rinse 7"
-x = -60.5
-y = -13.5
+x = -61.5
+y = -14.5
 z = -10.0
 is_rinse = true
 neighbors = ["Au", "Rinse 6"]
