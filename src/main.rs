@@ -4,10 +4,12 @@ mod grbl;
 mod manual;
 mod nodes;
 mod paths;
+mod run;
 use build::{Build, BuildMessage};
 use grbl::Grbl;
 use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
+use run::{Run, RunMessage};
 use std::collections::HashMap;
 
 use iced::{
@@ -38,7 +40,8 @@ struct State {
 struct Tabs {
     manual: Manual,
     manual_btn: button::State,
-    //run: button::State,
+    run: Run,
+    run_btn: button::State,
     build: Build,
     build_btn: button::State,
     //settings: button::State,
@@ -46,6 +49,7 @@ struct Tabs {
 
 enum TabState {
     Manual,
+    Run,
     Build,
 }
 
@@ -65,8 +69,10 @@ enum LoadError {
 enum Message {
     ManualTab,
     BuildTab,
+    RunTab,
     Manual(ManualMessage),
     Build(BuildMessage),
+    Run(RunMessage),
     Loaded(Result<LoadState, LoadError>),
     Tick,
 }
@@ -91,7 +97,8 @@ impl Application for Bathtub {
         match self {
             Bathtub::Loaded(state) => {
                 if state.connected {
-                    return time::every(std::time::Duration::from_millis(50)).map(|_| Message::Tick);
+                    return time::every(std::time::Duration::from_millis(50))
+                        .map(|_| Message::Tick);
                 } else {
                     return Subscription::none();
                 }
@@ -111,6 +118,8 @@ impl Application for Bathtub {
                             tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
                                 manual_btn: button::State::new(),
+                                run: Run::new(),
+                                run_btn: button::State::new(),
                                 build: Build::new(),
                                 build_btn: button::State::new(),
                             },
@@ -136,6 +145,7 @@ impl Application for Bathtub {
                 match message {
                     Message::ManualTab => state.state = TabState::Manual,
                     Message::BuildTab => state.state = TabState::Build,
+                    Message::RunTab => state.state = TabState::Run,
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         if !state.connected {
                             state.tabs.manual.status =
@@ -166,6 +176,7 @@ impl Application for Bathtub {
                     }
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
+                    Message::Run(msg) => state.tabs.run.update(msg),
                     Message::Tick => {
                         state.grbl.send("?".to_string()).unwrap();
                         for _i in 0..3 {
@@ -216,6 +227,17 @@ impl Application for Bathtub {
                             )
                             .push(
                                 Button::new(
+                                    &mut tabs.run_btn,
+                                    Text::new("Run")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::RunTab),
+                            )
+                            .push(
+                                Button::new(
                                     &mut tabs.build_btn,
                                     Text::new("Build")
                                         .horizontal_alignment(HorizontalAlignment::Center)
@@ -227,6 +249,45 @@ impl Application for Bathtub {
                             ),
                     )
                     .push(tabs.manual.view().map(move |msg| Message::Manual(msg)))
+                    .into(),
+                TabState::Run => Column::new()
+                    .push(
+                        Row::new()
+                            .push(
+                                Button::new(
+                                    &mut tabs.manual_btn,
+                                    Text::new("Manual")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::ManualTab),
+                            )
+                            .push(
+                                Button::new(
+                                    &mut tabs.run_btn,
+                                    Text::new("Run")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::RunTab),
+                            )
+                            .push(
+                                Button::new(
+                                    &mut tabs.build_btn,
+                                    Text::new("Build")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::BuildTab),
+                            ),
+                    )
+                    .push(tabs.run.view().map(move |msg| Message::Run(msg)))
                     .into(),
                 TabState::Build => Column::new()
                     .push(
@@ -241,6 +302,17 @@ impl Application for Bathtub {
                                 .width(Length::Fill)
                                 .padding(20)
                                 .on_press(Message::ManualTab),
+                            )
+                            .push(
+                                Button::new(
+                                    &mut tabs.run_btn,
+                                    Text::new("Run")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::RunTab),
                             )
                             .push(
                                 Button::new(
