@@ -62,7 +62,7 @@ impl Nodes {
                     name: node.name,
                     x: node.x,
                     y: node.y,
-                    z: 0.0,
+                    z: -1.0,
                     is_rinse : node.is_rinse,
                     neighbors: new_neighbors,
                 }
@@ -86,7 +86,7 @@ impl NodeGrid2d {
     pub fn from_nodes(nodes: Nodes) -> NodeGrid2d {
         let mut node_vec = nodes.node.clone();
         // sort by y
-        node_vec.retain(|n| n.z == 0.0);
+        node_vec.retain(|n| n.z == -1.0);
         node_vec.sort_by(|a, b| (b.y).total_cmp(&a.y));
         // split into many y vecs
         let mut test_value: f32 = node_vec[0].y;
