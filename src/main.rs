@@ -1,16 +1,19 @@
 #![feature(total_cmp)]
+mod build;
+mod grbl;
 mod manual;
 mod nodes;
-mod grbl;
 mod paths;
-mod build;
-use manual::{Manual, ManualMessage};
-use build::{BuildMessage, Build};
-use nodes::{Node, Nodes, NodeGrid2d};
+use build::{Build, BuildMessage};
 use grbl::Grbl;
+use manual::{Manual, ManualMessage};
+use nodes::{Node, NodeGrid2d, Nodes};
 use std::collections::HashMap;
 
-use iced::{button, Button, time, Subscription, Font, Container, Command, HorizontalAlignment, Length ,Column, Row, Element, Application, Settings, Text};
+use iced::{
+    button, time, Application, Button, Column, Command, Container, Element, Font,
+    HorizontalAlignment, Length, Row, Settings, Subscription, Text,
+};
 
 pub fn main() -> iced::Result {
     Bathtub::run(Settings::default())
@@ -19,7 +22,7 @@ pub fn main() -> iced::Result {
 //#[derive(Debug)]
 enum Bathtub {
     Loading,
-    Loaded(State)
+    Loaded(State),
 }
 
 struct State {
@@ -43,7 +46,7 @@ struct Tabs {
 
 enum TabState {
     Manual,
-    Build
+    Build,
 }
 
 #[derive(Debug, Clone)]
@@ -88,16 +91,15 @@ impl Application for Bathtub {
         match self {
             Bathtub::Loaded(state) => {
                 if state.connected {
-                    return time::every(std::time::Duration::from_millis(50))
-                        .map(|_| Message::Tick)
+                    return time::every(std::time::Duration::from_millis(50)).map(|_| Message::Tick);
                 } else {
                     return Subscription::none();
                 }
-            },
+            }
             _ => Subscription::none(),
         }
     }
-    
+
     fn update(&mut self, message: Message) -> Command<Message> {
         match self {
             Bathtub::Loading => {
@@ -106,7 +108,7 @@ impl Application for Bathtub {
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
-                            tabs: Tabs{
+                            tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
                                 manual_btn: button::State::new(),
                                 build: Build::new(),
@@ -114,7 +116,9 @@ impl Application for Bathtub {
                             },
                             nodes: state.nodes.clone(),
                             node_map: state.node_map.clone(),
-                            current_node: state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone(),
+                            current_node: state.nodes.node
+                                [state.node_map.get(&"MCL_16".to_string()).unwrap().clone()]
+                            .clone(),
                             connected: false,
                             grbl: grbl::new(),
                         });
@@ -131,32 +135,45 @@ impl Application for Bathtub {
             Bathtub::Loaded(state) => {
                 match message {
                     Message::ManualTab => state.state = TabState::Manual,
-                    Message::BuildTab  => state.state = TabState::Build,
+                    Message::BuildTab => state.state = TabState::Build,
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         if !state.connected {
-                            state.tabs.manual.status = "Running Homing Cycle\nPlease wait".to_string();
+                            state.tabs.manual.status =
+                                "Running Homing Cycle\nPlease wait".to_string();
                             state.grbl.send("$H".to_string()).unwrap();
                             state.connected = true;
                         }
                         let enter_bath: String;
                         println!("{}", node);
-                        if state.tabs.manual.in_bath {enter_bath = "_inBath".to_string()} else {enter_bath = "".to_string()}
-                        let next_node = &state.nodes.node[state.node_map.get(&format!("{}{}",node.clone(), enter_bath)).unwrap().clone()];
-                        let node_paths = paths::gen_node_paths(&state.nodes, &state.current_node, next_node);
+                        if state.tabs.manual.in_bath {
+                            enter_bath = "_inBath".to_string()
+                        } else {
+                            enter_bath = "".to_string()
+                        }
+                        let next_node = &state.nodes.node[state
+                            .node_map
+                            .get(&format!("{}{}", node.clone(), enter_bath))
+                            .unwrap()
+                            .clone()];
+                        let node_paths =
+                            paths::gen_node_paths(&state.nodes, &state.current_node, next_node);
                         let gcode_paths = paths::gen_gcode_paths(&node_paths);
                         // send gcode
                         for gcode_path in gcode_paths {
                             state.grbl.send(gcode_path).unwrap();
                         }
-                        state.current_node = next_node.clone();}
+                        state.current_node = next_node.clone();
+                    }
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Tick => {
                         state.grbl.send("?".to_string()).unwrap();
                         for _i in 0..3 {
                             match state.grbl.try_recv() {
-                                Ok((_,cmd, msg)) if cmd == "?".to_string() => {
-                                    if let Some(caps) = state.tabs.manual.status_regex.captures(&msg[..]) {
+                                Ok((_, cmd, msg)) if cmd == "?".to_string() => {
+                                    if let Some(caps) =
+                                        state.tabs.manual.status_regex.captures(&msg[..])
+                                    {
                                         state.tabs.manual.status = format!(
                                             "{} state at\n({:.3}, {:.3}, {:.3})",
                                             &caps["status"],
@@ -168,7 +185,7 @@ impl Application for Bathtub {
                                 }
                                 // do nothing for now. Will likely create a log of gcode commands
                                 // in future
-                                _ => {()}
+                                _ => (),
                             }
                         }
                     }
@@ -178,44 +195,71 @@ impl Application for Bathtub {
             }
         }
     }
-    
+
     fn view(&mut self) -> Element<Message> {
         match self {
             Bathtub::Loading => loading_message(),
-            Bathtub::Loaded(State {
-                state,
-                tabs,
-                ..
-            }) => {
-                match state {
-                    TabState::Manual => {
-                        Column::new()
-                        .push(
-                            Row::new()
-                                .push(Button::new(&mut tabs.manual_btn, Text::new("Manual").horizontal_alignment(HorizontalAlignment::Center).size(30)).width(Length::Fill).padding(20).on_press(Message::ManualTab))
-                                .push(Button::new(&mut tabs.build_btn, Text::new("Build").horizontal_alignment(HorizontalAlignment::Center).size(30)).width(Length::Fill).padding(20).on_press(Message::BuildTab))
-                        )
-                        .push(
-                            tabs.manual.view().map(move |msg| Message::Manual(msg))
-                        ).into()
-                    }
-                    TabState::Build => {
-                        Column::new()
-                        .push(
-                            Row::new()
-                                .push(Button::new(&mut tabs.manual_btn, Text::new("Manual").horizontal_alignment(HorizontalAlignment::Center).size(30)).width(Length::Fill).padding(20).on_press(Message::ManualTab))
-                                .push(Button::new(&mut tabs.build_btn, Text::new("Build").horizontal_alignment(HorizontalAlignment::Center).size(30)).width(Length::Fill).padding(20).on_press(Message::BuildTab))
-                        )
-                        .push(
-                            tabs.build.view().map(move |msg| Message::Build(msg))
-                        ).into()
-                    }
-                }
-            }
-
-        }
+            Bathtub::Loaded(State { state, tabs, .. }) => match state {
+                TabState::Manual => Column::new()
+                    .push(
+                        Row::new()
+                            .push(
+                                Button::new(
+                                    &mut tabs.manual_btn,
+                                    Text::new("Manual")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::ManualTab),
+                            )
+                            .push(
+                                Button::new(
+                                    &mut tabs.build_btn,
+                                    Text::new("Build")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::BuildTab),
+                            ),
+                    )
+                    .push(tabs.manual.view().map(move |msg| Message::Manual(msg)))
+                    .into(),
+                TabState::Build => Column::new()
+                    .push(
+                        Row::new()
+                            .push(
+                                Button::new(
+                                    &mut tabs.manual_btn,
+                                    Text::new("Manual")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::ManualTab),
+                            )
+                            .push(
+                                Button::new(
+                                    &mut tabs.build_btn,
+                                    Text::new("Build")
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .size(30),
+                                )
+                                .width(Length::Fill)
+                                .padding(20)
+                                .on_press(Message::BuildTab),
+                            ),
+                    )
+                    .push(tabs.build.view().map(move |msg| Message::Build(msg)))
+                    .into(),
+            },
         }
     }
+}
 
 impl LoadState {
     fn new(nodes: Nodes, node_map: HashMap<String, usize>, node_grid2d: NodeGrid2d) -> LoadState {
@@ -229,20 +273,20 @@ impl LoadState {
     // This is just a placeholder. Will eventually read data from server
     async fn load() -> Result<LoadState, LoadError> {
         let nodes = nodes::gen_nodes();
-        
-        Ok(
-            LoadState::new(nodes.clone(),
-                nodes::get_nodemap(nodes.clone()),
-                NodeGrid2d::from_nodes(nodes)
-            )
-        )
-    }}
+
+        Ok(LoadState::new(
+            nodes.clone(),
+            nodes::get_nodemap(nodes.clone()),
+            NodeGrid2d::from_nodes(nodes),
+        ))
+    }
+}
 
 fn loading_message<'a>() -> Element<'a, Message> {
     Container::new(
-            Text::new("Loading...\n\nThis should be very quick.")
-                .horizontal_alignment(HorizontalAlignment::Center)
-                .size(50),
+        Text::new("Loading...\n\nThis should be very quick.")
+            .horizontal_alignment(HorizontalAlignment::Center)
+            .size(50),
     )
     .width(Length::Fill)
     .height(Length::Fill)

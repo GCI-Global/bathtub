@@ -1,7 +1,7 @@
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Column,
-    Container, Element, Font, HorizontalAlignment, Length, PickList, Row, Scrollable,
-    Space, Text, TextInput, VerticalAlignment,
+    button, pick_list, scrollable, text_input, Align, Button, Column, Container, Element, Font,
+    HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
+    VerticalAlignment,
 };
 use std::fs::File;
 //use std::io::prelude::*;
@@ -31,138 +31,142 @@ impl Build {
             recipie_name_value: "".to_string(),
             save_button: button::State::new(),
             steps: Vec::new(),
-            add_step: AddStep::new(1,0),
+            add_step: AddStep::new(1, 0),
         }
     }
 
     pub fn update(&mut self, message: BuildMessage) {
-        match message {            
-                BuildMessage::StepMessage(i, StepMessage::Delete) => {
-                    self.steps.remove(i);
-                    for i in 0..self.steps.len() {
-                        self.steps[i].step_num = Some(i + 1);
+        match message {
+            BuildMessage::StepMessage(i, StepMessage::Delete) => {
+                self.steps.remove(i);
+                for i in 0..self.steps.len() {
+                    self.steps[i].step_num = Some(i + 1);
+                }
+                for i in 0..self.steps.len() {
+                    self.steps[i].steps_len = self.steps.len();
+                }
+                self.add_step.step_num = Some(self.steps.len() + 1);
+                self.add_step.steps_len = self.steps.len();
+            }
+            BuildMessage::StepMessage(i, StepMessage::NewNum(num)) => {
+                self.steps[i].step_num = Some(num);
+                if num <= i {
+                    for j in num - 1..i {
+                        self.steps[j].step_num = Some(self.steps[j].step_num.unwrap() + 1);
                     }
+                } else {
+                    for j in i + 1..num {
+                        self.steps[j].step_num = Some(self.steps[j].step_num.unwrap() - 1);
+                    }
+                }
+                self.steps
+                    .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
+            }
+            BuildMessage::StepMessage(i, msg) => {
+                if let Some(step) = self.steps.get_mut(i) {
+                    step.update(msg)
+                }
+            }
+            BuildMessage::AddStepMessage(AddStepMessage::Add(d, a, n, h, m, s)) => {
+                if let Some(d) = d {
+                    for i in n.unwrap() - 1..self.steps.len() {
+                        self.steps[i].step_num = Some(self.steps[i].step_num.unwrap() + 1);
+                    }
+                    self.steps
+                        .push(Step::new(n, self.steps.len(), Some(d), a, h, m, s));
+
+                    self.steps
+                        .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
                     for i in 0..self.steps.len() {
                         self.steps[i].steps_len = self.steps.len();
                     }
+                    self.scroll.scroll_to_bottom();
                     self.add_step.step_num = Some(self.steps.len() + 1);
                     self.add_step.steps_len = self.steps.len();
                 }
-                BuildMessage::StepMessage(i, StepMessage::NewNum(num)) => {
-                    self.steps[i].step_num = Some(num);
-                    if num <= i {
-                        for j in num - 1..i {
-                            self.steps[j].step_num = Some(self.steps[j].step_num.unwrap() + 1);
-                        }
-                    } else {
-                        for j in i + 1..num {
-                            self.steps[j].step_num = Some(self.steps[j].step_num.unwrap() - 1);
-                        }
-                    }
-                    self
-                        .steps
-                        .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
-                }
-                BuildMessage::StepMessage(i, msg) => {
-                    if let Some(step) = self.steps.get_mut(i) {
-                        step.update(msg)
-                    }
-                }
-                BuildMessage::AddStepMessage(AddStepMessage::Add(d, a, n, h, m, s)) => {
-                    if let Some(d) = d {
-                        for i in n.unwrap() - 1..self.steps.len() {
-                            self.steps[i].step_num = Some(self.steps[i].step_num.unwrap() + 1);
-                        }
-                        self
-                            .steps
-                            .push(Step::new(n, self.steps.len(), Some(d), a, h, m, s));
-
-                        self
-                            .steps
-                            .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
-                        for i in 0..self.steps.len() {
-                            self.steps[i].steps_len = self.steps.len();
-                        }
-                        self.scroll.scroll_to_bottom();
-                        self.add_step.step_num = Some(self.steps.len() + 1);
-                        self.add_step.steps_len = self.steps.len();
-                    }
-                }
-                BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
-                BuildMessage::UserChangedName(new_name) => self.recipie_name_value = new_name,
-                BuildMessage::Save => {
-                    if self.recipie_name_value != "".to_string() {
-                        let mut recipie = csv::Writer::from_writer(
-                            File::create(format!("./recipies/{}", &self.recipie_name_value))
-                                .expect("unable to create file"),
-                        );
-                        for step in self.steps.clone() {
-                            recipie
-                                .write_record(&[
-                                    format!("{}", step.selected_destination.unwrap()),
-                                    format!("{}", step.selected_action.unwrap()),
-                                    step.hours_value,
-                                    step.mins_value,
-                                    step.secs_value,
-                                ])
-                                .unwrap();
-                        }
+            }
+            BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
+            BuildMessage::UserChangedName(new_name) => self.recipie_name_value = new_name,
+            BuildMessage::Save => {
+                if self.recipie_name_value != "".to_string() {
+                    let mut recipie = csv::Writer::from_writer(
+                        File::create(format!("./recipies/{}", &self.recipie_name_value))
+                            .expect("unable to create file"),
+                    );
+                    for step in self.steps.clone() {
+                        recipie
+                            .write_record(&[
+                                format!("{}", step.selected_destination.unwrap()),
+                                format!("{}", step.selected_action.unwrap()),
+                                step.hours_value,
+                                step.mins_value,
+                                step.secs_value,
+                            ])
+                            .unwrap();
                     }
                 }
             }
         }
+    }
     pub fn view(&mut self) -> Element<BuildMessage> {
-                let name_and_save = Row::new()
-                    .push(Space::with_width(Length::Fill))
-                    .push(
-                        TextInput::new(
-                            &mut self.recipie_name,
-                            "Recipie Name",
-                            &self.recipie_name_value,
-                            BuildMessage::UserChangedName,
-                        )
-                        .padding(10)
-                        .width(Length::Units(300)),
-                    )
-                    .push(
-                        Button::new(
-                            &mut self.save_button,
-                            Text::new("Save").horizontal_alignment(HorizontalAlignment::Center),
-                        )
-                        .padding(10)
-                        .width(Length::Units(100))
-                        .on_press(BuildMessage::Save),
-                    )
-                    .push(Space::with_width(Length::Fill));
+        let name_and_save = Row::new()
+            .push(Space::with_width(Length::Fill))
+            .push(
+                TextInput::new(
+                    &mut self.recipie_name,
+                    "Recipie Name",
+                    &self.recipie_name_value,
+                    BuildMessage::UserChangedName,
+                )
+                .padding(10)
+                .width(Length::Units(300)),
+            )
+            .push(
+                Button::new(
+                    &mut self.save_button,
+                    Text::new("Save").horizontal_alignment(HorizontalAlignment::Center),
+                )
+                .padding(10)
+                .width(Length::Units(100))
+                .on_press(BuildMessage::Save),
+            )
+            .push(Space::with_width(Length::Fill));
 
-                let column_text = Row::new()
-                    .push(Space::with_width(Length::Units(70)))
-                    .push(Text::new("Destination").width(Length::Units(125)))
-                    .push(Text::new("Action").width(Length::Units(120)));
+        let column_text = Row::new()
+            .push(Space::with_width(Length::Units(70)))
+            .push(Text::new("Destination").width(Length::Units(125)))
+            .push(Text::new("Action").width(Length::Units(120)));
 
-                let add_step =
-                    Row::new().push(self.add_step.view().map(move |msg| BuildMessage::AddStepMessage(msg)));
+        let add_step = Row::new().push(
+            self.add_step
+                .view()
+                .map(move |msg| BuildMessage::AddStepMessage(msg)),
+        );
 
-                let steps: Element<_> = self.steps
-                    .iter_mut()
-                    .enumerate()
-                    .fold(Column::new().spacing(15), |column, (i, step)| {
-                        column.push(step.view().map(move |msg| BuildMessage::StepMessage(i, msg)))
-                    })
-                    .into();
+        let steps: Element<_> = self
+            .steps
+            .iter_mut()
+            .enumerate()
+            .fold(Column::new().spacing(15), |column, (i, step)| {
+                column.push(
+                    step.view()
+                        .map(move |msg| BuildMessage::StepMessage(i, msg)),
+                )
+            })
+            .into();
 
-                let content = Column::new()
-                    .max_width(800)
-                    .spacing(20)
-                    .push(name_and_save)
-                    .push(column_text)
-                    .push(steps)
-                    .push(add_step);
-                Scrollable::new(&mut self.scroll)
-                    .padding(40)
-                    .push(Container::new(content).width(Length::Fill).center_x())
-                    .into()
-            }
+        let content = Column::new()
+            .max_width(800)
+            .spacing(20)
+            .push(name_and_save)
+            .push(column_text)
+            .push(steps)
+            .push(add_step);
+        Scrollable::new(&mut self.scroll)
+            .padding(40)
+            .push(Container::new(content).width(Length::Fill).center_x())
+            .into()
+    }
 }
 
 #[derive(Debug, Clone)]
