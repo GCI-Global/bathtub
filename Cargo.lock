@@ -86,6 +86,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "csv",
+ "futures 0.1.30",
  "iced",
  "regex",
  "serde",
@@ -748,6 +749,12 @@ checksum = "3dcaa9ae7725d12cdb85b3ad99a434db70b468c09ded17e012d86b5c1010f7a7"
 
 [[package]]
 name = "futures"
+version = "0.1.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c7e4c2612746b0df8fed4ce0c69156021b704c9aefa360311c04e6e9e002eed"
+
+[[package]]
+name = "futures"
 version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da9052a1a50244d8d5aa9bf55cbc2fb6f357c86cc52e46c62ed390a7180cf150"
@@ -1095,7 +1102,7 @@ version = "0.3.0"
 name = "iced_futures"
 version = "0.2.0"
 dependencies = [
- "futures",
+ "futures 0.3.12",
  "log",
  "tokio",
  "wasm-bindgen-futures",
@@ -1152,7 +1159,7 @@ name = "iced_wgpu"
 version = "0.3.0"
 dependencies = [
  "bytemuck",
- "futures",
+ "futures 0.3.12",
  "glyph_brush",
  "guillotiere",
  "iced_graphics",
@@ -2526,7 +2533,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "991903e4c9f5b7319732b30a3d0339e27a51ea992cea22769b5f6c7f7076af6d"
 dependencies = [
  "arrayvec",
- "futures",
+ "futures 0.3.12",
  "gfx-backend-vulkan",
  "js-sys",
  "objc",

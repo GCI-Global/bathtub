@@ -11,6 +11,8 @@ use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
 use run::{Run, RunMessage};
 use std::collections::HashMap;
+use std::fs;
+use regex::Regex;
 
 use iced::{
     button, time, Application, Button, Column, Command, Container, Element, Font,
@@ -35,6 +37,7 @@ struct State {
     current_node: Node,
     grbl: Grbl,
     connected: bool,
+    recipie_regex: Regex,
 }
 
 struct Tabs {
@@ -130,6 +133,7 @@ impl Application for Bathtub {
                             .clone(),
                             connected: false,
                             grbl: grbl::new(),
+                            recipie_regex: Regex::new(r"^[^.]+").unwrap(),
                         });
                     }
                     Message::Loaded(Err(_)) => {
@@ -145,7 +149,23 @@ impl Application for Bathtub {
                 match message {
                     Message::ManualTab => state.state = TabState::Manual,
                     Message::BuildTab => state.state = TabState::Build,
-                    Message::RunTab => state.state = TabState::Run,
+                    Message::RunTab => {
+                        //println!("recipies: {:?}", fs::read_dir("./recipies").unwrap().fold(Vec::new(), |mut recipies, file| {recipies.push(file.unwrap().file_name()); recipies}));
+                        state.tabs.run.search = fs::read_dir("./recipies").unwrap().fold(
+                            Vec::new(),
+                            |mut rec, file| {
+                                if let Some(caps) = state
+                                    .recipie_regex
+                                    .captures(&file.unwrap().file_name().to_str().unwrap())
+                                {
+                                    rec.push(caps[0].to_string());
+                                }
+                                rec
+                            },
+                        );
+                        state.tabs.run.search.sort();
+                        state.state = TabState::Run
+                    }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         if !state.connected {
                             state.tabs.manual.status =

@@ -90,12 +90,23 @@ impl Build {
             BuildMessage::Save => {
                 if self.recipie_name_value != "".to_string() {
                     let mut recipie = csv::Writer::from_writer(
-                        File::create(format!("./recipies/{}", &self.recipie_name_value))
+                        File::create(format!("./recipies/{}.recipie", &self.recipie_name_value))
                             .expect("unable to create file"),
                     );
+                    recipie
+                        .write_record(&[
+                            "step_num",
+                            "selected_destination",
+                            "selected_action",
+                            "hours_value",
+                            "mins_value",
+                            "secs_value",
+                        ])
+                        .unwrap();
                     for step in self.steps.clone() {
                         recipie
                             .write_record(&[
+                                step.step_num.unwrap().to_string(),
                                 format!("{}", step.selected_destination.unwrap()),
                                 format!("{}", step.selected_action.unwrap()),
                                 step.hours_value,
@@ -914,7 +925,7 @@ impl std::fmt::Display for Actions {
     }
 }
 
-fn ns(string: &String) -> String {
+pub fn ns(string: &String) -> String {
     // needs s ?
     if string.parse::<usize>().unwrap_or(0) > 1 {
         "s".to_string()
