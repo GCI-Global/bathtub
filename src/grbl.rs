@@ -2,10 +2,11 @@ extern crate serial;
 use serial::prelude::*;
 use serial::SystemPort;
 use std::io::Write;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
 use std::time::Duration;
 use std::{str, thread};
+use regex::Regex;
 
 use chrono::prelude::*;
 use std::io::BufRead;
@@ -16,6 +17,15 @@ use std::io::BufReader;
 pub struct Grbl {
     pub sender: Sender<String>,
     pub receiver: Receiver<(chrono::DateTime<chrono::Local>, String, String)>,
+    pub mutex_status: Arc<Mutex<Option<Status>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Status {
+    pub status: String,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 impl Grbl {
@@ -27,26 +37,45 @@ impl Grbl {
     ) -> Result<(chrono::DateTime<chrono::Local>, String, String), TryRecvError> {
         self.receiver.try_recv()
     }
+    pub fn get_status(&self) -> Option<Status> {
+        self.mutex_status.lock().unwrap().clone()
+    }
 }
 
 // Create new thread that, locks usb serial connection + used to send+recv gcode
 pub fn new() -> Grbl {
     let (cnc_tx, ui_rx) = mpsc::channel();
     let (ui_tx, cnc_rx) = mpsc::channel();
+    let status = Arc::new(Mutex::new(None));
+    let status2 = Arc::clone(&status);
     thread::spawn(move || {
         let mut port = get_port();
         let mut grbl_response: (DateTime<Local>, String, String);
+        let r = Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)").unwrap();
         loop {
+            let status_response = send(&mut port, "?".to_string());
+            if let Some(caps) = r.captures(&status_response.2[..]) {
+                let loc = Status {
+                    status: caps["status"].to_string(),
+                    x: caps["X"].parse::<f32>().unwrap(),
+                    y: caps["Y"].parse::<f32>().unwrap(),
+                    z: caps["Z"].parse::<f32>().unwrap(),
+                };
+                let mut lctn = status.lock().unwrap();
+                *lctn = Some(loc);
+            }
+
             if let Ok(command) = ui_rx.try_recv() {
                 grbl_response = send(&mut port, command);
                 ui_tx.send(grbl_response).unwrap();
             }
-            thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_millis(40));
         }
     });
     Grbl {
         sender: cnc_tx,
         receiver: cnc_rx,
+        mutex_status: status2,
     }
 }
 

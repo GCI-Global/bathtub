@@ -6,13 +6,14 @@ mod nodes;
 mod paths;
 mod run;
 use build::{Build, BuildMessage};
-use grbl::Grbl;
+use grbl::{Grbl, Status};
 use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
 use run::{Run, RunMessage};
 use std::collections::HashMap;
 use std::fs;
 use regex::Regex;
+use std::sync::{Arc, Mutex};
 
 use iced::{
     button, time, Application, Button, Column, Command, Container, Element, Font,
@@ -38,6 +39,7 @@ struct State {
     grbl: Grbl,
     connected: bool,
     recipie_regex: Regex,
+    grbl_status: Option<Arc<Mutex<Option<Status>>>>
 }
 
 struct Tabs {
@@ -133,6 +135,7 @@ impl Application for Bathtub {
                             .clone(),
                             connected: false,
                             grbl: grbl::new(),
+                            grbl_status: None,
                             recipie_regex: Regex::new(r"^[^.]+").unwrap(),
                         });
                     }
@@ -173,6 +176,7 @@ impl Application for Bathtub {
                             state.grbl.send("$H".to_string()).unwrap();
                             state.connected = true;
                         }
+                        state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         let enter_bath: String;
                         println!("{}", node);
                         if state.tabs.manual.in_bath {
@@ -198,6 +202,17 @@ impl Application for Bathtub {
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => state.tabs.run.update(msg),
                     Message::Tick => {
+                        if let Some(grbl_status) = &state.grbl_status {
+                            let grbl_stat = grbl_status.lock().unwrap();
+                            state.tabs.manual.status = format!(
+                            "{} state at\n({:.3}, {:.3}, {:.3})",
+                            &grbl_stat.clone().unwrap().status,
+                            &grbl_stat.clone().unwrap().x,
+                            &grbl_stat.clone().unwrap().y,
+                            &grbl_stat.clone().unwrap().z,
+                            )
+                        }
+                        /*
                         state.grbl.send("?".to_string()).unwrap();
                         for _i in 0..3 {
                             match state.grbl.try_recv() {
@@ -219,6 +234,7 @@ impl Application for Bathtub {
                                 _ => (),
                             }
                         }
+                        */
                     }
                     _ => {}
                 }
