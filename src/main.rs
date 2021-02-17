@@ -9,15 +9,15 @@ use build::{Build, BuildMessage};
 use grbl::{Grbl, Status};
 use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
+use regex::Regex;
 use run::{Run, RunMessage};
 use std::collections::HashMap;
 use std::fs;
-use regex::Regex;
 use std::sync::{Arc, Mutex};
 
 use iced::{
-    button, time, Application, Button, Column, Command, Container, Element, Font,
-    HorizontalAlignment, Length, Row, Settings, Subscription, Text,
+    button, time, Align, Application, Button, Column, Command, Container, Element, Font,
+    HorizontalAlignment, Length, Row, Settings, Space, Subscription, Text,
 };
 
 pub fn main() -> iced::Result {
@@ -38,8 +38,9 @@ struct State {
     current_node: Node,
     grbl: Grbl,
     connected: bool,
+    running: bool,
     recipie_regex: Regex,
-    grbl_status: Option<Arc<Mutex<Option<Status>>>>
+    grbl_status: Option<Arc<Mutex<Option<Status>>>>,
 }
 
 struct Tabs {
@@ -134,6 +135,7 @@ impl Application for Bathtub {
                                 [state.node_map.get(&"MCL_16".to_string()).unwrap().clone()]
                             .clone(),
                             connected: false,
+                            running: false,
                             grbl: grbl::new(),
                             grbl_status: None,
                             recipie_regex: Regex::new(r"^[^.]+").unwrap(),
@@ -178,7 +180,6 @@ impl Application for Bathtub {
                         }
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         let enter_bath: String;
-                        println!("{}", node);
                         if state.tabs.manual.in_bath {
                             enter_bath = "_inBath".to_string()
                         } else {
@@ -198,6 +199,7 @@ impl Application for Bathtub {
                         }
                         state.current_node = next_node.clone();
                     }
+                    Message::Run(RunMessage::Run) => state.running = true,
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => state.tabs.run.update(msg),
@@ -205,36 +207,13 @@ impl Application for Bathtub {
                         if let Some(grbl_status) = &state.grbl_status {
                             let grbl_stat = grbl_status.lock().unwrap();
                             state.tabs.manual.status = format!(
-                            "{} state at\n({:.3}, {:.3}, {:.3})",
-                            &grbl_stat.clone().unwrap().status,
-                            &grbl_stat.clone().unwrap().x,
-                            &grbl_stat.clone().unwrap().y,
-                            &grbl_stat.clone().unwrap().z,
+                                "{} state at\n({:.3}, {:.3}, {:.3})",
+                                &grbl_stat.clone().unwrap().status,
+                                &grbl_stat.clone().unwrap().x,
+                                &grbl_stat.clone().unwrap().y,
+                                &grbl_stat.clone().unwrap().z,
                             )
                         }
-                        /*
-                        state.grbl.send("?".to_string()).unwrap();
-                        for _i in 0..3 {
-                            match state.grbl.try_recv() {
-                                Ok((_, cmd, msg)) if cmd == "?".to_string() => {
-                                    if let Some(caps) =
-                                        state.tabs.manual.status_regex.captures(&msg[..])
-                                    {
-                                        state.tabs.manual.status = format!(
-                                            "{} state at\n({:.3}, {:.3}, {:.3})",
-                                            &caps["status"],
-                                            &caps["X"].parse::<f32>().unwrap(), // convert to f32 for decimal places
-                                            &caps["Y"].parse::<f32>().unwrap(),
-                                            &caps["Z"].parse::<f32>().unwrap()
-                                        );
-                                    }
-                                }
-                                // do nothing for now. Will likely create a log of gcode commands
-                                // in future
-                                _ => (),
-                            }
-                        }
-                        */
                     }
                     _ => {}
                 }
@@ -246,9 +225,14 @@ impl Application for Bathtub {
     fn view(&mut self) -> Element<Message> {
         match self {
             Bathtub::Loading => loading_message(),
-            Bathtub::Loaded(State { state, tabs, .. }) => match state {
-                TabState::Manual => Column::new()
-                    .push(
+            Bathtub::Loaded(State {
+                state,
+                tabs,
+                running,
+                ..
+            }) => match state {
+                TabState::Manual => {
+                    let content = Column::new().push(
                         Row::new()
                             .push(
                                 Button::new(
@@ -283,9 +267,19 @@ impl Application for Bathtub {
                                 .padding(20)
                                 .on_press(Message::BuildTab),
                             ),
-                    )
-                    .push(tabs.manual.view().map(move |msg| Message::Manual(msg)))
-                    .into(),
+                    );
+                    if *running {
+                        content
+                            .push(Space::with_height(Length::Units(100)))
+                            .push(Text::new("Unavailable while running recipie").size(50))
+                            .align_items(Align::Center)
+                            .into()
+                    } else {
+                        content
+                            .push(tabs.manual.view().map(move |msg| Message::Manual(msg)))
+                            .into()
+                    }
+                }
                 TabState::Run => Column::new()
                     .push(
                         Row::new()

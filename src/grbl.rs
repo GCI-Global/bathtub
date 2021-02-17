@@ -1,12 +1,12 @@
 extern crate serial;
+use regex::Regex;
 use serial::prelude::*;
 use serial::SystemPort;
 use std::io::Write;
-use std::sync::{mpsc, Arc, Mutex};
 use std::sync::mpsc::{Receiver, SendError, Sender, TryRecvError};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use std::{str, thread};
-use regex::Regex;
 
 use chrono::prelude::*;
 use std::io::BufRead;
@@ -51,7 +51,9 @@ pub fn new() -> Grbl {
     thread::spawn(move || {
         let mut port = get_port();
         let mut grbl_response: (DateTime<Local>, String, String);
-        let r = Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)").unwrap();
+        let r =
+            Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)")
+                .unwrap();
         loop {
             let status_response = send(&mut port, "?".to_string());
             if let Some(caps) = r.captures(&status_response.2[..]) {
