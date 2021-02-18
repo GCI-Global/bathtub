@@ -94,7 +94,6 @@ pub fn new() -> Grbl {
             let mut rb = rb_c.lock().unwrap();
             while cb.len() > 0 {
                 let mut cmd = cb.pop().unwrap();
-                println!("{}", cmd.command.replace("\n", ""));
                 send(&mut port, &mut cmd);
                 rb.push(cmd)
             }

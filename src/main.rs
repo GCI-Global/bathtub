@@ -49,6 +49,7 @@ struct State {
 impl State {
     async fn run_recipie(
         grbl: Grbl,
+        current_node: Arc<Mutex<Node>>,
         recipie: Vec<Step>,
         node_map: HashMap<String, usize>,
         nodes: Nodes,
@@ -60,20 +61,19 @@ impl State {
             }
         }
         thread::sleep(Duration::from_millis(500));
-        let mut current_node =
-            nodes.node[node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();
+        let mut cn = current_node.lock().unwrap();
         for step in recipie {
             // gen paths and send
             let next_node = &nodes.node[node_map
                 .get(&format!("{}{}", step.selected_destination, "_inBath"))
                 .unwrap()
                 .clone()];
-            let node_paths = paths::gen_node_paths(&nodes, &current_node, next_node);
+            let node_paths = paths::gen_node_paths(&nodes, &cn, next_node);
             let gcode_paths = paths::gen_gcode_paths(&node_paths);
             for gcode_path in gcode_paths {
                 grbl.push_command(Cmd::new(gcode_path));
             }
-            current_node = next_node.clone();
+            *cn = next_node.clone();
             // wait for idle
             loop {
                 if let Some(grbl_stat) = grbl.mutex_status.lock().unwrap().clone() {
@@ -292,6 +292,7 @@ impl Application for Bathtub {
                             .unwrap()
                             .clone()];
                         let mut cn = state.current_node.lock().unwrap();
+                        println!("{}", cn.name);
                         let node_paths = paths::gen_node_paths(&state.nodes, &cn, next_node);
                         let gcode_paths = paths::gen_gcode_paths(&node_paths);
                         // send gcode
@@ -309,6 +310,7 @@ impl Application for Bathtub {
                             command = Command::perform(
                                 State::run_recipie(
                                     state.grbl.clone(),
+                                    Arc::clone(&state.current_node),
                                     state.tabs.run.steps.clone(),
                                     state.node_map.clone(),
                                     state.nodes.clone(),
