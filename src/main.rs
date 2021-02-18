@@ -59,6 +59,7 @@ impl State {
                 grbl.push_command(Cmd::new("$H".to_string()));
             }
         }
+        thread::sleep(Duration::from_millis(500));
         let mut current_node =
             nodes.node[node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();
         for step in recipie {
@@ -69,7 +70,9 @@ impl State {
                 .clone()];
             let node_paths = paths::gen_node_paths(&nodes, &current_node, next_node);
             let gcode_paths = paths::gen_gcode_paths(&node_paths);
-            for gcode_path in gcode_paths {}
+            for gcode_path in gcode_paths {
+                grbl.push_command(Cmd::new(gcode_path));
+            }
             current_node = next_node.clone();
             // wait for idle
             loop {
