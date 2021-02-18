@@ -877,7 +877,7 @@ impl std::fmt::Display for Baths {
             f,
             "{}",
             match self {
-                Baths::Mcl16 => "MCL-16",
+                Baths::Mcl16 => "MCL_16",
                 Baths::HNO3 => "HNO₃",
                 Baths::Zn => "Zn",
                 Baths::HF => "HF",

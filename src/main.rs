@@ -6,17 +6,21 @@ mod nodes;
 mod paths;
 mod run;
 use build::{Build, BuildMessage};
-use grbl::Grbl;
+use grbl::{Command as Cmd, Grbl, Status};
 use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
-use run::{Run, RunMessage};
-use std::collections::HashMap;
-use std::fs;
 use regex::Regex;
+use run::Step;
+use run::{Run, RunMessage};
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
+use std::{fs, thread};
 
 use iced::{
-    button, time, Application, Button, Column, Command, Container, Element, Font,
-    HorizontalAlignment, Length, Row, Settings, Subscription, Text,
+    button, time, Align, Application, Button, Column, Command, Container, Element, Font,
+    HorizontalAlignment, Length, Row, Settings, Space, Subscription, Text,
 };
 
 pub fn main() -> iced::Result {
@@ -34,10 +38,103 @@ struct State {
     tabs: Tabs,
     nodes: Nodes,
     node_map: HashMap<String, usize>,
-    current_node: Node,
+    current_node: Arc<Mutex<Node>>,
     grbl: Grbl,
     connected: bool,
+    running: bool,
     recipie_regex: Regex,
+    grbl_status: Option<Arc<Mutex<Option<Status>>>>,
+}
+
+impl State {
+    async fn run_recipie(
+        grbl: Grbl,
+        recipie: Vec<Step>,
+        node_map: HashMap<String, usize>,
+        nodes: Nodes,
+        actions: Actions,
+    ) -> Result<(), ()> {
+        if let Some(s) = grbl.get_status() {
+            if s.status == "Alarm".to_string() {
+                grbl.push_command(Cmd::new("$H".to_string()));
+            }
+        }
+        let mut current_node =
+            nodes.node[node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();
+        for step in recipie {
+            // gen paths and send
+            let next_node = &nodes.node[node_map
+                .get(&format!("{}{}", step.selected_destination, "_inBath"))
+                .unwrap()
+                .clone()];
+            let node_paths = paths::gen_node_paths(&nodes, &current_node, next_node);
+            let gcode_paths = paths::gen_gcode_paths(&node_paths);
+            for gcode_path in gcode_paths {}
+            current_node = next_node.clone();
+            // wait for idle
+            loop {
+                if let Some(grbl_stat) = grbl.mutex_status.lock().unwrap().clone() {
+                    //println!("{} | Current: ({}, {}, {}) | Next ({}, {}, {})", grbl_stat.status, grbl_stat.x, grbl_stat.y, grbl_stat.z, next_node.x, next_node.y, next_node.z);
+                    if grbl_stat.x == next_node.x
+                        && grbl_stat.y == next_node.y
+                        && grbl_stat.z == next_node.z
+                    {
+                        break;
+                    }
+                }
+            }
+            let (tx, rx) = mpsc::channel();
+            let step_c = step.clone();
+            thread::spawn(move || {
+                let seconds = step_c.hours_value.clone().parse::<u64>().unwrap_or(0) * 3600
+                    + step_c.mins_value.parse::<u64>().unwrap_or(0) * 60
+                    + step_c.secs_value.parse::<u64>().unwrap_or(0);
+                thread::sleep(Duration::from_secs(seconds));
+                tx.send("Stop").unwrap();
+            });
+            // send action steps
+            let mut contains_wait = false;
+            let mut action_map = HashMap::new();
+            for action in actions.action.clone() {
+                action_map.insert(action.name, action.commands);
+            }
+            let action_commands = action_map.get(&step.selected_action).unwrap();
+            let last_action_command = action_commands.last().unwrap();
+            for command in action_commands {
+                if command != &"WAIT".to_string() {
+                    grbl.push_command(Cmd::new(command.clone()));
+                } else {
+                    contains_wait = true
+                }
+            }
+            loop {
+                if rx.try_recv() == Ok("Stop") {
+                    grbl.push_command(Cmd::new("\u{85}".to_string()));
+                    break;
+                } else if !contains_wait {
+                    for response in grbl.clear_responses() {
+                        if response.command == *last_action_command {
+                            for command in action_commands {
+                                grbl.push_command(Cmd::new(command.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct Actions {
+    action: Vec<Action>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct Action {
+    name: String,
+    commands: Vec<String>,
 }
 
 struct Tabs {
@@ -73,6 +170,7 @@ enum Message {
     ManualTab,
     BuildTab,
     RunTab,
+    RecipieDone(Result<(), ()>),
     Manual(ManualMessage),
     Build(BuildMessage),
     Run(RunMessage),
@@ -111,6 +209,7 @@ impl Application for Bathtub {
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
+        let mut command = Command::none(); // setup to allow nested match statements to return different command
         match self {
             Bathtub::Loading => {
                 match message {
@@ -128,11 +227,16 @@ impl Application for Bathtub {
                             },
                             nodes: state.nodes.clone(),
                             node_map: state.node_map.clone(),
-                            current_node: state.nodes.node
-                                [state.node_map.get(&"MCL_16".to_string()).unwrap().clone()]
+                            current_node: Arc::new(Mutex::new(
+                                state.nodes.node
+                                    [state.node_map.get(&"MCL_16".to_string()).unwrap().clone()]
+                                .clone(),
+                            ))
                             .clone(),
                             connected: false,
+                            running: false,
                             grbl: grbl::new(),
+                            grbl_status: None,
                             recipie_regex: Regex::new(r"^[^.]+").unwrap(),
                         });
                     }
@@ -150,7 +254,6 @@ impl Application for Bathtub {
                     Message::ManualTab => state.state = TabState::Manual,
                     Message::BuildTab => state.state = TabState::Build,
                     Message::RunTab => {
-                        //println!("recipies: {:?}", fs::read_dir("./recipies").unwrap().fold(Vec::new(), |mut recipies, file| {recipies.push(file.unwrap().file_name()); recipies}));
                         state.tabs.run.search = fs::read_dir("./recipies").unwrap().fold(
                             Vec::new(),
                             |mut rec, file| {
@@ -170,11 +273,11 @@ impl Application for Bathtub {
                         if !state.connected {
                             state.tabs.manual.status =
                                 "Running Homing Cycle\nPlease wait".to_string();
-                            state.grbl.send("$H".to_string()).unwrap();
+                            state.grbl.push_command(Cmd::new("$H".to_string()));
                             state.connected = true;
                         }
+                        state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         let enter_bath: String;
-                        println!("{}", node);
                         if state.tabs.manual.in_bath {
                             enter_bath = "_inBath".to_string()
                         } else {
@@ -185,44 +288,54 @@ impl Application for Bathtub {
                             .get(&format!("{}{}", node.clone(), enter_bath))
                             .unwrap()
                             .clone()];
-                        let node_paths =
-                            paths::gen_node_paths(&state.nodes, &state.current_node, next_node);
+                        let mut cn = state.current_node.lock().unwrap();
+                        let node_paths = paths::gen_node_paths(&state.nodes, &cn, next_node);
                         let gcode_paths = paths::gen_gcode_paths(&node_paths);
                         // send gcode
                         for gcode_path in gcode_paths {
-                            state.grbl.send(gcode_path).unwrap();
+                            state.grbl.push_command(Cmd::new(gcode_path));
                         }
-                        state.current_node = next_node.clone();
+                        *cn = next_node.clone();
+                    }
+                    Message::Run(RunMessage::Run) => {
+                        // TODO: need to create + check for flag for manual movement
+                        if !state.running {
+                            let actions_toml = &fs::read_to_string("config/actions.toml")
+                                .expect("unable to open config/actions.toml");
+                            state.running = true;
+                            command = Command::perform(
+                                State::run_recipie(
+                                    state.grbl.clone(),
+                                    state.tabs.run.steps.clone(),
+                                    state.node_map.clone(),
+                                    state.nodes.clone(),
+                                    toml::from_str::<Actions>(actions_toml).unwrap(),
+                                ),
+                                Message::RecipieDone,
+                            );
+                        }
                     }
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => state.tabs.run.update(msg),
+                    Message::RecipieDone(_) => {
+                        state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
+                        state.running = false;
+                        state.connected = true;
+                    }
                     Message::Tick => {
-                        state.grbl.send("?".to_string()).unwrap();
-                        for _i in 0..3 {
-                            match state.grbl.try_recv() {
-                                Ok((_, cmd, msg)) if cmd == "?".to_string() => {
-                                    if let Some(caps) =
-                                        state.tabs.manual.status_regex.captures(&msg[..])
-                                    {
-                                        state.tabs.manual.status = format!(
-                                            "{} state at\n({:.3}, {:.3}, {:.3})",
-                                            &caps["status"],
-                                            &caps["X"].parse::<f32>().unwrap(), // convert to f32 for decimal places
-                                            &caps["Y"].parse::<f32>().unwrap(),
-                                            &caps["Z"].parse::<f32>().unwrap()
-                                        );
-                                    }
-                                }
-                                // do nothing for now. Will likely create a log of gcode commands
-                                // in future
-                                _ => (),
+                        if let Some(grbl_status) = &state.grbl_status {
+                            if let Some(grbl_stat) = grbl_status.lock().unwrap().clone() {
+                                state.tabs.manual.status = format!(
+                                    "{} state at\n({:.3}, {:.3}, {:.3})",
+                                    &grbl_stat.status, &grbl_stat.x, &grbl_stat.y, &grbl_stat.z,
+                                )
                             }
                         }
                     }
                     _ => {}
                 }
-                Command::none()
+                command
             }
         }
     }
@@ -230,9 +343,14 @@ impl Application for Bathtub {
     fn view(&mut self) -> Element<Message> {
         match self {
             Bathtub::Loading => loading_message(),
-            Bathtub::Loaded(State { state, tabs, .. }) => match state {
-                TabState::Manual => Column::new()
-                    .push(
+            Bathtub::Loaded(State {
+                state,
+                tabs,
+                running,
+                ..
+            }) => match state {
+                TabState::Manual => {
+                    let content = Column::new().push(
                         Row::new()
                             .push(
                                 Button::new(
@@ -267,9 +385,19 @@ impl Application for Bathtub {
                                 .padding(20)
                                 .on_press(Message::BuildTab),
                             ),
-                    )
-                    .push(tabs.manual.view().map(move |msg| Message::Manual(msg)))
-                    .into(),
+                    );
+                    if *running {
+                        content
+                            .push(Space::with_height(Length::Units(100)))
+                            .push(Text::new("Unavailable while running recipie").size(50))
+                            .align_items(Align::Center)
+                            .into()
+                    } else {
+                        content
+                            .push(tabs.manual.view().map(move |msg| Message::Manual(msg)))
+                            .into()
+                    }
+                }
                 TabState::Run => Column::new()
                     .push(
                         Row::new()
