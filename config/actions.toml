@@ -10,4 +10,4 @@ commands = ["WAIT"]
 
 [[action]]
 name = "Swish"
-commands = ["$J=G91 Y1 F250", "$J=G91 Y-1 F250"]
+commands = ["$J=G91 Y0.4 F250", "$J=G91 Y-0.8 F250", "$J=G91 Y0.4 F250"]

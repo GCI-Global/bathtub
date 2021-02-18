@@ -14,7 +14,7 @@
 name = "MCL_16"
 x = -1.1
 y = -1.4
-z = -10.0
+z = -10.1
 is_rinse = false
 neighbors = ["Rinse 1"]
 
@@ -22,7 +22,7 @@ neighbors = ["Rinse 1"]
 name = "HNO3"
 x = -11.2
 y = -1.4
-z = -10.0
+z = -10.4
 is_rinse = false
 neighbors = ["Rinse 2"]
 
@@ -30,7 +30,7 @@ neighbors = ["Rinse 2"]
 name = "Zn"
 x = -21.2
 y = -1.5
-z = -10.0
+z = -10.3
 is_rinse = false
 neighbors = ["Rinse 3"]
 
@@ -38,7 +38,7 @@ neighbors = ["Rinse 3"]
 name = "HF"
 x = -31.3
 y = -1.5
-z = -10.0
+z = -10.6
 is_rinse = false
 neighbors = ["Rinse 4"]
 
@@ -46,7 +46,7 @@ neighbors = ["Rinse 4"]
 name = "Ni"
 x = -41.3
 y = -1.5
-z = -10.0
+z = -10.5
 is_rinse = false
 neighbors = ["Rinse 5"]
 
@@ -54,7 +54,7 @@ neighbors = ["Rinse 5"]
 name = "Pd"
 x = -51.4
 y = -1.5
-z = -10.0
+z = -10.4
 is_rinse = false
 neighbors = ["Rinse 6"]
 
@@ -62,7 +62,7 @@ neighbors = ["Rinse 6"]
 name = "Au"
 x = -61.5
 y = -1.5
-z = -10.0
+z = -10.2
 is_rinse = false
 neighbors = ["Rinse 7"]
 
@@ -85,7 +85,7 @@ neighbors = ["HNO3", "Rinse 1", "Rinse 3"]
 [[node]]
 name = "Rinse 3"
 x = -21.1
-y = -13.4
+y = -14.3
 z = -10.0
 is_rinse = true
 neighbors = ["Zn", "Rinse 2", "Rinse 4"]
@@ -93,7 +93,7 @@ neighbors = ["Zn", "Rinse 2", "Rinse 4"]
 [[node]]
 name = "Rinse 4"
 x = -31.2
-y = -14.4
+y = -14.3
 z = -10.0
 is_rinse = true
 neighbors = ["HF", "Rinse 3", "Rinse 5"]
@@ -109,7 +109,7 @@ neighbors = ["Ni", "Rinse 4", "Rinse 6"]
 [[node]]
 name = "Rinse 6"
 x = -51.4
-y = -14.5
+y = -14.3
 z = -10.0
 is_rinse = true
 neighbors = ["Pd", "Rinse 5", "Rinse 7"]
@@ -117,7 +117,7 @@ neighbors = ["Pd", "Rinse 5", "Rinse 7"]
 [[node]]
 name = "Rinse 7"
 x = -61.5
-y = -14.5
+y = -14.3
 z = -10.0
 is_rinse = true
 neighbors = ["Au", "Rinse 6"]

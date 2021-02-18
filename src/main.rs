@@ -112,14 +112,19 @@ impl State {
             }
             loop {
                 if rx.try_recv() == Ok("Stop") {
+                    println!("len: {}", grbl.queue_len());
+                    grbl.clear_queue();
                     grbl.push_command(Cmd::new("\u{85}".to_string()));
+                    //grbl.clear_queue();
+                    //grbl.push_command(Cmd::new("~".to_string()));
                     break;
                 } else if !contains_wait {
                     for response in grbl.clear_responses() {
-                        if response.command == *last_action_command {
+                        if grbl.queue_len() < action_commands.len() && response.command == *last_action_command {
                             for command in action_commands {
                                 grbl.push_command(Cmd::new(command.clone()));
                             }
+                            println!("len after: {}", grbl.queue_len())
                         }
                     }
                 }

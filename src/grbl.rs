@@ -62,6 +62,14 @@ impl Grbl {
         *rb = Vec::new();
         rb_c
     }
+    pub fn clear_queue(&self) {
+        let mut cb = self.command_buffer.lock().unwrap();
+        *cb = Vec::new();
+    }
+    pub fn queue_len(&self) -> usize {
+        let cb = self.command_buffer.lock().unwrap();
+        cb.len()
+    }
 }
 
 // Create new thread that, locks usb serial connection + used to send+recv gcode
