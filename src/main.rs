@@ -5,6 +5,7 @@ mod manual;
 mod nodes;
 mod paths;
 mod run;
+use run::Step;
 use build::{Build, BuildMessage};
 use grbl::{Grbl, Status};
 use manual::{Manual, ManualMessage};
@@ -12,8 +13,10 @@ use nodes::{Node, NodeGrid2d, Nodes};
 use regex::Regex;
 use run::{Run, RunMessage};
 use std::collections::HashMap;
-use std::fs;
-use std::sync::{Arc, Mutex};
+use std::{fs, thread};
+use std::time::Duration;
+use std::sync::{Arc, Mutex, mpsc};
+use serde::Deserialize;
 
 use iced::{
     button, time, Align, Application, Button, Column, Command, Container, Element, Font,
@@ -41,6 +44,93 @@ struct State {
     running: bool,
     recipie_regex: Regex,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
+}
+
+impl State {
+    async fn run_recipie(recipie: Vec<Step>, node_map: HashMap<String, usize>, nodes: Nodes, actions: Actions) -> Result<(), ()> {
+        let grbl = grbl::new();
+        grbl.send("$H".to_string()).unwrap();
+        let mut current_node = nodes.node[node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();
+        for step in recipie {
+            // gen paths and send
+            println!("{}", step.selected_destination);
+            let next_node = &nodes.node[
+                node_map
+                .get(&format!("{}{}", step.selected_destination, "_inBath"))
+                .unwrap()
+                .clone()];
+            let node_paths = paths::gen_node_paths(&nodes, &current_node, next_node);
+            let gcode_paths = paths::gen_gcode_paths(&node_paths);
+            for gcode_path in gcode_paths {
+                println!("{}", gcode_path.replace("\n",""));
+                grbl.send(gcode_path).unwrap();
+                thread::sleep(Duration::from_millis(30))
+            }
+            current_node = next_node.clone();
+            // wait for idle
+            loop {
+                if let Some(grbl_stat) = grbl.mutex_status.lock().unwrap().clone() {
+                    if grbl_stat.x == next_node.x && grbl_stat.y == next_node.y && grbl_stat.z == next_node.z {break}
+                }
+            }
+            let (tx, rx) = mpsc::channel();
+            let step_c = step.clone();
+            thread::spawn(move || {
+                let seconds = step_c.hours_value.clone().parse::<u64>().unwrap_or(0) * 3600 + step_c.mins_value.parse::<u64>().unwrap_or(0) * 60 + step_c.secs_value.parse::<u64>().unwrap_or(0);
+                thread::sleep(Duration::from_secs(seconds));
+                tx.send("Stop").unwrap();
+
+            });
+            // send action steps
+            let mut action_map = HashMap::new();
+            for action in actions.action.clone() {
+                action_map.insert(action.name, action.commands);
+            }
+            for command in action_map.get(&step.selected_action).unwrap() {
+                if command != &"WAIT".to_string() {
+                    grbl.send(command.clone()).unwrap();
+                    //thread::sleep(Duration::from_millis(50));
+                }
+            }
+            loop {
+                //let mut recv = rx.try_recv();
+                //println!("{:?}", recv);
+                if rx.try_recv() == Ok("Stop") {
+                    println!("recived stop");
+                    //grbl.jog_cancel().unwrap();
+                    grbl.jog_cancel().unwrap();
+                    //grbl.send("~".to_string()).unwrap();
+                    //thread::sleep(Duration::from_millis(1000));
+                    break
+                } else { if let Ok(response) = grbl.try_recv() {
+                    if response.2 == "ok".to_string() {
+                        println!("heard ok");
+                        for command in action_map.get(&step.selected_action).unwrap() {
+                            if command != &"WAIT".to_string() {
+                                grbl.send(command.clone()).unwrap();
+                                thread::sleep(Duration::from_millis(50));
+                            }
+                        }
+                    }
+                }
+                }
+            }
+        }
+        grbl.close().unwrap();
+        thread::sleep(Duration::from_millis(1000));
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct Actions {
+    action: Vec<Action>
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct Action {
+    name: String,
+    commands: Vec<String>
 }
 
 struct Tabs {
@@ -76,6 +166,7 @@ enum Message {
     ManualTab,
     BuildTab,
     RunTab,
+    RecipieDone(Result<(), ()>),
     Manual(ManualMessage),
     Build(BuildMessage),
     Run(RunMessage),
@@ -114,6 +205,7 @@ impl Application for Bathtub {
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
+        let mut command = Command::none(); // setup to allow nested match statements to return different command
         match self {
             Bathtub::Loading => {
                 match message {
@@ -155,7 +247,6 @@ impl Application for Bathtub {
                     Message::ManualTab => state.state = TabState::Manual,
                     Message::BuildTab => state.state = TabState::Build,
                     Message::RunTab => {
-                        //println!("recipies: {:?}", fs::read_dir("./recipies").unwrap().fold(Vec::new(), |mut recipies, file| {recipies.push(file.unwrap().file_name()); recipies}));
                         state.tabs.run.search = fs::read_dir("./recipies").unwrap().fold(
                             Vec::new(),
                             |mut rec, file| {
@@ -199,25 +290,42 @@ impl Application for Bathtub {
                         }
                         state.current_node = next_node.clone();
                     }
-                    Message::Run(RunMessage::Run) => state.running = true,
+                    Message::Run(RunMessage::Run) => {
+                        // TODO: need to create + check for flag for manual movement
+                                if !state.running {
+                                    let actions_toml = &fs::read_to_string("config/actions.toml").expect("unable to open config/actions.toml");
+                                    state.running = true;
+                                    state.grbl.close();
+                                    command = Command::perform(State::run_recipie(state.tabs.run.steps.clone(), state.node_map.clone(), state.nodes.clone(), toml::from_str::<Actions>(actions_toml).unwrap()), Message::RecipieDone);
+                                }
+                    }
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => state.tabs.run.update(msg),
+                    Message::RecipieDone(_) => {
+                        state.grbl = grbl::new();
+                        state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
+                        state.tabs.manual.status = "Click any button\nto start homing cycle".to_string();
+                        state.current_node = state.nodes.node[state.node_map.get(&"MCL_16".to_string()).unwrap().clone()].clone();
+                        state.running = false;
+                        state.connected = false;
+                    }
                     Message::Tick => {
                         if let Some(grbl_status) = &state.grbl_status {
-                            let grbl_stat = grbl_status.lock().unwrap();
+                            if let Some(grbl_stat) = grbl_status.lock().unwrap().clone() {
                             state.tabs.manual.status = format!(
                                 "{} state at\n({:.3}, {:.3}, {:.3})",
-                                &grbl_stat.clone().unwrap().status,
-                                &grbl_stat.clone().unwrap().x,
-                                &grbl_stat.clone().unwrap().y,
-                                &grbl_stat.clone().unwrap().z,
+                                &grbl_stat.status,
+                                &grbl_stat.x,
+                                &grbl_stat.y,
+                                &grbl_stat.z,
                             )
+                            }
                         }
                     }
                     _ => {}
                 }
-                Command::none()
+                command
             }
         }
     }

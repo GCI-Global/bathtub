@@ -6,8 +6,8 @@
 
 [[action]]
 name = "Rest"
-command = ["WAIT"]
+commands = ["WAIT"]
 
 [[action]]
 name = "Swish"
-command = ["$J=G91 Y1 F250", "$J=G91 Y-1 F250"]
+commands = ["$J=G91 Y1 F250", "$J=G91 Y-1 F250"]

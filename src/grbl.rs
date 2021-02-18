@@ -40,6 +40,14 @@ impl Grbl {
     pub fn get_status(&self) -> Option<Status> {
         self.mutex_status.lock().unwrap().clone()
     }
+    pub fn close(&self) -> Result<(), SendError<String>> {
+        let return_value = self.sender.send("Close".to_string());
+        thread::sleep(Duration::from_millis(50));
+        return_value
+    }
+    pub fn jog_cancel(&self) -> Result<(), SendError<String>> {
+        self.sender.send("JogCancel".to_string())
+    }
 }
 
 // Create new thread that, locks usb serial connection + used to send+recv gcode
@@ -68,8 +76,12 @@ pub fn new() -> Grbl {
             }
 
             if let Ok(command) = ui_rx.try_recv() {
+                if command == "Close".to_string() { break}
                 grbl_response = send(&mut port, command);
-                ui_tx.send(grbl_response).unwrap();
+                match ui_tx.send(grbl_response) {
+                    Ok(_) => (),
+                    Err(_) => break,
+                }
             }
             thread::sleep(Duration::from_millis(40));
         }
@@ -85,12 +97,16 @@ pub fn new() -> Grbl {
 fn get_port() -> SystemPort {
     let mut try_port = serial::open("/dev/ttyUSB0");
     if try_port.is_err() {
-        let mut i = 1;
-        while try_port.is_err() && i < 10000 {
+        let mut i = 0;
+        while try_port.is_err() && i < 1000 {
             try_port = serial::open(&format!("/dev/ttyUSB{}", i));
+            //match &try_port {
+            //    Err(err) => println!("/dev/ttyUSB{} is {}", i, err),
+            //    _ => {}
+            //}
             i += 1;
         }
-        if i == 10000 {
+        if i == 1000 {
             panic!("unable to find USB port");
         }
     }
@@ -112,7 +128,13 @@ fn get_port() -> SystemPort {
 
 // used by the new() thread to send to grbl and parse response
 pub fn send(port: &mut SystemPort, gcode: String) -> (DateTime<Local>, String, String) {
-    let mut buf = format!("{}\n", gcode.clone()).as_bytes().to_owned();
+    let mut buf: Vec<u8>;
+    if gcode == "JogCancel".to_string() {
+        buf = "~".as_bytes().to_owned();
+        //buf = "0x85".as_bytes().to_owned();
+    } else {
+        buf = format!("{}\n", gcode.clone()).as_bytes().to_owned();
+    }
     port.write(&buf[..]).unwrap();
     let mut reader = BufReader::new(port);
     let mut line: String;
@@ -132,7 +154,7 @@ pub fn send(port: &mut SystemPort, gcode: String) -> (DateTime<Local>, String, S
             output.push(line.replace("\r", ""));
             return (
                 Local::now(),
-                gcode.replace("\n", "\\n"),
+                gcode.replace("\n", ""),
                 output.into_iter().fold(String::new(), |mut string, part| {
                     string.push_str(&part[..]);
                     string
