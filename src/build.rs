@@ -4,10 +4,15 @@ use iced::{
     VerticalAlignment,
 };
 use std::fs::File;
-//use std::io::prelude::*;
+use super::nodes::Nodes;
+use std::cell::RefCell;
+use std::rc::Rc;
+use super::actions::{Action, Actions};
 
 pub struct Build {
     scroll: scrollable::State,
+    nodes_ref: Rc<RefCell<Nodes>>,
+    actions_ref: Rc<RefCell<Actions>>,
     steps: Vec<Step>,
     add_step: AddStep,
     recipie_name: text_input::State,
@@ -24,14 +29,16 @@ pub enum BuildMessage {
 }
 
 impl Build {
-    pub fn new() -> Self {
+    pub fn new(nodes_ref: Rc<RefCell<Nodes>>, actions_ref: Rc<RefCell<Actions>>) -> Self {
         Build {
             scroll: scrollable::State::new(),
+            add_step: AddStep::new(1, 0, Rc::clone(&nodes_ref), Rc::clone(&actions_ref)),
+            nodes_ref,
+            actions_ref,
             recipie_name: text_input::State::new(),
             recipie_name_value: "".to_string(),
             save_button: button::State::new(),
             steps: Vec::new(),
-            add_step: AddStep::new(1, 0),
         }
     }
 
@@ -73,7 +80,7 @@ impl Build {
                         self.steps[i].step_num = Some(self.steps[i].step_num.unwrap() + 1);
                     }
                     self.steps
-                        .push(Step::new(n, self.steps.len(), Some(d), a, h, m, s));
+                        .push(Step::new(n, self.steps.len(), Rc::clone(&self.nodes_ref), Rc::clone(&self.actions_ref), Some(d), a, h, m, s));
 
                     self.steps
                         .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
@@ -103,15 +110,15 @@ impl Build {
                             "secs_value",
                         ])
                         .unwrap();
-                    for step in self.steps.clone() {
+                    for step in self.steps.iter() {
                         recipie
                             .write_record(&[
                                 step.step_num.unwrap().to_string(),
-                                format!("{}", step.selected_destination.unwrap()),
-                                format!("{}", step.selected_action.unwrap()),
-                                step.hours_value,
-                                step.mins_value,
-                                step.secs_value,
+                                format!("{}", step.selected_destination.clone().unwrap()),
+                                format!("{}", step.selected_action.clone().unwrap()),
+                                step.hours_value.clone(),
+                                step.mins_value.clone(),
+                                step.secs_value.clone(),
                             ])
                             .unwrap();
                     }
@@ -180,12 +187,14 @@ impl Build {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Step {
     step_num: Option<usize>,
     steps_len: usize,
-    selected_destination: Option<Baths>,
-    selected_action: Option<Actions>,
+    nodes_ref: Rc<RefCell<Nodes>>,
+    actions_ref: Rc<RefCell<Actions>>,
+    selected_destination: Option<String>,
+    selected_action: Option<String>,
     secs_value: String,
     mins_value: String,
     hours_value: String,
@@ -198,8 +207,8 @@ pub enum StepState {
         edit_btn: button::State,
     },
     Editing {
-        destination_state: pick_list::State<Baths>,
-        actions_state: pick_list::State<Actions>,
+        destination_state: pick_list::State<String>,
+        actions_state: pick_list::State<String>,
         step_num_state: pick_list::State<usize>,
         okay_btn: button::State,
         delete_btn: button::State,
@@ -219,8 +228,8 @@ impl Default for StepState {
 
 #[derive(Debug, Clone)]
 pub enum StepMessage {
-    NewDestination(Baths),
-    NewAction(Actions),
+    NewDestination(String),
+    NewAction(String),
     SecsChanged(String),
     MinsChanged(String),
     HoursChanged(String),
@@ -240,9 +249,10 @@ impl Step {
     fn new(
         step_num: Option<usize>,
         steps_len: usize,
-
-        selected_destination: Option<Baths>,
-        selected_action: Option<Actions>,
+        nodes_ref: Rc<RefCell<Nodes>>,
+        actions_ref: Rc<RefCell<Actions>>,
+        selected_destination: Option<String>,
+        selected_action: Option<String>,
         hours_value: String,
         mins_value: String,
         secs_value: String,
@@ -250,6 +260,8 @@ impl Step {
         Step {
             step_num,
             steps_len,
+            nodes_ref,
+            actions_ref,
             selected_destination,
             selected_action,
             secs_value,
@@ -392,8 +404,8 @@ impl Step {
                         Column::new().push(
                             PickList::new(
                                 destination_state,
-                                &Baths::ALL[..],
-                                self.selected_destination,
+                                self.nodes_ref.borrow().node.iter().filter(|n| !n.name.contains("_inBath")).fold(Vec::new(), |mut v, n| {v.push(n.name.clone()); v}),
+                                self.selected_destination.clone(),
                                 StepMessage::NewDestination,
                             )
                             .padding(10)
@@ -407,8 +419,8 @@ impl Step {
                                 .push(
                                     PickList::new(
                                         actions_state,
-                                        &Actions::ALL[..],
-                                        self.selected_action,
+                                        self.actions_ref.borrow().action.iter().fold(Vec::new(), |mut v, a| {v.push(a.name.clone()); v}),
+                                        self.selected_action.clone(),
                                         StepMessage::NewAction,
                                     )
                                     .padding(10)
@@ -481,26 +493,26 @@ impl Step {
                     self.secs_value.clone(),
                 ) {
                     (h, m, s) if h == e && m == e && s == e => {
-                        format!("{} for 0 seconds", self.selected_action.unwrap())
+                        format!("{} for 0 seconds", self.selected_action.clone().unwrap())
                     }
                     (h, m, s) if h == e && m == e => format!(
                         "{} for {} second{}",
-                        self.selected_action.unwrap(),
+                        self.selected_action.clone().unwrap(),
                         s,
                         ns(&s)
                     ),
                     (h, m, s) if h == e && s == e => format!(
                         "{} for {} minute{}",
-                        self.selected_action.unwrap(),
+                        self.selected_action.clone().unwrap(),
                         m,
                         ns(&m)
                     ),
                     (h, m, s) if m == e && s == e => {
-                        format!("{} for {} hour{}", self.selected_action.unwrap(), h, ns(&h))
+                        format!("{} for {} hour{}", self.selected_action.clone().unwrap(), h, ns(&h))
                     }
                     (h, m, s) if h == e => format!(
                         "{} for {} minute{} and {} second{}",
-                        self.selected_action.unwrap(),
+                        self.selected_action.clone().unwrap(),
                         m,
                         ns(&m),
                         s,
@@ -508,7 +520,7 @@ impl Step {
                     ),
                     (h, m, s) if m == e => format!(
                         "{} for {} hour{} and {} second{}",
-                        self.selected_action.unwrap(),
+                        self.selected_action.clone().unwrap(),
                         h,
                         ns(&h),
                         s,
@@ -516,7 +528,7 @@ impl Step {
                     ),
                     (h, m, s) if s == e => format!(
                         "{} for {} hour{} and {} minute{}",
-                        self.selected_action.unwrap(),
+                        self.selected_action.clone().unwrap(),
                         h,
                         ns(&h),
                         m,
@@ -524,7 +536,7 @@ impl Step {
                     ),
                     (h, m, s) => format!(
                         "{} for {} hour{}, {} minute{} and {} second{}",
-                        self.selected_action.unwrap(),
+                        self.selected_action.clone().unwrap(),
                         h,
                         ns(&h),
                         m,
@@ -543,7 +555,7 @@ impl Step {
                     .push(
                         // Destination
                         Column::new().push(
-                            Text::new(format!("{:?}", self.selected_destination.unwrap()))
+                            Text::new(format!("{:?}", self.selected_destination.clone().unwrap()))
                                 .width(Length::Units(120))
                                 .vertical_alignment(VerticalAlignment::Center),
                         ),
@@ -581,11 +593,13 @@ impl Step {
 pub struct AddStep {
     step_num: Option<usize>,
     steps_len: usize,
-    destination_state: pick_list::State<Baths>,
-    selected_destination: Option<Baths>,
-    actions_state: pick_list::State<Actions>,
+    nodes_ref: Rc<RefCell<Nodes>>,
+    actions_ref: Rc<RefCell<Actions>>,
+    destination_state: pick_list::State<String>,
+    selected_destination: Option<String>,
+    actions_state: pick_list::State<String>,
     step_num_state: pick_list::State<usize>,
-    selected_action: Option<Actions>,
+    selected_action: Option<String>,
     secs_input: text_input::State,
     secs_value: String,
     mins_input: text_input::State,
@@ -598,15 +612,15 @@ pub struct AddStep {
 #[derive(Debug, Clone)]
 pub enum AddStepMessage {
     Add(
-        Option<Baths>,
-        Option<Actions>,
+        Option<String>,
+        Option<String>,
         Option<usize>,
         String,
         String,
         String,
     ),
-    NewDestination(Baths),
-    NewAction(Actions),
+    NewDestination(String),
+    NewAction(String),
     SecsChanged(String),
     MinsChanged(String),
     HoursChanged(String),
@@ -620,15 +634,17 @@ pub enum AddStepMessage {
 }
 
 impl AddStep {
-    fn new(step_num: usize, steps_len: usize) -> AddStep {
+    fn new(step_num: usize, steps_len: usize, nodes_ref: Rc<RefCell<Nodes>>, actions_ref: Rc<RefCell<Actions>>) -> AddStep {
         AddStep {
             step_num: Some(step_num),
             steps_len,
+            nodes_ref,
+            actions_ref: Rc::clone(&actions_ref),
             destination_state: pick_list::State::default(),
             selected_destination: None,
             actions_state: pick_list::State::default(),
             step_num_state: pick_list::State::default(),
-            selected_action: Some(Actions::default()),
+            selected_action: actions_ref.borrow().action.first().map_or(None, |a| Some(a.name.clone())),
             secs_input: text_input::State::new(),
             secs_value: "".to_string(),
             mins_input: text_input::State::new(),
@@ -744,8 +760,8 @@ impl AddStep {
                 Column::new().push(
                     PickList::new(
                         &mut self.destination_state,
-                        &Baths::ALL[..],
-                        self.selected_destination,
+                        self.nodes_ref.borrow().node.iter().filter(|n| !n.name.contains("_inBath")).fold(Vec::new(), |mut v, n| {v.push(n.name.clone()); v}),
+                        self.selected_destination.clone(),
                         AddStepMessage::NewDestination,
                     )
                     .padding(10)
@@ -759,8 +775,8 @@ impl AddStep {
                         .push(
                             PickList::new(
                                 &mut self.actions_state,
-                                &Actions::ALL[..],
-                                self.selected_action,
+                                self.actions_ref.borrow().action.iter().fold(Vec::new(), |mut v, a| {v.push(a.name.clone()); v}),
+                                self.selected_action.clone(),
                                 AddStepMessage::NewAction,
                             )
                             .padding(10)
@@ -812,8 +828,8 @@ impl AddStep {
                                     .horizontal_alignment(HorizontalAlignment::Center),
                             )
                             .on_press(AddStepMessage::Add(
-                                self.selected_destination,
-                                self.selected_action,
+                                self.selected_destination.clone(),
+                                self.selected_action.clone(),
                                 self.step_num,
                                 self.hours_value.clone(),
                                 self.mins_value.clone(),
@@ -825,103 +841,6 @@ impl AddStep {
                 ),
             )
             .into()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Baths {
-    Mcl16,
-    HNO3,
-    Zn,
-    HF,
-    Ni,
-    Pd,
-    Au,
-    Rinse1,
-    Rinse2,
-    Rinse3,
-    Rinse4,
-    Rinse5,
-    Rinse6,
-    Rinse7,
-}
-
-impl Baths {
-    const ALL: [Baths; 14] = [
-        Baths::Mcl16,
-        Baths::HNO3,
-        Baths::Zn,
-        Baths::HF,
-        Baths::Ni,
-        Baths::Pd,
-        Baths::Au,
-        Baths::Rinse1,
-        Baths::Rinse2,
-        Baths::Rinse3,
-        Baths::Rinse4,
-        Baths::Rinse5,
-        Baths::Rinse6,
-        Baths::Rinse7,
-    ];
-}
-
-impl Default for Baths {
-    fn default() -> Baths {
-        Baths::Mcl16
-    }
-}
-
-impl std::fmt::Display for Baths {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Baths::Mcl16 => "MCL_16",
-                Baths::HNO3 => "HNO3",
-                Baths::Zn => "Zn",
-                Baths::HF => "HF",
-                Baths::Ni => "Ni",
-                Baths::Pd => "Pd",
-                Baths::Au => "Au",
-                Baths::Rinse1 => "Rinse 1",
-                Baths::Rinse2 => "Rinse 2",
-                Baths::Rinse3 => "Rinse 3",
-                Baths::Rinse4 => "Rinse 4",
-                Baths::Rinse5 => "Rinse 5",
-                Baths::Rinse6 => "Rinse 6",
-                Baths::Rinse7 => "Rinse 7",
-            }
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Actions {
-    Rest,
-    Swish,
-}
-
-impl Actions {
-    const ALL: [Actions; 2] = [Actions::Rest, Actions::Swish];
-}
-
-impl Default for Actions {
-    fn default() -> Actions {
-        Actions::Rest
-    }
-}
-
-impl std::fmt::Display for Actions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Actions::Rest => "Rest",
-                Actions::Swish => "Swish",
-            }
-        )
     }
 }
 

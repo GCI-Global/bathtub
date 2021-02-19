@@ -20,6 +20,12 @@ pub struct Node {
     pub neighbors: Vec<String>,
 }
 
+impl std::fmt::Display for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Nodes {
     pub node: Vec<Node>,

@@ -109,7 +109,6 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
                     no_match = false;
                     break;
                 } else {
-                    //distance_nodes.remove(i + 1);
                     if i == distance_nodes.len() - 2 {
                         no_match = false;
                         break;
@@ -132,6 +131,7 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
         path_nodes.node.push(node.node);
     }
     path_nodes.node.reverse();
+    path_nodes.node.remove(0);
     path_nodes
 }
 

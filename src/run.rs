@@ -20,6 +20,7 @@ pub struct Run {
 #[derive(Debug, Clone)]
 pub enum RunMessage {
     Run,
+    TabActive,
     RecipieChanged(String),
     Step,
 }
@@ -39,6 +40,7 @@ impl Run {
 
     pub fn update(&mut self, message: RunMessage) {
         match message {
+            RunMessage::TabActive => if let Some(sv) = self.search_value.clone() {self.update(RunMessage::RecipieChanged(sv))},
             RunMessage::RecipieChanged(recipie) => {
                 match File::open(format!("./recipies/{}.recipie", recipie)) {
                     Ok(file) => {
@@ -177,7 +179,7 @@ impl Step {
             .push(
                 // Destination
                 Column::new().push(
-                    Text::new(format!("{:?}", self.selected_destination))
+                    Text::new(format!("{}", self.selected_destination))
                         .width(Length::Units(120))
                         .vertical_alignment(VerticalAlignment::Center),
                 ),

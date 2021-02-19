@@ -5,18 +5,21 @@ mod manual;
 mod nodes;
 mod paths;
 mod run;
+mod actions;
 use build::{Build, BuildMessage};
 use grbl::{Command as Cmd, Grbl, Status};
 use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
+use actions::Actions;
 use regex::Regex;
 use run::Step;
 use run::{Run, RunMessage};
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use std::{fs, thread};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use iced::{
     button, time, Align, Application, Button, Column, Command, Container, Element, Font,
@@ -36,9 +39,10 @@ enum Bathtub {
 struct State {
     state: TabState,
     tabs: Tabs,
-    nodes: Nodes,
+    nodes: Rc<RefCell<Nodes>>,
     node_map: HashMap<String, usize>,
     current_node: Arc<Mutex<Node>>,
+    actions: Rc<RefCell<Actions>>,
     grbl: Grbl,
     connected: bool,
     running: bool,
@@ -54,7 +58,7 @@ impl State {
         node_map: HashMap<String, usize>,
         nodes: Nodes,
         actions: Actions,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Errors> {
         if let Some(s) = grbl.get_status() {
             if s.status == "Alarm".to_string() {
                 grbl.push_command(Cmd::new("$H".to_string()));
@@ -77,7 +81,9 @@ impl State {
             // wait for idle
             loop {
                 if let Some(grbl_stat) = grbl.mutex_status.lock().unwrap().clone() {
-                    //println!("{} | Current: ({}, {}, {}) | Next ({}, {}, {})", grbl_stat.status, grbl_stat.x, grbl_stat.y, grbl_stat.z, next_node.x, next_node.y, next_node.z);
+                    if grbl_stat.status == "Alarm".to_string() {
+                        return Err(Errors::GRBLError);
+                    }
                     if grbl_stat.x == next_node.x
                         && grbl_stat.y == next_node.y
                         && grbl_stat.z == next_node.z
@@ -112,11 +118,8 @@ impl State {
             }
             loop {
                 if rx.try_recv() == Ok("Stop") {
-                    println!("len: {}", grbl.queue_len());
                     grbl.clear_queue();
                     grbl.push_command(Cmd::new("\u{85}".to_string()));
-                    //grbl.clear_queue();
-                    //grbl.push_command(Cmd::new("~".to_string()));
                     break;
                 } else if !contains_wait {
                     for response in grbl.clear_responses() {
@@ -124,7 +127,6 @@ impl State {
                             for command in action_commands {
                                 grbl.push_command(Cmd::new(command.clone()));
                             }
-                            println!("len after: {}", grbl.queue_len())
                         }
                     }
                 }
@@ -132,17 +134,6 @@ impl State {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct Actions {
-    action: Vec<Action>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct Action {
-    name: String,
-    commands: Vec<String>,
 }
 
 struct Tabs {
@@ -166,6 +157,7 @@ struct LoadState {
     nodes: Nodes,
     node_map: HashMap<String, usize>,
     node_grid2d: NodeGrid2d,
+    actions: Actions,
 }
 
 #[derive(Debug, Clone)]
@@ -174,11 +166,16 @@ enum LoadError {
 }
 
 #[derive(Debug, Clone)]
+enum Errors {
+    GRBLError,
+}
+
+#[derive(Debug, Clone)]
 enum Message {
     ManualTab,
     BuildTab,
     RunTab,
-    RecipieDone(Result<(), ()>),
+    RecipieDone(Result<(), Errors>),
     Manual(ManualMessage),
     Build(BuildMessage),
     Run(RunMessage),
@@ -222,6 +219,8 @@ impl Application for Bathtub {
             Bathtub::Loading => {
                 match message {
                     Message::Loaded(Ok(state)) => {
+                        let ref_node = Rc::new(RefCell::new(state.nodes.clone()));
+                        let ref_actions = Rc::new(RefCell::new(state.actions));
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
@@ -230,17 +229,18 @@ impl Application for Bathtub {
                                 manual_btn: button::State::new(),
                                 run: Run::new(),
                                 run_btn: button::State::new(),
-                                build: Build::new(),
+                                build: Build::new(Rc::clone(&ref_node), Rc::clone(&ref_actions)),
                                 build_btn: button::State::new(),
                             },
-                            nodes: state.nodes.clone(),
+                            nodes: Rc::clone(&ref_node),
                             node_map: state.node_map.clone(),
                             current_node: Arc::new(Mutex::new(
                                 state.nodes.node
-                                    [state.node_map.get(&"MCL_16".to_string()).unwrap().clone()]
+                                    [state.node_map.get(&"MCL-16".to_string()).unwrap().clone()]
                                 .clone(),
                             ))
                             .clone(),
+                            actions: Rc::clone(&ref_actions),
                             connected: false,
                             running: false,
                             grbl: grbl::new(),
@@ -275,6 +275,7 @@ impl Application for Bathtub {
                             },
                         );
                         state.tabs.run.search.sort();
+                        state.tabs.run.update(RunMessage::TabActive);
                         state.state = TabState::Run
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
@@ -291,14 +292,13 @@ impl Application for Bathtub {
                         } else {
                             enter_bath = "".to_string()
                         }
-                        let next_node = &state.nodes.node[state
+                        let next_node = &state.nodes.borrow().node[state
                             .node_map
                             .get(&format!("{}{}", node.clone(), enter_bath))
                             .unwrap()
                             .clone()];
                         let mut cn = state.current_node.lock().unwrap();
-                        println!("{}", cn.name);
-                        let node_paths = paths::gen_node_paths(&state.nodes, &cn, next_node);
+                        let node_paths = paths::gen_node_paths(&state.nodes.borrow(), &cn, next_node);
                         let gcode_paths = paths::gen_gcode_paths(&node_paths);
                         // send gcode
                         for gcode_path in gcode_paths {
@@ -309,8 +309,6 @@ impl Application for Bathtub {
                     Message::Run(RunMessage::Run) => {
                         // TODO: need to create + check for flag for manual movement
                         if !state.running {
-                            let actions_toml = &fs::read_to_string("config/actions.toml")
-                                .expect("unable to open config/actions.toml");
                             state.running = true;
                             command = Command::perform(
                                 State::run_recipie(
@@ -318,8 +316,8 @@ impl Application for Bathtub {
                                     Arc::clone(&state.current_node),
                                     state.tabs.run.steps.clone(),
                                     state.node_map.clone(),
-                                    state.nodes.clone(),
-                                    toml::from_str::<Actions>(actions_toml).unwrap(),
+                                    state.nodes.borrow().clone(),
+                                    state.actions.borrow().clone(),
                                 ),
                                 Message::RecipieDone,
                             );
@@ -328,11 +326,12 @@ impl Application for Bathtub {
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => state.tabs.run.update(msg),
-                    Message::RecipieDone(_) => {
+                    Message::RecipieDone(Ok(_)) => {
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         state.running = false;
                         state.connected = true;
                     }
+                    Message::RecipieDone(Err(_err)) => {state.running = false; state.connected = false}
                     Message::Tick => {
                         if let Some(grbl_status) = &state.grbl_status {
                             if let Some(grbl_stat) = grbl_status.lock().unwrap().clone() {
@@ -492,22 +491,23 @@ impl Application for Bathtub {
 }
 
 impl LoadState {
-    fn new(nodes: Nodes, node_map: HashMap<String, usize>, node_grid2d: NodeGrid2d) -> LoadState {
+    fn new(nodes: Nodes, node_map: HashMap<String, usize>, node_grid2d: NodeGrid2d, actions: Actions) -> LoadState {
         LoadState {
             nodes,
             node_map,
             node_grid2d,
+            actions,
         }
     }
 
     // This is just a placeholder. Will eventually read data from server
     async fn load() -> Result<LoadState, LoadError> {
         let nodes = nodes::gen_nodes();
-
         Ok(LoadState::new(
             nodes.clone(),
             nodes::get_nodemap(nodes.clone()),
             NodeGrid2d::from_nodes(nodes),
+            actions::gen_actions(),
         ))
     }
 }
