@@ -4,7 +4,7 @@ use serial::prelude::*;
 use serial::SystemPort;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{str, thread};
 
 use chrono::prelude::*;
@@ -30,7 +30,7 @@ impl Command {
     pub fn new(command: String) -> Command {
         Command {
             response_time: None,
-            command,
+            command: command.replace("\n", "").replace(" ", ""),
             result: None,
         }
     }
@@ -47,6 +47,9 @@ pub struct Status {
 impl Grbl {
     pub fn push_command(&self, command: Command) {
         let mut cb = self.command_buffer.lock().unwrap();
+        if command.command == "\u{85}".to_string() {
+            *cb = Vec::new();
+        }
         cb.insert(0, command)
     }
     pub fn pop_command(&self) -> Option<Command> {
@@ -82,30 +85,34 @@ pub fn new() -> Grbl {
     let mutex_status = Arc::clone(&status);
     thread::spawn(move || {
         let mut port = get_port();
+        let mut now = Instant::now();
         let r =
             Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)")
                 .unwrap();
         loop {
-            let mut current_status = Command::new("?".to_string());
-            send(&mut port, &mut current_status);
-            if let Some(caps) = r.captures(&current_status.result.unwrap()[..]) {
-                let loc = Status {
-                    status: caps["status"].to_string(),
-                    x: caps["X"].parse::<f32>().unwrap(),
-                    y: caps["Y"].parse::<f32>().unwrap(),
-                    z: caps["Z"].parse::<f32>().unwrap(),
-                };
-                let mut lctn = status.lock().unwrap();
-                *lctn = Some(loc);
+            if now.elapsed().as_millis() >= 100 {
+                now = Instant::now();
+                let mut current_status = Command::new("?".to_string());
+                send(&mut port, &mut current_status);
+                if let Some(caps) = r.captures(&current_status.result.unwrap()[..]) {
+                    let loc = Status {
+                        status: caps["status"].to_string(),
+                        x: caps["X"].parse::<f32>().unwrap(),
+                        y: caps["Y"].parse::<f32>().unwrap(),
+                        z: caps["Z"].parse::<f32>().unwrap(),
+                    };
+                    let mut lctn = status.lock().unwrap();
+                    *lctn = Some(loc);
+                }
             }
             let mut cb = cb_c.lock().unwrap();
-            let mut rb = rb_c.lock().unwrap();
-            while cb.len() > 0 {
-                let mut cmd = cb.pop().unwrap();
+            //while cb.len() > 0 {
+            if let Some(mut cmd) = cb.pop() {
+                let mut rb = rb_c.lock().unwrap();
+                //let mut cmd = cb.pop().unwrap();
                 send(&mut port, &mut cmd);
-                rb.push(cmd)
+                rb.push(cmd);
             }
-            thread::sleep(Duration::from_millis(40));
         }
     });
     Grbl {
@@ -152,27 +159,49 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
     let mut line: String;
     let mut output: Vec<String> = Vec::new();
     buf = Vec::new();
-    loop {
-        // read until caridge return kek from grbl
-        reader.read_until(0xD, &mut buf).unwrap();
-        line = str::from_utf8(&buf).unwrap().to_string();
-        // the first reponse from grbl initializing the connection is a bit weird, it has multiple
-        // caridge returns, lockily it is the only one with a unicode 'null' char. GRBL doesnt do
-        // anything with this first command, so we can mostly ignore it.
-        if line.contains("\u{0}\r") {
-            command.response_time = Some(Local::now());
-            command.result = Some("init".to_string());
-            break;
+    if command.command == "$$".to_string() {
+        loop {
+            reader.read_until(0xD, &mut buf).unwrap();
+            line = str::from_utf8(&buf).unwrap().to_string();
+            if line.contains("$132=") {
+                output.push(line);
+                command.response_time = Some(Local::now());
+                command.result = Some(output.into_iter().fold(String::new(), |mut s, part| {
+                    s.push_str(&part[..]);
+                    s
+                }));
+                break;
+            }
+            output.push(line);
         }
-        if line.contains("\r") {
-            output.push(line.replace("\r", ""));
-            command.response_time = Some(Local::now());
-            command.result = Some(output.into_iter().fold(String::new(), |mut string, part| {
-                string.push_str(&part[..]);
-                string
-            }));
-            break;
+    } else {
+        loop {
+            // read until caridge return kek from grbl
+            match reader.read_until(0xD, &mut buf) {
+                Ok(_reader) => {
+                    line = str::from_utf8(&buf).unwrap().to_string();
+                    // the first reponse from grbl initializing the connection is a bit weird, it has multiple
+                    // caridge returns, lockily it is the only one with a unicode 'null' char. GRBL doesnt do
+                    // anything with this first command, so we can mostly ignore it.
+                    if line.contains("\u{0}\r") {
+                        command.response_time = Some(Local::now());
+                        command.result = Some("init".to_string());
+                        break;
+                    }
+                    if line.contains("\r") {
+                        output.push(line.replace("\r", ""));
+                        command.response_time = Some(Local::now());
+                        command.result =
+                            Some(output.into_iter().fold(String::new(), |mut string, part| {
+                                string.push_str(&part[..]);
+                                string
+                            }));
+                        break;
+                    }
+                    output.push(line);
+                }
+                Err(err) => println!("{:?}", err),
+            }
         }
-        output.push(line);
     }
 }
