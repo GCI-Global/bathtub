@@ -1,5 +1,6 @@
 use super::actions::{Action, Actions};
 use super::nodes::Nodes;
+use crate::CQ_MONO;
 use iced::{
     button, pick_list, scrollable, text_input, Align, Button, Column, Container, Element, Font,
     HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
@@ -597,7 +598,8 @@ impl Step {
                     .push(
                         Text::new(format!("{}", self.step_num.unwrap()))
                             .width(Length::Units(75))
-                            .horizontal_alignment(HorizontalAlignment::Center),
+                            .horizontal_alignment(HorizontalAlignment::Center)
+                            .font(CQ_MONO),
                     )
                     .push(
                         // Destination
@@ -608,6 +610,7 @@ impl Step {
                                     .as_ref()
                                     .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string())
                             ))
+                            .font(CQ_MONO)
                             .width(Length::Units(120))
                             .vertical_alignment(VerticalAlignment::Center),
                         ),
@@ -618,7 +621,8 @@ impl Step {
                             .push(
                                 Text::new(step_time_text)
                                     .vertical_alignment(VerticalAlignment::Center)
-                                    .width(Length::Units(455)),
+                                    .width(Length::Units(455))
+                                    .font(CQ_MONO),
                             )
                             .align_items(Align::Center),
                     )
@@ -628,7 +632,8 @@ impl Step {
                             edit_btn,
                             Text::new("Edit")
                                 .vertical_alignment(VerticalAlignment::Center)
-                                .horizontal_alignment(HorizontalAlignment::Center),
+                                .horizontal_alignment(HorizontalAlignment::Center)
+                                .font(CQ_MONO),
                         )
                         .padding(10)
                         .on_press(StepMessage::Edit)
@@ -900,7 +905,8 @@ impl AddStep {
                             Button::new(
                                 &mut self.add_btn,
                                 Text::new("Add Step")
-                                    .horizontal_alignment(HorizontalAlignment::Center),
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO),
                             )
                             .on_press(AddStepMessage::Add(
                                 self.selected_destination.clone(),

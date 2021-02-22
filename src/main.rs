@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
-use std::{fs, thread};
+use std::{cmp::max, fs, thread};
 
 use iced::{
     button, time, Align, Application, Button, Column, Command, Container, Element, Font,
@@ -64,10 +64,18 @@ impl State {
                 grbl.push_command(Cmd::new("$H".to_string()));
             }
         }
-        thread::sleep(Duration::from_millis(500));
+        // wait for homing to finish
+        loop {
+            if let Some(s) = grbl.get_status() {
+                if s.status == "Idle".to_string() {
+                    break;
+                }
+            }
+        }
         let mut cn = current_node.lock().unwrap();
         for step in recipie {
             // gen paths and send
+            println!("{}", step.selected_destination);
             let next_node = &nodes.node[node_map
                 .get(&format!("{}{}", step.selected_destination, "_inBath"))
                 .unwrap()
@@ -95,20 +103,29 @@ impl State {
             let (tx, rx) = mpsc::channel();
             let step_c = step.clone();
             thread::spawn(move || {
-                let seconds = step_c.hours_value.clone().parse::<u64>().unwrap_or(0) * 3600
-                    + step_c.mins_value.parse::<u64>().unwrap_or(0) * 60
-                    + step_c.secs_value.parse::<u64>().unwrap_or(0);
-                thread::sleep(Duration::from_secs(seconds));
+                let seconds = match (step_c.hours_value.clone().parse::<u64>().unwrap_or(0)
+                    * 3600000
+                    + step_c.mins_value.parse::<u64>().unwrap_or(0) * 60000
+                    + step_c.secs_value.parse::<u64>().unwrap_or(0) * 1000)
+                    .overflowing_sub(500)
+                {
+                    (n, false) => n,
+                    (_, true) => 0,
+                }; // calcualte then subtract half a second because of code delay
+                println!("{}", seconds);
+                thread::sleep(Duration::from_millis(seconds));
                 tx.send("Stop").unwrap();
+                println!("send stop");
             });
             // send action steps
+            // TODO: Hash map creation should be moved into state, not in loop
             let mut contains_wait = false;
             let mut action_map = HashMap::new();
             for action in actions.action.clone() {
                 action_map.insert(action.name, action.commands);
             }
             let action_commands = action_map.get(&step.selected_action).unwrap();
-            let last_action_command = action_commands.last().unwrap();
+            //let last_action_command = action_commands.last().unwrap();
             for command in action_commands {
                 if command != &"WAIT".to_string() {
                     grbl.push_command(Cmd::new(command.clone()));
@@ -117,18 +134,17 @@ impl State {
                 }
             }
             loop {
-                if rx.try_recv() == Ok("Stop") {
-                    grbl.clear_queue();
+                let recv = rx.try_recv();
+                //println!("{:?}", recv);
+                if recv == Ok("Stop") {
+                    println!("received stop");
                     grbl.push_command(Cmd::new("\u{85}".to_string()));
                     break;
                 } else if !contains_wait {
-                    for response in grbl.clear_responses() {
-                        if grbl.queue_len() < action_commands.len()
-                            && response.command == *last_action_command
-                        {
-                            for command in action_commands {
-                                grbl.push_command(Cmd::new(command.clone()));
-                            }
+                    grbl.clear_responses();
+                    if grbl.queue_len() < action_commands.len() {
+                        for command in action_commands {
+                            grbl.push_command(Cmd::new(command.clone()));
                         }
                     }
                 }
@@ -238,7 +254,7 @@ impl Application for Bathtub {
                             node_map: state.node_map.clone(),
                             current_node: Arc::new(Mutex::new(
                                 state.nodes.node
-                                    [state.node_map.get(&"MCL-16".to_string()).unwrap().clone()]
+                                    [state.node_map.get(&"Rinse 1".to_string()).unwrap().clone()]
                                 .clone(),
                             ))
                             .clone(),
@@ -279,6 +295,12 @@ impl Application for Bathtub {
                         state.tabs.run.search.sort();
                         state.tabs.run.update(RunMessage::TabActive);
                         state.state = TabState::Run
+                    }
+                    Message::Manual(ManualMessage::Pause) => {
+                        state.grbl.push_command(Cmd::new("\u{85}".to_string()));
+                    }
+                    Message::Manual(ManualMessage::Resume) => {
+                        state.grbl.push_command(Cmd::new("~".to_string()));
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         if !state.connected {
@@ -372,7 +394,8 @@ impl Application for Bathtub {
                                     &mut tabs.manual_btn,
                                     Text::new("Manual")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -383,7 +406,8 @@ impl Application for Bathtub {
                                     &mut tabs.run_btn,
                                     Text::new("Run")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -394,7 +418,8 @@ impl Application for Bathtub {
                                     &mut tabs.build_btn,
                                     Text::new("Build")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -404,7 +429,11 @@ impl Application for Bathtub {
                     if *running {
                         content
                             .push(Space::with_height(Length::Units(100)))
-                            .push(Text::new("Unavailable while running recipie").size(50))
+                            .push(
+                                Text::new("Unavailable while running recipie")
+                                    .size(50)
+                                    .font(CQ_MONO),
+                            )
                             .align_items(Align::Center)
                             .into()
                     } else {
@@ -421,7 +450,8 @@ impl Application for Bathtub {
                                     &mut tabs.manual_btn,
                                     Text::new("Manual")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -432,7 +462,8 @@ impl Application for Bathtub {
                                     &mut tabs.run_btn,
                                     Text::new("Run")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -443,7 +474,8 @@ impl Application for Bathtub {
                                     &mut tabs.build_btn,
                                     Text::new("Build")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -460,7 +492,8 @@ impl Application for Bathtub {
                                     &mut tabs.manual_btn,
                                     Text::new("Manual")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -471,7 +504,8 @@ impl Application for Bathtub {
                                     &mut tabs.run_btn,
                                     Text::new("Run")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -482,7 +516,8 @@ impl Application for Bathtub {
                                     &mut tabs.build_btn,
                                     Text::new("Build")
                                         .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30),
+                                        .size(30)
+                                        .font(CQ_MONO),
                                 )
                                 .width(Length::Fill)
                                 .padding(20)
@@ -535,7 +570,7 @@ fn loading_message<'a>() -> Element<'a, Message> {
     .into()
 }
 
-const MONOSPACE_TYPEWRITTER: Font = Font::External {
-    name: "MonospaceTypewritter",
-    bytes: include_bytes!("../fonts/MonospaceTypewriter.ttf"),
+const CQ_MONO: Font = Font::External {
+    name: "CQ_MONO",
+    bytes: include_bytes!("../fonts/CQ_MONO.otf"),
 };

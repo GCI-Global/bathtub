@@ -1,3 +1,4 @@
+use crate::CQ_MONO;
 use iced::{
     button, pick_list, scrollable, Align, Button, Column, Container, Element, HorizontalAlignment,
     Length, PickList, Row, Scrollable, Text, VerticalAlignment,
@@ -85,7 +86,8 @@ impl Run {
             &mut self.run_btn,
             Text::new("Run")
                 .size(30)
-                .horizontal_alignment(HorizontalAlignment::Center),
+                .horizontal_alignment(HorizontalAlignment::Center)
+                .font(CQ_MONO),
         )
         .on_press(RunMessage::Run)
         .padding(10)
@@ -178,14 +180,16 @@ impl Step {
             .push(
                 Text::new(format!("{}", self.step_num))
                     .width(Length::Units(75))
-                    .horizontal_alignment(HorizontalAlignment::Center),
+                    .horizontal_alignment(HorizontalAlignment::Center)
+                    .font(CQ_MONO),
             )
             .push(
                 // Destination
                 Column::new().push(
                     Text::new(format!("{}", self.selected_destination))
                         .width(Length::Units(120))
-                        .vertical_alignment(VerticalAlignment::Center),
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .font(CQ_MONO),
                 ),
             )
             .push(
@@ -194,7 +198,8 @@ impl Step {
                     .push(
                         Text::new(step_time_text)
                             .vertical_alignment(VerticalAlignment::Center)
-                            .width(Length::Units(455)),
+                            .width(Length::Units(455))
+                            .font(CQ_MONO),
                     )
                     .align_items(Align::Center),
             )
