@@ -114,11 +114,11 @@ impl Build {
                         recipie
                             .write_record(&[
                                 step.step_num.unwrap().to_string(),
-                                format!("{}", step.selected_destination.clone().unwrap()),
-                                format!("{}", step.selected_action.clone().unwrap()),
-                                step.hours_value.clone(),
-                                step.mins_value.clone(),
-                                step.secs_value.clone(),
+                                format!("{}", step.selected_destination.as_ref().unwrap()),
+                                format!("{}", step.selected_action.as_ref().unwrap()),
+                                (*step.hours_value).to_string(),
+                                (*step.mins_value).to_string(),
+                                (*step.secs_value).to_string(),
                             ])
                             .unwrap();
                     }
@@ -493,26 +493,26 @@ impl Step {
                     self.secs_value.clone(),
                 ) {
                     (h, m, s) if h == e && m == e && s == e => {
-                        format!("{} for 0 seconds", self.selected_action.clone().unwrap())
+                        format!("{} for 0 seconds", self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()))
                     }
                     (h, m, s) if h == e && m == e => format!(
                         "{} for {} second{}",
-                        self.selected_action.clone().unwrap(),
+                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         s,
                         ns(&s)
                     ),
                     (h, m, s) if h == e && s == e => format!(
                         "{} for {} minute{}",
-                        self.selected_action.clone().unwrap(),
+                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         m,
                         ns(&m)
                     ),
                     (h, m, s) if m == e && s == e => {
-                        format!("{} for {} hour{}", self.selected_action.clone().unwrap(), h, ns(&h))
+                        format!("{} for {} hour{}", self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()), h, ns(&h))
                     }
                     (h, m, s) if h == e => format!(
                         "{} for {} minute{} and {} second{}",
-                        self.selected_action.clone().unwrap(),
+                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         m,
                         ns(&m),
                         s,
@@ -520,7 +520,7 @@ impl Step {
                     ),
                     (h, m, s) if m == e => format!(
                         "{} for {} hour{} and {} second{}",
-                        self.selected_action.clone().unwrap(),
+                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         h,
                         ns(&h),
                         s,
@@ -528,7 +528,7 @@ impl Step {
                     ),
                     (h, m, s) if s == e => format!(
                         "{} for {} hour{} and {} minute{}",
-                        self.selected_action.clone().unwrap(),
+                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         h,
                         ns(&h),
                         m,
@@ -536,7 +536,7 @@ impl Step {
                     ),
                     (h, m, s) => format!(
                         "{} for {} hour{}, {} minute{} and {} second{}",
-                        self.selected_action.clone().unwrap(),
+                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         h,
                         ns(&h),
                         m,
@@ -555,7 +555,7 @@ impl Step {
                     .push(
                         // Destination
                         Column::new().push(
-                            Text::new(format!("{:?}", self.selected_destination.clone().unwrap()))
+                            Text::new(format!("{}", self.selected_destination.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string())))
                                 .width(Length::Units(120))
                                 .vertical_alignment(VerticalAlignment::Center),
                         ),
