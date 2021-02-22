@@ -40,7 +40,11 @@ impl Run {
 
     pub fn update(&mut self, message: RunMessage) {
         match message {
-            RunMessage::TabActive => if let Some(sv) = self.search_value.clone() {self.update(RunMessage::RecipieChanged(sv))},
+            RunMessage::TabActive => {
+                if let Some(sv) = self.search_value.clone() {
+                    self.update(RunMessage::RecipieChanged(sv))
+                }
+            }
             RunMessage::RecipieChanged(recipie) => {
                 match File::open(format!("./recipies/{}.recipie", recipie)) {
                     Ok(file) => {

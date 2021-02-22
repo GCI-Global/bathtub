@@ -1,13 +1,13 @@
+use super::actions::{Action, Actions};
+use super::nodes::Nodes;
 use iced::{
     button, pick_list, scrollable, text_input, Align, Button, Column, Container, Element, Font,
     HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
     VerticalAlignment,
 };
-use std::fs::File;
-use super::nodes::Nodes;
 use std::cell::RefCell;
+use std::fs::File;
 use std::rc::Rc;
-use super::actions::{Action, Actions};
 
 pub struct Build {
     scroll: scrollable::State,
@@ -79,8 +79,17 @@ impl Build {
                     for i in n.unwrap() - 1..self.steps.len() {
                         self.steps[i].step_num = Some(self.steps[i].step_num.unwrap() + 1);
                     }
-                    self.steps
-                        .push(Step::new(n, self.steps.len(), Rc::clone(&self.nodes_ref), Rc::clone(&self.actions_ref), Some(d), a, h, m, s));
+                    self.steps.push(Step::new(
+                        n,
+                        self.steps.len(),
+                        Rc::clone(&self.nodes_ref),
+                        Rc::clone(&self.actions_ref),
+                        Some(d),
+                        a,
+                        h,
+                        m,
+                        s,
+                    ));
 
                     self.steps
                         .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
@@ -404,7 +413,15 @@ impl Step {
                         Column::new().push(
                             PickList::new(
                                 destination_state,
-                                self.nodes_ref.borrow().node.iter().filter(|n| !n.name.contains("_inBath")).fold(Vec::new(), |mut v, n| {v.push(n.name.clone()); v}),
+                                self.nodes_ref
+                                    .borrow()
+                                    .node
+                                    .iter()
+                                    .filter(|n| !n.name.contains("_inBath"))
+                                    .fold(Vec::new(), |mut v, n| {
+                                        v.push(n.name.clone());
+                                        v
+                                    }),
                                 self.selected_destination.clone(),
                                 StepMessage::NewDestination,
                             )
@@ -419,7 +436,13 @@ impl Step {
                                 .push(
                                     PickList::new(
                                         actions_state,
-                                        self.actions_ref.borrow().action.iter().fold(Vec::new(), |mut v, a| {v.push(a.name.clone()); v}),
+                                        self.actions_ref.borrow().action.iter().fold(
+                                            Vec::new(),
+                                            |mut v, a| {
+                                                v.push(a.name.clone());
+                                                v
+                                            },
+                                        ),
                                         self.selected_action.clone(),
                                         StepMessage::NewAction,
                                     )
@@ -493,26 +516,44 @@ impl Step {
                     self.secs_value.clone(),
                 ) {
                     (h, m, s) if h == e && m == e && s == e => {
-                        format!("{} for 0 seconds", self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()))
+                        format!(
+                            "{} for 0 seconds",
+                            self.selected_action
+                                .as_ref()
+                                .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string())
+                        )
                     }
                     (h, m, s) if h == e && m == e => format!(
                         "{} for {} second{}",
-                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                        self.selected_action
+                            .as_ref()
+                            .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         s,
                         ns(&s)
                     ),
                     (h, m, s) if h == e && s == e => format!(
                         "{} for {} minute{}",
-                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                        self.selected_action
+                            .as_ref()
+                            .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         m,
                         ns(&m)
                     ),
                     (h, m, s) if m == e && s == e => {
-                        format!("{} for {} hour{}", self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()), h, ns(&h))
+                        format!(
+                            "{} for {} hour{}",
+                            self.selected_action
+                                .as_ref()
+                                .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                            h,
+                            ns(&h)
+                        )
                     }
                     (h, m, s) if h == e => format!(
                         "{} for {} minute{} and {} second{}",
-                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                        self.selected_action
+                            .as_ref()
+                            .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         m,
                         ns(&m),
                         s,
@@ -520,7 +561,9 @@ impl Step {
                     ),
                     (h, m, s) if m == e => format!(
                         "{} for {} hour{} and {} second{}",
-                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                        self.selected_action
+                            .as_ref()
+                            .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         h,
                         ns(&h),
                         s,
@@ -528,7 +571,9 @@ impl Step {
                     ),
                     (h, m, s) if s == e => format!(
                         "{} for {} hour{} and {} minute{}",
-                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                        self.selected_action
+                            .as_ref()
+                            .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         h,
                         ns(&h),
                         m,
@@ -536,7 +581,9 @@ impl Step {
                     ),
                     (h, m, s) => format!(
                         "{} for {} hour{}, {} minute{} and {} second{}",
-                        self.selected_action.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                        self.selected_action
+                            .as_ref()
+                            .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
                         h,
                         ns(&h),
                         m,
@@ -555,9 +602,14 @@ impl Step {
                     .push(
                         // Destination
                         Column::new().push(
-                            Text::new(format!("{}", self.selected_destination.as_ref().unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string())))
-                                .width(Length::Units(120))
-                                .vertical_alignment(VerticalAlignment::Center),
+                            Text::new(format!(
+                                "{}",
+                                self.selected_destination
+                                    .as_ref()
+                                    .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string())
+                            ))
+                            .width(Length::Units(120))
+                            .vertical_alignment(VerticalAlignment::Center),
                         ),
                     )
                     .push(
@@ -634,7 +686,12 @@ pub enum AddStepMessage {
 }
 
 impl AddStep {
-    fn new(step_num: usize, steps_len: usize, nodes_ref: Rc<RefCell<Nodes>>, actions_ref: Rc<RefCell<Actions>>) -> AddStep {
+    fn new(
+        step_num: usize,
+        steps_len: usize,
+        nodes_ref: Rc<RefCell<Nodes>>,
+        actions_ref: Rc<RefCell<Actions>>,
+    ) -> AddStep {
         AddStep {
             step_num: Some(step_num),
             steps_len,
@@ -644,7 +701,11 @@ impl AddStep {
             selected_destination: None,
             actions_state: pick_list::State::default(),
             step_num_state: pick_list::State::default(),
-            selected_action: actions_ref.borrow().action.first().map_or(None, |a| Some(a.name.clone())),
+            selected_action: actions_ref
+                .borrow()
+                .action
+                .first()
+                .map_or(None, |a| Some(a.name.clone())),
             secs_input: text_input::State::new(),
             secs_value: "".to_string(),
             mins_input: text_input::State::new(),
@@ -760,7 +821,15 @@ impl AddStep {
                 Column::new().push(
                     PickList::new(
                         &mut self.destination_state,
-                        self.nodes_ref.borrow().node.iter().filter(|n| !n.name.contains("_inBath")).fold(Vec::new(), |mut v, n| {v.push(n.name.clone()); v}),
+                        self.nodes_ref
+                            .borrow()
+                            .node
+                            .iter()
+                            .filter(|n| !n.name.contains("_inBath"))
+                            .fold(Vec::new(), |mut v, n| {
+                                v.push(n.name.clone());
+                                v
+                            }),
                         self.selected_destination.clone(),
                         AddStepMessage::NewDestination,
                     )
@@ -775,7 +844,13 @@ impl AddStep {
                         .push(
                             PickList::new(
                                 &mut self.actions_state,
-                                self.actions_ref.borrow().action.iter().fold(Vec::new(), |mut v, a| {v.push(a.name.clone()); v}),
+                                self.actions_ref.borrow().action.iter().fold(
+                                    Vec::new(),
+                                    |mut v, a| {
+                                        v.push(a.name.clone());
+                                        v
+                                    },
+                                ),
                                 self.selected_action.clone(),
                                 AddStepMessage::NewAction,
                             )

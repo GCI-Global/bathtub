@@ -19,6 +19,7 @@ impl std::fmt::Display for Action {
 }
 
 pub fn gen_actions() -> Actions {
-    let actions_toml = &fs::read_to_string("config/actions.toml").expect("unable to open actions.toml");
+    let actions_toml =
+        &fs::read_to_string("config/actions.toml").expect("unable to open actions.toml");
     toml::from_str::<Actions>(actions_toml).unwrap()
 }

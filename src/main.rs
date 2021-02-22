@@ -1,25 +1,25 @@
 #![feature(total_cmp)]
+mod actions;
 mod build;
 mod grbl;
 mod manual;
 mod nodes;
 mod paths;
 mod run;
-mod actions;
+use actions::Actions;
 use build::{Build, BuildMessage};
 use grbl::{Command as Cmd, Grbl, Status};
 use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
-use actions::Actions;
 use regex::Regex;
 use run::Step;
 use run::{Run, RunMessage};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use std::{fs, thread};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use iced::{
     button, time, Align, Application, Button, Column, Command, Container, Element, Font,
@@ -123,7 +123,9 @@ impl State {
                     break;
                 } else if !contains_wait {
                     for response in grbl.clear_responses() {
-                        if grbl.queue_len() < action_commands.len() && response.command == *last_action_command {
+                        if grbl.queue_len() < action_commands.len()
+                            && response.command == *last_action_command
+                        {
                             for command in action_commands {
                                 grbl.push_command(Cmd::new(command.clone()));
                             }
@@ -298,7 +300,8 @@ impl Application for Bathtub {
                             .unwrap()
                             .clone()];
                         let mut cn = state.current_node.lock().unwrap();
-                        let node_paths = paths::gen_node_paths(&state.nodes.borrow(), &cn, next_node);
+                        let node_paths =
+                            paths::gen_node_paths(&state.nodes.borrow(), &cn, next_node);
                         let gcode_paths = paths::gen_gcode_paths(&node_paths);
                         // send gcode
                         for gcode_path in gcode_paths {
@@ -331,7 +334,10 @@ impl Application for Bathtub {
                         state.running = false;
                         state.connected = true;
                     }
-                    Message::RecipieDone(Err(_err)) => {state.running = false; state.connected = false}
+                    Message::RecipieDone(Err(_err)) => {
+                        state.running = false;
+                        state.connected = false
+                    }
                     Message::Tick => {
                         if let Some(grbl_status) = &state.grbl_status {
                             if let Some(grbl_stat) = grbl_status.lock().unwrap().clone() {
@@ -491,7 +497,12 @@ impl Application for Bathtub {
 }
 
 impl LoadState {
-    fn new(nodes: Nodes, node_map: HashMap<String, usize>, node_grid2d: NodeGrid2d, actions: Actions) -> LoadState {
+    fn new(
+        nodes: Nodes,
+        node_map: HashMap<String, usize>,
+        node_grid2d: NodeGrid2d,
+        actions: Actions,
+    ) -> LoadState {
         LoadState {
             nodes,
             node_map,
