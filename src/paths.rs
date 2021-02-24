@@ -74,14 +74,9 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
         };
     }
     // Filter useless nodes
-    let final_distance = distance_nodes[current_index].distance.unwrap();
     distance_nodes.retain(|n| {
-        if let Some(nx) = n.distance {
-            if nx != final_distance || n.node.name == stop.name {
-                true
-            } else {
-                false
-            }
+        if let Some(_) = n.distance {
+            true
         } else {
             false
         }
@@ -134,6 +129,12 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
             break;
         } else {
             i += 1;
+        }
+    }
+    // filter nodes that are neighbors to start and finish, but not shortest path
+    for i in 1..distance_nodes.len() - 1 {
+        if distance_nodes[i].distance == distance_nodes[i - 1].distance {
+            distance_nodes.remove(i);
         }
     }
     // main.rs does not import nor need NodeDistance, convert back to Node
