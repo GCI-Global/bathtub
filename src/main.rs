@@ -353,7 +353,7 @@ impl Application for Bathtub {
                         state.tabs.run.update(RunMessage::TabActive);
                         state.state = TabState::Run
                     }
-                    Message::Manual(ManualMessage::Pause) => {
+                    Message::Manual(ManualMessage::Stop) => {
                         if let Some(tx) = &state.stop_tx {
                             tx.send("Stop".to_string()).unwrap_or(());
                         }
@@ -383,9 +383,6 @@ impl Application for Bathtub {
                         }
                         *nn = Vec::new();
                         //println!("pn: {:?}\ncn: {:?}\nnn: {:?}", pn, cn, nn);
-                    }
-                    Message::Manual(ManualMessage::Resume) => {
-                        state.grbl.push_command(Cmd::new("~".to_string()));
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         let (tx, rx) = mpsc::channel();
