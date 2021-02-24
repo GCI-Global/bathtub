@@ -17,29 +17,28 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
     }
 
     // Assign relevant nodes a distance from the start node
-    let mut distance_nodes: Vec<NodeDistance> = vec![];
+    println!("from {} to {}", &start.name, &stop.name);
+    println!("starts nei are {:?}", &start.neighbors);
+    let mut distance_nodes: Vec<NodeDistance> = Vec::new();
     for node in &nodes.node {
-        if node.name == start.name {
-            distance_nodes.push(NodeDistance {
-                node: node.clone(),
-                distance: Some(0),
-                visited: false,
-            })
-        } else {
-            distance_nodes.push(NodeDistance {
-                node: node.clone(),
-                distance: None,
-                visited: false,
-            })
-        }
+        distance_nodes.push(NodeDistance {
+            node: node.clone(),
+            distance: None,
+            visited: false,
+        })
     }
+    distance_nodes.push(NodeDistance {
+        node: start.clone(),
+        distance: Some(0),
+        visited: false,
+    });
     // Create map for faster node traversal
-    let mut node_map = HashMap::new();
+    let mut distance_map = HashMap::new();
     for i in 0..distance_nodes.len() {
-        node_map.insert(distance_nodes[i].node.name.clone(), i);
+        distance_map.insert(distance_nodes[i].node.name.clone(), i);
     }
     // Dijkstra's algorithm setup
-    let mut current_index = node_map[&start.name];
+    let mut current_index = distance_map[&start.name];
     let mut neighbor_index: usize;
     let mut mut_dn: &mut NodeDistance;
     let mut new_distance: u16;
@@ -50,11 +49,11 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
         new_distance = distance_nodes[current_index].distance.unwrap() + 1;
         for neighbor in distance_nodes[current_index].node.neighbors.clone() {
             // for each neighbor in current node
-            if !distance_nodes[node_map[&neighbor]].visited {
+            if !distance_nodes[distance_map[&neighbor]].visited {
                 //only add unvisited nodes
-                discovered_index.push(node_map[&neighbor]);
+                discovered_index.push(distance_map[&neighbor]);
             }
-            neighbor_index = node_map[&neighbor];
+            neighbor_index = distance_map[&neighbor];
             mut_dn = &mut distance_nodes[neighbor_index];
             match mut_dn.distance {
                 // update distance if no current distance, or new distance less than existing
@@ -75,14 +74,22 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
         };
     }
     // Filter useless nodes
+    let final_distance = distance_nodes[current_index].distance.unwrap();
     distance_nodes.retain(|n| {
-        if let Some(_) = n.distance {
-            true
+        if let Some(nx) = n.distance {
+            if nx != final_distance || n.node.name == stop.name {
+                true
+            } else {
+                false
+            }
         } else {
             false
         }
     });
     distance_nodes.sort_by(|a, b| b.distance.unwrap().cmp(&a.distance.unwrap()));
+    for node in &distance_nodes {
+        println!("{} ({})", node.node.name, node.distance.unwrap());
+    }
     let mut remove_to: usize = 0;
     // removes nodes untill final node is found
     for i in 0..distance_nodes.len() {
@@ -101,11 +108,15 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
     // neighbors to the following node, thus removing all incorrect nodes
     // that are not filtered from Dijkstra's algorithm
     let mut i = 0;
+    println!("----- distance nodes -----");
+    for node in &distance_nodes {
+        println!("{}", node.node.name);
+    }
     loop {
         let mut no_match: bool = true;
         while no_match {
-            for neighbor in distance_nodes[i].node.neighbors.clone() {
-                if neighbor == distance_nodes[i + 1].node.name {
+            for neighbor in &distance_nodes[i].node.neighbors {
+                if neighbor == &distance_nodes[i + 1].node.name {
                     no_match = false;
                     break;
                 } else {
@@ -132,6 +143,10 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
     }
     path_nodes.node.reverse();
     path_nodes.node.remove(0);
+    println!("----- final -----");
+    for node in &path_nodes.node {
+        println!("{}", &node.name);
+    }
     path_nodes
 }
 

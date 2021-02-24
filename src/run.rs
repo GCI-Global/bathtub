@@ -109,12 +109,14 @@ impl Run {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Step {
-    step_num: String,
+    pub step_num: String,
     pub selected_destination: String,
     pub selected_action: String,
     pub secs_value: String,
     pub mins_value: String,
     pub hours_value: String,
+    pub in_bath: bool,
+    pub require_input: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -123,25 +125,34 @@ pub enum StepMessage {}
 impl Step {
     fn view(&mut self) -> Element<StepMessage> {
         let e = "".to_string(); //empty
+        let eb = match self.in_bath {
+            true => "\n in bath",
+            false => "",
+        };
+        let ri = match self.require_input {
+            true => "Wait for user input then\n ",
+            false => "",
+        };
         let step_time_text = match (
             self.hours_value.clone(),
             self.mins_value.clone(),
             self.secs_value.clone(),
         ) {
             (h, m, s) if h == e && m == e && s == e => {
-                format!("{} for 0 seconds", self.selected_action)
+                format!("{}{} for 0 seconds", ri, self.selected_action)
             }
             (h, m, s) if h == e && m == e => {
-                format!("{} for {} second{}", self.selected_action, s, ns(&s))
+                format!("{}{} for {} second{}", ri, self.selected_action, s, ns(&s))
             }
             (h, m, s) if h == e && s == e => {
-                format!("{} for {} minute{}", self.selected_action, m, ns(&m))
+                format!("{}{} for {} minute{}", ri, self.selected_action, m, ns(&m))
             }
             (h, m, s) if m == e && s == e => {
-                format!("{} for {} hour{}", self.selected_action, h, ns(&h))
+                format!("{}{} for {} hour{}", ri, self.selected_action, h, ns(&h))
             }
             (h, m, s) if h == e => format!(
-                "{} for {} minute{} and {} second{}",
+                "{}{} for {} minute{} and {} second{}",
+                ri,
                 self.selected_action,
                 m,
                 ns(&m),
@@ -149,7 +160,8 @@ impl Step {
                 ns(&s)
             ),
             (h, m, s) if m == e => format!(
-                "{} for {} hour{} and {} second{}",
+                "{}{} for {} hour{} and {} second{}",
+                ri,
                 self.selected_action,
                 h,
                 ns(&h),
@@ -157,7 +169,8 @@ impl Step {
                 ns(&s)
             ),
             (h, m, s) if s == e => format!(
-                "{} for {} hour{} and {} minute{}",
+                "{}{} for {} hour{} and {} minute{}",
+                ri,
                 self.selected_action,
                 h,
                 ns(&h),
@@ -165,7 +178,8 @@ impl Step {
                 ns(&m)
             ),
             (h, m, s) => format!(
-                "{} for {} hour{}, {} minute{} and {} second{}",
+                "{}{} for {} hour{}, {} minute{} and {} second{}",
+                ri,
                 self.selected_action,
                 h,
                 ns(&h),
@@ -186,7 +200,7 @@ impl Step {
             .push(
                 // Destination
                 Column::new().push(
-                    Text::new(format!("{}", self.selected_destination))
+                    Text::new(format!("{}{}", self.selected_destination, eb))
                         .width(Length::Units(120))
                         .vertical_alignment(VerticalAlignment::Center)
                         .font(CQ_MONO),
@@ -198,9 +212,9 @@ impl Step {
                     .push(
                         Text::new(step_time_text)
                             .vertical_alignment(VerticalAlignment::Center)
-                            .width(Length::Units(455))
                             .font(CQ_MONO),
                     )
+                    .width(Length::Fill)
                     .align_items(Align::Center),
             )
             .into()
