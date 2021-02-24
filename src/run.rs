@@ -1,4 +1,4 @@
-use crate::CQ_MONO;
+use crate::{CQ_MONO, RecipieState};
 use iced::{
     button, pick_list, scrollable, Align, Button, Column, Container, Element, HorizontalAlignment,
     Length, PickList, Row, Scrollable, Text, VerticalAlignment,
@@ -14,6 +14,7 @@ pub struct Run {
     pub search: Vec<String>,
     search_state: pick_list::State<String>,
     search_value: Option<String>,
+    pub recipie_state: RecipieState,
     pub steps: Vec<Step>,
     pub active_recipie: Option<Vec<Step>>,
 }
@@ -33,9 +34,10 @@ impl Run {
             run_btn: button::State::new(),
             search: Vec::new(),
             search_state: pick_list::State::default(),
-            search_value: Some("".to_string()),
+            search_value: None,
             steps: Vec::new(),
             active_recipie: None,
+            recipie_state: RecipieState::Stopped,
         }
     }
 
@@ -72,7 +74,24 @@ impl Run {
             RunMessage::RecipieChanged,
         )
         .padding(10)
-        .width(Length::Units(400));
+        .width(Length::Units(500));
+
+        let run = match self.search_value {
+            Some(_) => { 
+            Row::new().push(
+            Button::new(
+            &mut self.run_btn,
+            Text::new("Run")
+                .size(30)
+                .horizontal_alignment(HorizontalAlignment::Center)
+                .font(CQ_MONO),
+        )
+        .on_press(RunMessage::Run)
+        .padding(10)
+        .width(Length::Units(500)))
+            }
+            None => Row::new(),
+        };
 
         let recipie: Element<_> = self
             .steps
@@ -82,22 +101,12 @@ impl Run {
             })
             .into();
 
-        let run = Button::new(
-            &mut self.run_btn,
-            Text::new("Run")
-                .size(30)
-                .horizontal_alignment(HorizontalAlignment::Center)
-                .font(CQ_MONO),
-        )
-        .on_press(RunMessage::Run)
-        .padding(10)
-        .width(Length::Units(100));
         let content = Column::new()
             .max_width(800)
             .spacing(20)
             .push(search)
-            .push(recipie)
             .push(run)
+            .push(recipie)
             .align_items(Align::Center);
 
         Scrollable::new(&mut self.scroll)

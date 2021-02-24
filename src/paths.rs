@@ -17,8 +17,8 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
     }
 
     // Assign relevant nodes a distance from the start node
-    println!("from {} to {}", &start.name, &stop.name);
-    println!("starts nei are {:?}", &start.neighbors);
+    //println!("from {} to {}", &start.name, &stop.name);
+    //println!("starts nei are {:?}", &start.neighbors);
     let mut distance_nodes: Vec<NodeDistance> = Vec::new();
     for node in &nodes.node {
         distance_nodes.push(NodeDistance {
@@ -82,9 +82,11 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
         }
     });
     distance_nodes.sort_by(|a, b| b.distance.unwrap().cmp(&a.distance.unwrap()));
+    /*
     for node in &distance_nodes {
         println!("{} ({})", node.node.name, node.distance.unwrap());
     }
+    */
     let mut remove_to: usize = 0;
     // removes nodes untill final node is found
     for i in 0..distance_nodes.len() {
@@ -103,10 +105,12 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
     // neighbors to the following node, thus removing all incorrect nodes
     // that are not filtered from Dijkstra's algorithm
     let mut i = 0;
+    /*
     println!("----- distance nodes -----");
     for node in &distance_nodes {
         println!("{}", node.node.name);
     }
+    */
     loop {
         let mut no_match: bool = true;
         while no_match {
@@ -144,10 +148,12 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
     }
     path_nodes.node.reverse();
     path_nodes.node.remove(0);
+    /*
     println!("----- final -----");
     for node in &path_nodes.node {
         println!("{}", &node.name);
     }
+    */
     path_nodes
 }
 

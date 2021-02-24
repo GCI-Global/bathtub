@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
-use std::{fs, thread};
+use std::{fs, thread, mem::discriminant};
 
 use iced::{
     button, time, Align, Application, Button, Column, Command, Container, Element, Font,
@@ -48,9 +48,9 @@ struct State {
     grbl: Grbl,
     stop_tx: Option<mpsc::Sender<String>>,
     connected: bool,
-    running: bool,
     recipie_regex: Regex,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
+    recipie_state: RecipieState,
 }
 
 impl State {
@@ -84,7 +84,8 @@ impl State {
         let px = Arc::clone(&prev_node);
         let cx = Arc::clone(&current_node);
         let nx = Arc::clone(&next_nodes);
-        thread::spawn(move || loop {
+        let (watcher_tx, watcher_rx) = mpsc::channel();
+        thread::spawn(move || while let Err(_) = watcher_rx.try_recv() {
             if let Some(grbl_stat) = gx.get_status() {
                 let mut nn = nx.lock().unwrap();
                 match nn.first() {
@@ -106,6 +107,7 @@ impl State {
         });
         for step in recipie {
             if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
+                watcher_tx.send("Stop").unwrap();
                 break;
             }
             // gen paths and send
@@ -142,6 +144,7 @@ impl State {
                 thread::sleep(Duration::from_nanos(25));
             }
             if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
+                watcher_tx.send("Stop").unwrap();
                 break;
             }
             let (tx, rx) = mpsc::channel();
@@ -167,11 +170,13 @@ impl State {
                 action_map.insert(action.name, action.commands);
             }
             if stop_received {
+                watcher_tx.send("Stop").unwrap();
                 break;
             };
             let action_commands = action_map.get(&step.selected_action).unwrap();
             for command in action_commands {
                 if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
+                watcher_tx.send("Stop").unwrap();
                     stop_received = true;
                     break;
                 }
@@ -183,6 +188,7 @@ impl State {
             }
             loop {
                 if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
+                watcher_tx.send("Stop").unwrap();
                     stop_received = true;
                     break;
                 }
@@ -194,6 +200,7 @@ impl State {
                     if grbl.queue_len() < action_commands.len() {
                         for command in action_commands {
                             if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
+                watcher_tx.send("Stop").unwrap();
                                 stop_received = true;
                                 break;
                             }
@@ -205,6 +212,13 @@ impl State {
         }
         Ok(())
     }
+}
+
+pub enum RecipieState {
+    Stopped,
+    ManualRunning,
+    RecipieRunning,
+    RecipiePaused,
 }
 
 struct Tabs {
@@ -316,11 +330,11 @@ impl Application for Bathtub {
                             next_nodes: Arc::new(Mutex::new(Vec::new())),
                             actions: Rc::clone(&ref_actions),
                             connected: false,
-                            running: false,
                             grbl: grbl::new(),
                             stop_tx: None,
                             grbl_status: None,
                             recipie_regex: Regex::new(r"^[^.]+").unwrap(),
+                            recipie_state: RecipieState::Stopped,
                         });
                     }
                     Message::Loaded(Err(_)) => {
@@ -385,6 +399,7 @@ impl Application for Bathtub {
                         //println!("pn: {:?}\ncn: {:?}\nnn: {:?}", pn, cn, nn);
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
+                        state.recipie_state = RecipieState::ManualRunning;
                         let (tx, rx) = mpsc::channel();
                         state.stop_tx = Some(tx);
                         state.connected = true;
@@ -409,13 +424,12 @@ impl Application for Bathtub {
                                 state.nodes.borrow().clone(),
                                 state.actions.borrow().clone(),
                             ),
-                            Message::ManualDone,
+                            Message::RecipieDone,
                         )
                     }
                     Message::Run(RunMessage::Run) => {
-                        // TODO: need to create + check for flag for manual movement
-                        if !state.running {
-                            state.running = true;
+                        if discriminant(&state.recipie_state) == discriminant(&RecipieState::Stopped) {
+                            state.recipie_state = RecipieState::RecipieRunning;
                             let (tx, rx) = mpsc::channel();
                             state.stop_tx = Some(tx);
                             command = Command::perform(
@@ -439,11 +453,11 @@ impl Application for Bathtub {
                     Message::Run(msg) => state.tabs.run.update(msg),
                     Message::RecipieDone(Ok(_)) => {
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
-                        state.running = false;
+                        state.recipie_state = RecipieState::Stopped;
                         state.connected = true;
                     }
                     Message::RecipieDone(Err(_err)) => {
-                        state.running = false;
+                        state.recipie_state = RecipieState::Stopped;
                         state.connected = false
                     }
                     Message::Tick => {
@@ -468,7 +482,7 @@ impl Application for Bathtub {
             Bathtub::Loaded(State {
                 state,
                 tabs,
-                running,
+                recipie_state,
                 ..
             }) => match state {
                 TabState::Manual => {
@@ -511,7 +525,7 @@ impl Application for Bathtub {
                                 .on_press(Message::BuildTab),
                             ),
                     );
-                    if *running {
+                    if discriminant(recipie_state) == discriminant(&RecipieState::RecipieRunning) {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
@@ -527,7 +541,7 @@ impl Application for Bathtub {
                             .into()
                     }
                 }
-                TabState::Run => Column::new()
+                TabState::Run => {let content = Column::new()
                     .push(
                         Row::new()
                             .push(
@@ -566,9 +580,23 @@ impl Application for Bathtub {
                                 .padding(20)
                                 .on_press(Message::BuildTab),
                             ),
-                    )
-                    .push(tabs.run.view().map(move |msg| Message::Run(msg)))
-                    .into(),
+                    );
+                    if discriminant(recipie_state) == discriminant(&RecipieState::ManualRunning) {
+                        content
+                            .push(Space::with_height(Length::Units(100)))
+                            .push(
+                                Text::new("Unavailable while Manual control is active")
+                                    .size(50)
+                                    .font(CQ_MONO),
+                            )
+                            .align_items(Align::Center)
+                            .into()
+                    } else {
+                        content
+                            .push(tabs.run.view().map(move |msg| Message::Run(msg)))
+                            .into()
+                    }
+                }
                 TabState::Build => Column::new()
                     .push(
                         Row::new()
