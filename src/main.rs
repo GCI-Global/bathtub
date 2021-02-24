@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
-use std::{fs, thread, mem::discriminant};
+use std::{fs, mem::discriminant, thread};
 
 use iced::{
     button, time, Align, Application, Button, Column, Command, Container, Element, Font,
@@ -85,25 +85,27 @@ impl State {
         let cx = Arc::clone(&current_node);
         let nx = Arc::clone(&next_nodes);
         let (watcher_tx, watcher_rx) = mpsc::channel();
-        thread::spawn(move || while let Err(_) = watcher_rx.try_recv() {
-            if let Some(grbl_stat) = gx.get_status() {
-                let mut nn = nx.lock().unwrap();
-                match nn.first() {
-                    Some(n) => {
-                        if (grbl_stat.x - n.x).abs() < 0.2
-                            && (grbl_stat.y - n.y).abs() < 0.2
-                            && (grbl_stat.z - n.z).abs() < 0.2
-                        {
-                            let mut cn = cx.lock().unwrap();
-                            let mut pn = px.lock().unwrap();
-                            *pn = Some(cn.clone());
-                            *cn = nn.remove(0);
+        thread::spawn(move || {
+            while let Err(_) = watcher_rx.try_recv() {
+                if let Some(grbl_stat) = gx.get_status() {
+                    let mut nn = nx.lock().unwrap();
+                    match nn.first() {
+                        Some(n) => {
+                            if (grbl_stat.x - n.x).abs() < 0.2
+                                && (grbl_stat.y - n.y).abs() < 0.2
+                                && (grbl_stat.z - n.z).abs() < 0.2
+                            {
+                                let mut cn = cx.lock().unwrap();
+                                let mut pn = px.lock().unwrap();
+                                *pn = Some(cn.clone());
+                                *cn = nn.remove(0);
+                            }
                         }
+                        None => {}
                     }
-                    None => {}
                 }
+                thread::sleep(Duration::from_millis(1))
             }
-            thread::sleep(Duration::from_millis(1))
         });
         for step in recipie {
             if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
@@ -176,7 +178,7 @@ impl State {
             let action_commands = action_map.get(&step.selected_action).unwrap();
             for command in action_commands {
                 if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
-                watcher_tx.send("Stop").unwrap();
+                    watcher_tx.send("Stop").unwrap();
                     stop_received = true;
                     break;
                 }
@@ -188,7 +190,7 @@ impl State {
             }
             loop {
                 if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
-                watcher_tx.send("Stop").unwrap();
+                    watcher_tx.send("Stop").unwrap();
                     stop_received = true;
                     break;
                 }
@@ -200,7 +202,7 @@ impl State {
                     if grbl.queue_len() < action_commands.len() {
                         for command in action_commands {
                             if stop_received || Ok("Stop".to_string()) == stop_rx.try_recv() {
-                watcher_tx.send("Stop").unwrap();
+                                watcher_tx.send("Stop").unwrap();
                                 stop_received = true;
                                 break;
                             }
@@ -428,7 +430,9 @@ impl Application for Bathtub {
                         )
                     }
                     Message::Run(RunMessage::Run) => {
-                        if discriminant(&state.recipie_state) == discriminant(&RecipieState::Stopped) {
+                        if discriminant(&state.recipie_state)
+                            == discriminant(&RecipieState::Stopped)
+                        {
                             state.recipie_state = RecipieState::RecipieRunning;
                             let (tx, rx) = mpsc::channel();
                             state.stop_tx = Some(tx);
@@ -541,8 +545,8 @@ impl Application for Bathtub {
                             .into()
                     }
                 }
-                TabState::Run => {let content = Column::new()
-                    .push(
+                TabState::Run => {
+                    let content = Column::new().push(
                         Row::new()
                             .push(
                                 Button::new(

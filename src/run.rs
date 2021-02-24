@@ -1,4 +1,4 @@
-use crate::{CQ_MONO, RecipieState};
+use crate::{RecipieState, CQ_MONO};
 use iced::{
     button, pick_list, scrollable, Align, Button, Column, Container, Element, HorizontalAlignment,
     Length, PickList, Row, Scrollable, Text, VerticalAlignment,
@@ -77,19 +77,18 @@ impl Run {
         .width(Length::Units(500));
 
         let run = match self.search_value {
-            Some(_) => { 
-            Row::new().push(
-            Button::new(
-            &mut self.run_btn,
-            Text::new("Run")
-                .size(30)
-                .horizontal_alignment(HorizontalAlignment::Center)
-                .font(CQ_MONO),
-        )
-        .on_press(RunMessage::Run)
-        .padding(10)
-        .width(Length::Units(500)))
-            }
+            Some(_) => Row::new().push(
+                Button::new(
+                    &mut self.run_btn,
+                    Text::new("Run")
+                        .size(30)
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .font(CQ_MONO),
+                )
+                .on_press(RunMessage::Run)
+                .padding(10)
+                .width(Length::Units(500)),
+            ),
             None => Row::new(),
         };
 
