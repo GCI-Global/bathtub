@@ -1,20 +1,24 @@
 use crate::{RecipieState, CQ_MONO};
 use iced::{
     button, pick_list, scrollable, Align, Button, Column, Container, Element, HorizontalAlignment,
-    Length, PickList, Row, Scrollable, Text, VerticalAlignment,
+    Length, PickList, Row, Scrollable, Space, Text, VerticalAlignment,
 };
 
 use super::build::ns;
 use serde::Deserialize;
 use std::fs::File;
+use std::sync::{Arc, Condvar, Mutex};
 
 pub struct Run {
     scroll: scrollable::State,
     run_btn: button::State,
+    stop_btn: button::State,
+    pause_btn: button::State,
+    resume_btn: button::State,
     pub search: Vec<String>,
     search_state: pick_list::State<String>,
     search_value: Option<String>,
-    pub recipie_state: RecipieState,
+    pub recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
     pub steps: Vec<Step>,
     pub active_recipie: Option<Vec<Step>>,
 }
@@ -22,22 +26,28 @@ pub struct Run {
 #[derive(Debug, Clone)]
 pub enum RunMessage {
     Run,
+    Stop,
+    Pause,
+    Resume,
     TabActive,
     RecipieChanged(String),
     Step,
 }
 
 impl Run {
-    pub fn new() -> Self {
+    pub fn new(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> Self {
         Run {
             scroll: scrollable::State::new(),
             run_btn: button::State::new(),
+            stop_btn: button::State::new(),
+            pause_btn: button::State::new(),
+            resume_btn: button::State::new(),
             search: Vec::new(),
             search_state: pick_list::State::default(),
             search_value: None,
             steps: Vec::new(),
             active_recipie: None,
-            recipie_state: RecipieState::Stopped,
+            recipie_state,
         }
     }
 
@@ -77,18 +87,76 @@ impl Run {
         .width(Length::Units(500));
 
         let run = match self.search_value {
-            Some(_) => Row::new().push(
-                Button::new(
-                    &mut self.run_btn,
-                    Text::new("Run")
-                        .size(30)
-                        .horizontal_alignment(HorizontalAlignment::Center)
-                        .font(CQ_MONO),
-                )
-                .on_press(RunMessage::Run)
-                .padding(10)
-                .width(Length::Units(500)),
-            ),
+            Some(_) => {
+                let (recipie_state, _) = &*self.recipie_state;
+                match *recipie_state.lock().unwrap() {
+                    RecipieState::Stopped => Row::new().push(
+                        Button::new(
+                            &mut self.run_btn,
+                            Text::new("Run")
+                                .size(30)
+                                .horizontal_alignment(HorizontalAlignment::Center)
+                                .font(CQ_MONO),
+                        )
+                        .on_press(RunMessage::Run)
+                        .padding(10)
+                        .width(Length::Units(500)),
+                    ),
+                    RecipieState::RecipieRunning => Row::new()
+                        .push(
+                            Button::new(
+                                &mut self.stop_btn,
+                                Text::new("Stop")
+                                    .size(30)
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO),
+                            )
+                            .on_press(RunMessage::Stop)
+                            .padding(10)
+                            .width(Length::Units(200)),
+                        )
+                        .push(Space::with_width(Length::Units(100)))
+                        .push(
+                            Button::new(
+                                &mut self.pause_btn,
+                                Text::new("Pause")
+                                    .size(30)
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO),
+                            )
+                            .on_press(RunMessage::Pause)
+                            .padding(10)
+                            .width(Length::Units(200)),
+                        ),
+                    RecipieState::RecipiePaused => Row::new()
+                        .push(
+                            Button::new(
+                                &mut self.stop_btn,
+                                Text::new("Stop")
+                                    .size(30)
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO),
+                            )
+                            .on_press(RunMessage::Stop)
+                            .padding(10)
+                            .width(Length::Units(200)),
+                        )
+                        .push(Space::with_width(Length::Units(100)))
+                        .push(
+                            Button::new(
+                                &mut self.resume_btn,
+                                Text::new("Resume")
+                                    .size(30)
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO),
+                            )
+                            .on_press(RunMessage::Resume)
+                            .padding(10)
+                            .width(Length::Units(200)),
+                        ),
+                    _ => Row::new(),
+                }
+            }
             None => Row::new(),
         };
 

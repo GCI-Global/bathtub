@@ -17,7 +17,7 @@ use run::{Run, RunMessage};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
 use std::{fs, mem::discriminant, thread};
 
@@ -50,7 +50,7 @@ struct State {
     connected: bool,
     recipie_regex: Regex,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
-    recipie_state: RecipieState,
+    recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
 }
 
 impl State {
@@ -216,6 +216,7 @@ impl State {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum RecipieState {
     Stopped,
     ManualRunning,
@@ -263,7 +264,6 @@ enum Message {
     BuildTab,
     RunTab,
     RecipieDone(Result<(), Errors>),
-    ManualDone(Result<(), Errors>),
     Manual(ManualMessage),
     Build(BuildMessage),
     Run(RunMessage),
@@ -309,13 +309,15 @@ impl Application for Bathtub {
                     Message::Loaded(Ok(state)) => {
                         let ref_node = Rc::new(RefCell::new(state.nodes.clone()));
                         let ref_actions = Rc::new(RefCell::new(state.actions));
+                        let recipie_state =
+                            Arc::new((Mutex::new(RecipieState::Stopped), Condvar::new()));
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
                             tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
                                 manual_btn: button::State::new(),
-                                run: Run::new(),
+                                run: Run::new(Arc::clone(&recipie_state)),
                                 run_btn: button::State::new(),
                                 build: Build::new(Rc::clone(&ref_node), Rc::clone(&ref_actions)),
                                 build_btn: button::State::new(),
@@ -336,7 +338,7 @@ impl Application for Bathtub {
                             stop_tx: None,
                             grbl_status: None,
                             recipie_regex: Regex::new(r"^[^.]+").unwrap(),
-                            recipie_state: RecipieState::Stopped,
+                            recipie_state: Arc::clone(&recipie_state),
                         });
                     }
                     Message::Loaded(Err(_)) => {
@@ -401,7 +403,9 @@ impl Application for Bathtub {
                         //println!("pn: {:?}\ncn: {:?}\nnn: {:?}", pn, cn, nn);
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
-                        state.recipie_state = RecipieState::ManualRunning;
+                        let (recipie_state, _) = &*state.recipie_state;
+                        let mut recipie_state = recipie_state.lock().unwrap();
+                        *recipie_state = RecipieState::ManualRunning;
                         let (tx, rx) = mpsc::channel();
                         state.stop_tx = Some(tx);
                         state.connected = true;
@@ -430,10 +434,18 @@ impl Application for Bathtub {
                         )
                     }
                     Message::Run(RunMessage::Run) => {
-                        if discriminant(&state.recipie_state)
-                            == discriminant(&RecipieState::Stopped)
+                        let rs: RecipieState;
                         {
-                            state.recipie_state = RecipieState::RecipieRunning;
+                            let (recipie_state, _) = &*state.recipie_state;
+                            rs = *recipie_state.lock().unwrap();
+                        }
+                        if discriminant(&rs) == discriminant(&RecipieState::Stopped) {
+                            {
+                                let (recipie_state, cvar) = &*state.recipie_state;
+                                let mut recipie_state = recipie_state.lock().unwrap();
+                                *recipie_state = RecipieState::RecipieRunning;
+                                cvar.notify_all();
+                            }
                             let (tx, rx) = mpsc::channel();
                             state.stop_tx = Some(tx);
                             command = Command::perform(
@@ -452,16 +464,44 @@ impl Application for Bathtub {
                             );
                         }
                     }
+                    Message::Run(RunMessage::Pause) => {
+                        let (recipie_state, cvar) = &*state.recipie_state;
+                        let mut recipie_state = recipie_state.lock().unwrap();
+                        *recipie_state = RecipieState::RecipiePaused;
+                        cvar.notify_all();
+                    }
+                    Message::Run(RunMessage::Resume) => {
+                        let (recipie_state, cvar) = &*state.recipie_state;
+                        let mut recipie_state = recipie_state.lock().unwrap();
+                        *recipie_state = RecipieState::RecipieRunning;
+                        cvar.notify_all();
+                    }
+                    Message::Run(RunMessage::Stop) => {
+                        let (recipie_state, cvar) = &*state.recipie_state;
+                        let mut recipie_state = recipie_state.lock().unwrap();
+                        *recipie_state = RecipieState::Stopped;
+                        cvar.notify_all();
+                    }
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => state.tabs.run.update(msg),
                     Message::RecipieDone(Ok(_)) => {
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
-                        state.recipie_state = RecipieState::Stopped;
+                        {
+                            let (recipie_state, cvar) = &*state.recipie_state;
+                            let mut recipie_state = recipie_state.lock().unwrap();
+                            *recipie_state = RecipieState::Stopped;
+                            cvar.notify_all();
+                        }
                         state.connected = true;
                     }
                     Message::RecipieDone(Err(_err)) => {
-                        state.recipie_state = RecipieState::Stopped;
+                        {
+                            let (recipie_state, cvar) = &*state.recipie_state;
+                            let mut recipie_state = recipie_state.lock().unwrap();
+                            *recipie_state = RecipieState::Stopped;
+                            cvar.notify_all();
+                        }
                         state.connected = false
                     }
                     Message::Tick => {
@@ -529,7 +569,12 @@ impl Application for Bathtub {
                                 .on_press(Message::BuildTab),
                             ),
                     );
-                    if discriminant(recipie_state) == discriminant(&RecipieState::RecipieRunning) {
+                    let rs: RecipieState;
+                    {
+                        let (recipie_state, _) = &**recipie_state;
+                        rs = *recipie_state.lock().unwrap();
+                    }
+                    if discriminant(&rs) == discriminant(&RecipieState::RecipieRunning) {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
@@ -585,7 +630,12 @@ impl Application for Bathtub {
                                 .on_press(Message::BuildTab),
                             ),
                     );
-                    if discriminant(recipie_state) == discriminant(&RecipieState::ManualRunning) {
+                    let rs: RecipieState;
+                    {
+                        let (recipie_state, _) = &**recipie_state;
+                        rs = *recipie_state.lock().unwrap();
+                    }
+                    if discriminant(&rs) == discriminant(&RecipieState::ManualRunning) {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(

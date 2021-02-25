@@ -111,6 +111,9 @@ impl Build {
                     self.scroll.scroll_to_bottom();
                     self.add_step.step_num = Some(self.steps.len() + 1);
                     self.add_step.steps_len = self.steps.len();
+                    self.add_step.hours_value = "".to_string();
+                    self.add_step.mins_value = "".to_string();
+                    self.add_step.secs_value = "".to_string();
                 }
             }
             BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
