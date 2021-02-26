@@ -77,15 +77,33 @@ impl Run {
     }
 
     pub fn view(&mut self) -> Element<RunMessage> {
-        let search = PickList::new(
-            &mut self.search_state,
-            &self.search[..],
-            self.search_value.clone(),
-            RunMessage::RecipieChanged,
-        )
-        .padding(10)
-        .width(Length::Units(500));
-
+        let search: Element<_>;
+        {
+            let (recipie_state, _) = &*self.recipie_state;
+            search = match *recipie_state.lock().unwrap() {
+                RecipieState::Stopped => Row::new()
+                    .push(
+                        PickList::new(
+                            &mut self.search_state,
+                            &self.search[..],
+                            self.search_value.clone(),
+                            RunMessage::RecipieChanged,
+                        )
+                        .padding(10)
+                        .width(Length::Units(500)),
+                    )
+                    .into(),
+                _ => Row::new()
+                    .push(
+                        Text::new(self.search_value.clone().unwrap_or("".to_string()))
+                            .horizontal_alignment(HorizontalAlignment::Center)
+                            .size(30)
+                            .font(CQ_MONO),
+                    )
+                    .padding(6)
+                    .into(),
+            }
+        }
         let run = match self.search_value {
             Some(_) => {
                 let (recipie_state, _) = &*self.recipie_state;
