@@ -193,7 +193,7 @@ impl State {
                     };
                     thread::sleep(Duration::from_millis(500));
                 }
-                tx.send("Stop").unwrap();
+                tx.send("Stop").unwrap_or(());
             });
             // send action steps
             // TODO: Hash map creation should be moved into state, not in loop
@@ -487,14 +487,13 @@ impl Application for Bathtub {
                         }
                     }
                     Message::Run(RunMessage::Pause) => {
-                        println!("pause");
                         let (recipie_state, cvar) = &*state.recipie_state;
                         let mut recipie_state = recipie_state.lock().unwrap();
                         *recipie_state = RecipieState::RecipiePaused;
                         cvar.notify_all();
+                        state.grbl.push_command(Cmd::new("\u{85}".to_string()));
                     }
                     Message::Run(RunMessage::Resume) => {
-                        println!("resume");
                         let (recipie_state, cvar) = &*state.recipie_state;
                         let mut recipie_state = recipie_state.lock().unwrap();
                         *recipie_state = RecipieState::RecipieRunning;
@@ -537,7 +536,6 @@ impl Application for Bathtub {
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => state.tabs.run.update(msg),
                     Message::RecipieDone(Ok(_)) => {
-                        println!("Recipie Done");
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         {
                             let (recipie_state, cvar) = &*state.recipie_state;
