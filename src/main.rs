@@ -89,9 +89,9 @@ impl State {
                     let mut nn = nx.lock().unwrap();
                     match nn.first() {
                         Some(n) => {
-                            if (grbl_stat.x - n.x).abs() < 0.2
-                                && (grbl_stat.y - n.y).abs() < 0.2
-                                && (grbl_stat.z - n.z).abs() < 0.2
+                            if (grbl_stat.x - n.x).abs() < 0.5
+                                && (grbl_stat.y - n.y).abs() < 0.5
+                                && (grbl_stat.z - n.z).abs() < 0.5
                             {
                                 let mut cn = cx.lock().unwrap();
                                 let mut pn = px.lock().unwrap();
@@ -106,6 +106,11 @@ impl State {
             }
         });
         for step in recipie {
+            if step.require_input {
+                let (recipie_state, _) = &*recipie_state;
+                let mut recipie_state = recipie_state.lock().unwrap();
+                *recipie_state = RecipieState::RequireInput;
+            }
             if break_and_hold(Arc::clone(&recipie_state)) {
                 break;
             }
@@ -137,8 +142,8 @@ impl State {
                 while (*next_nodes.lock().unwrap()).len() != 0 {
                     let (recipie_state, _) = &*recipie_state;
                     match *recipie_state.lock().unwrap() {
-                        RecipieState::ManualRunning => {}
-                        RecipieState::RecipieRunning => {}
+                        //RecipieState::ManualRunning => {}
+                        //RecipieState::RecipieRunning => {}
                         RecipieState::Stopped => break,
                         RecipieState::RecipiePaused => {
                             grbl.push_command(Cmd::new("\u{85}".to_string()));
@@ -162,6 +167,7 @@ impl State {
                             }
                             *nn = Vec::new();
                         }
+                        _ => {}
                     }
                 }
                 let cn = current_node.lock().unwrap();
@@ -246,6 +252,7 @@ pub enum RecipieState {
     ManualRunning,
     RecipieRunning,
     RecipiePaused,
+    RequireInput,
 }
 
 struct Tabs {
@@ -335,13 +342,23 @@ impl Application for Bathtub {
                         let ref_actions = Rc::new(RefCell::new(state.actions));
                         let recipie_state =
                             Arc::new((Mutex::new(RecipieState::Stopped), Condvar::new()));
+                        let current_node = Arc::new(Mutex::new(
+                            state.nodes.node
+                                [state.node_map.get(&"Rinse 1".to_string()).unwrap().clone()]
+                            .clone(),
+                        ));
+                        let next_nodes = Arc::new(Mutex::new(Vec::new()));
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
                             tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
                                 manual_btn: button::State::new(),
-                                run: Run::new(Arc::clone(&recipie_state)),
+                                run: Run::new(
+                                    Arc::clone(&recipie_state),
+                                    Arc::clone(&current_node),
+                                    Arc::clone(&next_nodes),
+                                ),
                                 run_btn: button::State::new(),
                                 build: Build::new(Rc::clone(&ref_node), Rc::clone(&ref_actions)),
                                 build_btn: button::State::new(),
@@ -349,13 +366,8 @@ impl Application for Bathtub {
                             nodes: Rc::clone(&ref_node),
                             node_map: state.node_map.clone(),
                             prev_node: Arc::new(Mutex::new(None)),
-                            current_node: Arc::new(Mutex::new(
-                                state.nodes.node
-                                    [state.node_map.get(&"Rinse 1".to_string()).unwrap().clone()]
-                                .clone(),
-                            ))
-                            .clone(),
-                            next_nodes: Arc::new(Mutex::new(Vec::new())),
+                            current_node: Arc::clone(&current_node),
+                            next_nodes: Arc::clone(&next_nodes),
                             actions: Rc::clone(&ref_actions),
                             connected: false,
                             grbl: grbl::new(),
@@ -470,6 +482,7 @@ impl Application for Bathtub {
                                 *recipie_state = RecipieState::RecipieRunning;
                                 cvar.notify_all();
                             }
+                            state.connected = true;
                             command = Command::perform(
                                 State::run_recipie(
                                     state.grbl.clone(),
@@ -624,7 +637,9 @@ impl Application for Bathtub {
                         let (recipie_state, _) = &**recipie_state;
                         rs = *recipie_state.lock().unwrap();
                     }
-                    if discriminant(&rs) == discriminant(&RecipieState::RecipieRunning) {
+                    if discriminant(&rs) == discriminant(&RecipieState::RecipieRunning)
+                        || discriminant(&rs) == discriminant(&RecipieState::RecipiePaused)
+                    {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
@@ -798,6 +813,7 @@ fn break_and_hold(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> bool {
             match *rs {
                 RecipieState::Stopped => stop = true,
                 RecipieState::RecipiePaused => rs = cvar.wait(rs).unwrap(),
+                RecipieState::RequireInput => rs = cvar.wait(rs).unwrap(),
                 _ => break,
             }
         }
