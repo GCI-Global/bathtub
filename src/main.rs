@@ -106,7 +106,9 @@ impl State {
             }
         });
         for step in recipie {
-            if break_and_hold(Arc::clone(&recipie_state)) {break}
+            if break_and_hold(Arc::clone(&recipie_state)) {
+                break;
+            }
             // gen paths and send
             let in_bath = match step.in_bath {
                 true => "_inBath",
@@ -133,12 +135,12 @@ impl State {
                     }
                 }
                 while (*next_nodes.lock().unwrap()).len() != 0 {
-                    let(recipie_state, _) = &*recipie_state;
+                    let (recipie_state, _) = &*recipie_state;
                     match *recipie_state.lock().unwrap() {
-                            RecipieState::ManualRunning => {},
-                            RecipieState::RecipieRunning => {},
-                            RecipieState::Stopped => break,
-                            RecipieState::RecipiePaused => {
+                        RecipieState::ManualRunning => {}
+                        RecipieState::RecipieRunning => {}
+                        RecipieState::Stopped => break,
+                        RecipieState::RecipiePaused => {
                             grbl.push_command(Cmd::new("\u{85}".to_string()));
                             let mut cn = current_node.lock().unwrap();
                             let mut nn = next_nodes.lock().unwrap();
@@ -146,14 +148,14 @@ impl State {
                                 Some(nn) => {
                                     let s = grbl.get_status().unwrap();
                                     if cn.name != "paused_node" {
-                                    *cn = Node {
-                                        name: "paused_node".to_string(),
-                                        x: s.x,
-                                        y: s.y,
-                                        z: s.z,
-                                        is_rinse: false,
-                                        neighbors: vec![cn.name.clone(), nn.name.clone()]
-                                    }
+                                        *cn = Node {
+                                            name: "paused_node".to_string(),
+                                            x: s.x,
+                                            y: s.y,
+                                            z: s.z,
+                                            is_rinse: false,
+                                            neighbors: vec![cn.name.clone(), nn.name.clone()],
+                                        }
                                     }
                                 }
                                 None => (),
@@ -164,9 +166,13 @@ impl State {
                 }
                 let cn = current_node.lock().unwrap();
                 let nn = next_nodes.lock().unwrap();
-                if cn.name != "paused_node" && nn.len() == 0 {break};
+                if cn.name != "paused_node" && nn.len() == 0 {
+                    break;
+                };
             }
-            if break_and_hold(Arc::clone(&recipie_state)) {break}
+            if break_and_hold(Arc::clone(&recipie_state)) {
+                break;
+            }
             let (tx, rx) = mpsc::channel();
             let step_c = step.clone();
             let recipie_state3 = Arc::clone(&recipie_state);
@@ -183,7 +189,7 @@ impl State {
                 while !break_and_hold(Arc::clone(&recipie_state3)) {
                     match seconds.overflowing_sub(500) {
                         (n, false) => seconds = n,
-                        (_, true) => break
+                        (_, true) => break,
                     };
                     thread::sleep(Duration::from_millis(500));
                 }
@@ -196,10 +202,14 @@ impl State {
             for action in actions.action.clone() {
                 action_map.insert(action.name, action.commands);
             }
-            if break_and_hold(Arc::clone(&recipie_state)) {break}
+            if break_and_hold(Arc::clone(&recipie_state)) {
+                break;
+            }
             let action_commands = action_map.get(&step.selected_action).unwrap();
             for command in action_commands {
-            if break_and_hold(Arc::clone(&recipie_state)) {break}
+                if break_and_hold(Arc::clone(&recipie_state)) {
+                    break;
+                }
                 if command != &"WAIT".to_string() {
                     grbl.push_command(Cmd::new(command.clone()));
                 } else {
@@ -207,7 +217,9 @@ impl State {
                 }
             }
             loop {
-            if break_and_hold(Arc::clone(&recipie_state)) {break}
+                if break_and_hold(Arc::clone(&recipie_state)) {
+                    break;
+                }
                 if rx.try_recv() == Ok("Stop") {
                     grbl.push_command(Cmd::new("\u{85}".to_string()));
                     break;
@@ -215,7 +227,9 @@ impl State {
                     grbl.clear_responses();
                     if grbl.queue_len() < action_commands.len() {
                         for command in action_commands {
-            if break_and_hold(Arc::clone(&recipie_state)) {break}
+                            if break_and_hold(Arc::clone(&recipie_state)) {
+                                break;
+                            }
                             grbl.push_command(Cmd::new(command.clone()));
                         }
                     }
@@ -778,20 +792,19 @@ fn loading_message<'a>() -> Element<'a, Message> {
 // used by grbl control threads to see if they need to stop or wait for recipie to resume
 // this function will block the thread if on pause, and return true if the thread should close
 fn break_and_hold(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> bool {
-            let mut stop = false;
-            while !stop {
-                {
-                let (recipie_state, cvar) = &*recipie_state;
-                let mut rs = recipie_state.lock().unwrap();
-                match *rs {
-                    RecipieState::Stopped => stop = true,
-                    RecipieState::RecipiePaused => rs = cvar.wait(rs).unwrap(),
-                    _ => break
-                }
-                }
+    let mut stop = false;
+    while !stop {
+        {
+            let (recipie_state, cvar) = &*recipie_state;
+            let mut rs = recipie_state.lock().unwrap();
+            match *rs {
+                RecipieState::Stopped => stop = true,
+                RecipieState::RecipiePaused => rs = cvar.wait(rs).unwrap(),
+                _ => break,
             }
-            stop
-
+        }
+    }
+    stop
 }
 
 const CQ_MONO: Font = Font::External {
