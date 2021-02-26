@@ -1,9 +1,9 @@
-use super::actions::{Action, Actions};
+use super::actions::Actions;
 use super::nodes::Nodes;
 use crate::CQ_MONO;
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Column, Container, Element, Font,
-    HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
+    button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Container, Element,
+    Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
     VerticalAlignment,
 };
 use std::cell::RefCell;
@@ -75,21 +75,32 @@ impl Build {
                     step.update(msg)
                 }
             }
-            BuildMessage::AddStepMessage(AddStepMessage::Add(d, a, n, h, m, s)) => {
-                if let Some(d) = d {
-                    for i in n.unwrap() - 1..self.steps.len() {
+            BuildMessage::AddStepMessage(AddStepMessage::Add(
+                dest,
+                inbath,
+                action,
+                nodes,
+                hours,
+                mins,
+                secs,
+                req_input,
+            )) => {
+                if let Some(d) = dest {
+                    for i in nodes.unwrap() - 1..self.steps.len() {
                         self.steps[i].step_num = Some(self.steps[i].step_num.unwrap() + 1);
                     }
                     self.steps.push(Step::new(
-                        n,
+                        nodes,
                         self.steps.len(),
                         Rc::clone(&self.nodes_ref),
                         Rc::clone(&self.actions_ref),
                         Some(d),
-                        a,
-                        h,
-                        m,
-                        s,
+                        inbath,
+                        action,
+                        hours,
+                        mins,
+                        secs,
+                        req_input,
                     ));
 
                     self.steps
@@ -100,6 +111,9 @@ impl Build {
                     self.scroll.scroll_to_bottom();
                     self.add_step.step_num = Some(self.steps.len() + 1);
                     self.add_step.steps_len = self.steps.len();
+                    self.add_step.hours_value = "".to_string();
+                    self.add_step.mins_value = "".to_string();
+                    self.add_step.secs_value = "".to_string();
                 }
             }
             BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
@@ -118,6 +132,8 @@ impl Build {
                             "hours_value",
                             "mins_value",
                             "secs_value",
+                            "in_bath",
+                            "require_input",
                         ])
                         .unwrap();
                     for step in self.steps.iter() {
@@ -129,6 +145,8 @@ impl Build {
                                 (*step.hours_value).to_string(),
                                 (*step.mins_value).to_string(),
                                 (*step.secs_value).to_string(),
+                                step.in_bath.to_string(),
+                                step.require_input.to_string(),
                             ])
                             .unwrap();
                     }
@@ -162,8 +180,12 @@ impl Build {
 
         let column_text = Row::new()
             .push(Space::with_width(Length::Units(70)))
-            .push(Text::new("Destination").width(Length::Units(125)))
-            .push(Text::new("Action").width(Length::Units(120)));
+            .push(
+                Text::new("Destination")
+                    .width(Length::Units(125))
+                    .font(CQ_MONO),
+            )
+            .push(Text::new("Action").width(Length::Units(120)).font(CQ_MONO));
 
         let add_step = Row::new().push(
             self.add_step
@@ -204,10 +226,12 @@ pub struct Step {
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
     selected_destination: Option<String>,
+    in_bath: bool,
     selected_action: Option<String>,
     secs_value: String,
     mins_value: String,
     hours_value: String,
+    require_input: bool,
     state: StepState,
 }
 
@@ -244,6 +268,8 @@ pub enum StepMessage {
     MinsChanged(String),
     HoursChanged(String),
     NewNum(usize),
+    ToggleBath(bool),
+    ToggleInput(bool),
     HoursIncrement,
     HoursDecrement,
     MinsIncrement,
@@ -262,10 +288,12 @@ impl Step {
         nodes_ref: Rc<RefCell<Nodes>>,
         actions_ref: Rc<RefCell<Actions>>,
         selected_destination: Option<String>,
+        in_bath: bool,
         selected_action: Option<String>,
         hours_value: String,
         mins_value: String,
         secs_value: String,
+        require_input: bool,
     ) -> Self {
         Step {
             step_num,
@@ -273,10 +301,12 @@ impl Step {
             nodes_ref,
             actions_ref,
             selected_destination,
+            in_bath,
             selected_action,
             secs_value,
             mins_value,
             hours_value,
+            require_input,
             state: StepState::Idle {
                 edit_btn: button::State::new(),
             },
@@ -289,6 +319,8 @@ impl Step {
                 self.selected_destination = Some(destination)
             }
             StepMessage::NewAction(action) => self.selected_action = Some(action),
+            StepMessage::ToggleBath(b) => self.in_bath = b,
+            StepMessage::ToggleInput(b) => self.require_input = b,
             StepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
                 if hours == "".to_string() {
@@ -395,122 +427,155 @@ impl Step {
                 mins_input,
                 hours_input,
             } => {
-                Row::new()
+                Column::new()
                     .push(
-                        // Step num
-                        Column::new().push(
-                            PickList::new(
-                                step_num_state,
-                                (1..self.steps_len + 1).collect::<Vec<usize>>(),
-                                self.step_num,
-                                StepMessage::NewNum,
-                            )
-                            .padding(10)
-                            .width(Length::Units(70)),
-                        ),
-                    )
-                    .push(
-                        // Destination
-                        Column::new().push(
-                            PickList::new(
-                                destination_state,
-                                self.nodes_ref
-                                    .borrow()
-                                    .node
-                                    .iter()
-                                    .filter(|n| !n.name.contains("_inBath"))
-                                    .fold(Vec::new(), |mut v, n| {
-                                        v.push(n.name.clone());
-                                        v
-                                    }),
-                                self.selected_destination.clone(),
-                                StepMessage::NewDestination,
-                            )
-                            .padding(10)
-                            .width(Length::Units(110)),
-                        ),
-                    )
-                    .push(
-                        // actions
-                        Column::new().push(
-                            Row::new()
-                                .push(
+                        Row::new()
+                            .push(
+                                // Step num
+                                Column::new().push(
                                     PickList::new(
-                                        actions_state,
-                                        self.actions_ref.borrow().action.iter().fold(
-                                            Vec::new(),
-                                            |mut v, a| {
-                                                v.push(a.name.clone());
-                                                v
-                                            },
-                                        ),
-                                        self.selected_action.clone(),
-                                        StepMessage::NewAction,
+                                        step_num_state,
+                                        (1..self.steps_len + 2).collect::<Vec<usize>>(),
+                                        self.step_num,
+                                        StepMessage::NewNum,
                                     )
                                     .padding(10)
-                                    .width(Length::Units(110)),
-                                )
-                                .push(
-                                    TextInput::new(
-                                        // hours
-                                        hours_input,
-                                        "Hours",
-                                        &self.hours_value,
-                                        StepMessage::HoursChanged,
-                                    )
-                                    .on_scroll_up(StepMessage::HoursIncrement)
-                                    .on_scroll_down(StepMessage::HoursDecrement)
-                                    .padding(10)
-                                    .width(Length::Units(100)),
-                                )
-                                .push(
-                                    (TextInput::new(
-                                        // mins
-                                        mins_input,
-                                        "Minutes",
-                                        &self.mins_value,
-                                        StepMessage::MinsChanged,
-                                    ))
-                                    .on_scroll_up(StepMessage::MinsIncrement)
-                                    .on_scroll_down(StepMessage::MinsDecrement)
-                                    .padding(10)
-                                    .width(Length::Units(100)),
-                                )
-                                .push(
-                                    TextInput::new(
-                                        // secs
-                                        secs_input,
-                                        "Seconds",
-                                        &self.secs_value,
-                                        StepMessage::SecsChanged,
-                                    )
-                                    .on_scroll_up(StepMessage::SecsIncrement)
-                                    .on_scroll_down(StepMessage::SecsDecrement)
-                                    .padding(10)
-                                    .width(Length::Units(100)),
-                                )
-                                .push(
-                                    Button::new(okay_btn, okay_icon())
-                                        .on_press(StepMessage::Okay)
-                                        .padding(10)
-                                        .width(Length::Units(50)),
-                                )
-                                .push(
-                                    Button::new(
-                                        delete_btn,
-                                        delete_icon(),
-                                        //.horizontal_alignment(HorizontalAlignment::Center),
-                                    )
-                                    .on_press(StepMessage::Delete)
-                                    .padding(10)
-                                    .width(Length::Units(50)),
+                                    .width(Length::Shrink),
                                 ),
-                        ),
+                            )
+                            .push(
+                                // Destination
+                                Column::new().push(
+                                    PickList::new(
+                                        destination_state,
+                                        self.nodes_ref
+                                            .borrow()
+                                            .node
+                                            .iter()
+                                            .filter(|n| !n.name.contains("_inBath"))
+                                            .fold(Vec::new(), |mut v, n| {
+                                                v.push(n.name.clone());
+                                                v
+                                            }),
+                                        self.selected_destination.clone(),
+                                        StepMessage::NewDestination,
+                                    )
+                                    .padding(10)
+                                    .width(Length::Shrink),
+                                ),
+                            )
+                            .push(
+                                // actions
+                                Column::new().push(
+                                    Row::new()
+                                        .push(
+                                            PickList::new(
+                                                actions_state,
+                                                self.actions_ref.borrow().action.iter().fold(
+                                                    Vec::new(),
+                                                    |mut v, a| {
+                                                        v.push(a.name.clone());
+                                                        v
+                                                    },
+                                                ),
+                                                self.selected_action.clone(),
+                                                StepMessage::NewAction,
+                                            )
+                                            .padding(10)
+                                            .width(Length::Shrink),
+                                        )
+                                        .push(
+                                            TextInput::new(
+                                                // hours
+                                                hours_input,
+                                                "Hours",
+                                                &self.hours_value,
+                                                StepMessage::HoursChanged,
+                                            )
+                                            .on_scroll_up(StepMessage::HoursIncrement)
+                                            .on_scroll_down(StepMessage::HoursDecrement)
+                                            .padding(10)
+                                            .width(Length::Fill),
+                                        )
+                                        .push(
+                                            (TextInput::new(
+                                                // mins
+                                                mins_input,
+                                                "Minutes",
+                                                &self.mins_value,
+                                                StepMessage::MinsChanged,
+                                            ))
+                                            .on_scroll_up(StepMessage::MinsIncrement)
+                                            .on_scroll_down(StepMessage::MinsDecrement)
+                                            .padding(10)
+                                            .width(Length::Fill),
+                                        )
+                                        .push(
+                                            TextInput::new(
+                                                // secs
+                                                secs_input,
+                                                "Seconds",
+                                                &self.secs_value,
+                                                StepMessage::SecsChanged,
+                                            )
+                                            .on_scroll_up(StepMessage::SecsIncrement)
+                                            .on_scroll_down(StepMessage::SecsDecrement)
+                                            .padding(10)
+                                            .width(Length::Fill),
+                                        )
+                                        .push(
+                                            Button::new(okay_btn, okay_icon())
+                                                .on_press(StepMessage::Okay)
+                                                .padding(10)
+                                                .width(Length::Units(50)),
+                                        )
+                                        .push(
+                                            Button::new(delete_btn, delete_icon())
+                                                .on_press(StepMessage::Delete)
+                                                .padding(10)
+                                                .width(Length::Units(50)),
+                                        ),
+                                ),
+                            ),
+                    )
+                    .push(
+                        Row::new()
+                            .push(Space::with_width(Length::Fill))
+                            .push(
+                                Column::new()
+                                    .push(Checkbox::new(
+                                        self.in_bath,
+                                        "Enter Bath",
+                                        StepMessage::ToggleBath,
+                                    ))
+                                    .padding(4)
+                                    .width(Length::Shrink),
+                            )
+                            .push(Space::with_width(Length::Units(25)))
+                            .push(
+                                Column::new()
+                                    .push(Checkbox::new(
+                                        self.require_input,
+                                        "Require Input",
+                                        StepMessage::ToggleInput,
+                                    ))
+                                    .padding(4)
+                                    .width(Length::Shrink),
+                            )
+                            .push(Space::with_width(Length::Fill)),
                     )
                     .into()
             }
             StepState::Idle { edit_btn } => {
                 let e = "".to_string(); //empty
+                let eb = match self.in_bath {
+                    true => "\n in bath",
+                    false => "",
+                };
+                let ri = match self.require_input {
+                    true => "Wait for user input then\n ",
+                    false => "",
+                };
                 let step_time_text = match (
                     self.hours_value.clone(),
                     self.mins_value.clone(),
@@ -518,14 +583,16 @@ impl Step {
                 ) {
                     (h, m, s) if h == e && m == e && s == e => {
                         format!(
-                            "{} for 0 seconds",
+                            "{}{} for 0 seconds",
+                            ri,
                             self.selected_action
                                 .as_ref()
                                 .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string())
                         )
                     }
                     (h, m, s) if h == e && m == e => format!(
-                        "{} for {} second{}",
+                        "{}{} for {} second{}",
+                        ri,
                         self.selected_action
                             .as_ref()
                             .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
@@ -533,7 +600,8 @@ impl Step {
                         ns(&s)
                     ),
                     (h, m, s) if h == e && s == e => format!(
-                        "{} for {} minute{}",
+                        "{}{} for {} minute{}",
+                        ri,
                         self.selected_action
                             .as_ref()
                             .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
@@ -542,7 +610,8 @@ impl Step {
                     ),
                     (h, m, s) if m == e && s == e => {
                         format!(
-                            "{} for {} hour{}",
+                            "{}{} for {} hour{}",
+                            ri,
                             self.selected_action
                                 .as_ref()
                                 .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
@@ -551,7 +620,8 @@ impl Step {
                         )
                     }
                     (h, m, s) if h == e => format!(
-                        "{} for {} minute{} and {} second{}",
+                        "{}{} for {} minute{} and {} second{}",
+                        ri,
                         self.selected_action
                             .as_ref()
                             .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
@@ -561,7 +631,8 @@ impl Step {
                         ns(&s)
                     ),
                     (h, m, s) if m == e => format!(
-                        "{} for {} hour{} and {} second{}",
+                        "{}{} for {} hour{} and {} second{}",
+                        ri,
                         self.selected_action
                             .as_ref()
                             .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
@@ -571,7 +642,8 @@ impl Step {
                         ns(&s)
                     ),
                     (h, m, s) if s == e => format!(
-                        "{} for {} hour{} and {} minute{}",
+                        "{}{} for {} hour{} and {} minute{}",
+                        ri,
                         self.selected_action
                             .as_ref()
                             .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
@@ -581,7 +653,8 @@ impl Step {
                         ns(&m)
                     ),
                     (h, m, s) => format!(
-                        "{} for {} hour{}, {} minute{} and {} second{}",
+                        "{}{} for {} hour{}, {} minute{} and {} second{}",
+                        ri,
                         self.selected_action
                             .as_ref()
                             .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
@@ -605,10 +678,11 @@ impl Step {
                         // Destination
                         Column::new().push(
                             Text::new(format!(
-                                "{}",
+                                "{}{}",
                                 self.selected_destination
                                     .as_ref()
-                                    .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string())
+                                    .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                                eb
                             ))
                             .font(CQ_MONO)
                             .width(Length::Units(120))
@@ -621,10 +695,10 @@ impl Step {
                             .push(
                                 Text::new(step_time_text)
                                     .vertical_alignment(VerticalAlignment::Center)
-                                    .width(Length::Units(455))
                                     .font(CQ_MONO),
                             )
-                            .align_items(Align::Center),
+                            .width(Length::Fill)
+                            .align_items(Align::Start),
                     )
                     .push(
                         // edit button
@@ -653,6 +727,7 @@ pub struct AddStep {
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
     destination_state: pick_list::State<String>,
+    in_bath: bool,
     selected_destination: Option<String>,
     actions_state: pick_list::State<String>,
     step_num_state: pick_list::State<usize>,
@@ -663,6 +738,7 @@ pub struct AddStep {
     mins_value: String,
     hours_input: text_input::State,
     hours_value: String,
+    require_input: bool,
     add_btn: button::State,
 }
 
@@ -670,11 +746,13 @@ pub struct AddStep {
 pub enum AddStepMessage {
     Add(
         Option<String>,
+        bool,
         Option<String>,
         Option<usize>,
         String,
         String,
         String,
+        bool,
     ),
     NewDestination(String),
     NewAction(String),
@@ -682,6 +760,8 @@ pub enum AddStepMessage {
     MinsChanged(String),
     HoursChanged(String),
     NewNum(usize),
+    ToggleBath(bool),
+    ToggleInput(bool),
     HoursIncrement,
     HoursDecrement,
     MinsIncrement,
@@ -704,6 +784,7 @@ impl AddStep {
             actions_ref: Rc::clone(&actions_ref),
             destination_state: pick_list::State::default(),
             selected_destination: None,
+            in_bath: true,
             actions_state: pick_list::State::default(),
             step_num_state: pick_list::State::default(),
             selected_action: actions_ref
@@ -717,6 +798,7 @@ impl AddStep {
             mins_value: "".to_string(),
             hours_input: text_input::State::new(),
             hours_value: "".to_string(),
+            require_input: false,
             add_btn: button::State::new(),
         }
     }
@@ -727,6 +809,8 @@ impl AddStep {
                 self.selected_destination = Some(destination)
             }
             AddStepMessage::NewAction(action) => self.selected_action = Some(action),
+            AddStepMessage::ToggleBath(b) => self.in_bath = b,
+            AddStepMessage::ToggleInput(b) => self.require_input = b,
             AddStepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
                 if hours == "".to_string() {
@@ -766,7 +850,11 @@ impl AddStep {
                     .min(59)
                     .to_string()
             }
-            AddStepMessage::Add(_, _, _, _, _, _) => {}
+            AddStepMessage::Add(_, _, _, _, _, _, _, _) => {
+                self.hours_value = "".to_string();
+                self.mins_value = "".to_string();
+                self.secs_value = "".to_string()
+            }
             AddStepMessage::HoursDecrement => {
                 if self.hours_value != 0.to_string()
                     && self.hours_value != 1.to_string()
@@ -807,119 +895,150 @@ impl AddStep {
     }
 
     fn view(&mut self) -> Element<AddStepMessage> {
-        Row::new()
+        Column::new()
             .push(
-                // Step num
-                Column::new().push(
-                    PickList::new(
-                        &mut self.step_num_state,
-                        (1..self.steps_len + 2).collect::<Vec<usize>>(),
-                        self.step_num,
-                        AddStepMessage::NewNum,
-                    )
-                    .padding(10)
-                    .width(Length::Units(70)),
-                ),
-            )
-            .push(
-                // Destination
-                Column::new().push(
-                    PickList::new(
-                        &mut self.destination_state,
-                        self.nodes_ref
-                            .borrow()
-                            .node
-                            .iter()
-                            .filter(|n| !n.name.contains("_inBath"))
-                            .fold(Vec::new(), |mut v, n| {
-                                v.push(n.name.clone());
-                                v
-                            }),
-                        self.selected_destination.clone(),
-                        AddStepMessage::NewDestination,
-                    )
-                    .padding(10)
-                    .width(Length::Units(110)),
-                ),
-            )
-            .push(
-                // actions
-                Column::new().push(
-                    Row::new()
-                        .push(
+                Row::new()
+                    .push(
+                        // Step num
+                        Column::new().push(
                             PickList::new(
-                                &mut self.actions_state,
-                                self.actions_ref.borrow().action.iter().fold(
-                                    Vec::new(),
-                                    |mut v, a| {
-                                        v.push(a.name.clone());
-                                        v
-                                    },
-                                ),
-                                self.selected_action.clone(),
-                                AddStepMessage::NewAction,
-                            )
-                            .padding(10)
-                            .width(Length::Units(110)),
-                        )
-                        .push(
-                            TextInput::new(
-                                // hours
-                                &mut self.hours_input,
-                                "Hours",
-                                &self.hours_value,
-                                AddStepMessage::HoursChanged,
-                            )
-                            .on_scroll_up(AddStepMessage::HoursIncrement)
-                            .on_scroll_down(AddStepMessage::HoursDecrement)
-                            .padding(10)
-                            .width(Length::Units(100)),
-                        )
-                        .push(
-                            (TextInput::new(
-                                // mins
-                                &mut self.mins_input,
-                                "Minutes",
-                                &self.mins_value,
-                                AddStepMessage::MinsChanged,
-                            ))
-                            .on_scroll_up(AddStepMessage::MinsIncrement)
-                            .on_scroll_down(AddStepMessage::MinsDecrement)
-                            .padding(10)
-                            .width(Length::Units(100)),
-                        )
-                        .push(
-                            TextInput::new(
-                                // secs
-                                &mut self.secs_input,
-                                "Seconds",
-                                &self.secs_value,
-                                AddStepMessage::SecsChanged,
-                            )
-                            .on_scroll_up(AddStepMessage::SecsIncrement)
-                            .on_scroll_down(AddStepMessage::SecsDecrement)
-                            .padding(10)
-                            .width(Length::Units(100)),
-                        )
-                        .push(
-                            Button::new(
-                                &mut self.add_btn,
-                                Text::new("Add Step")
-                                    .horizontal_alignment(HorizontalAlignment::Center)
-                                    .font(CQ_MONO),
-                            )
-                            .on_press(AddStepMessage::Add(
-                                self.selected_destination.clone(),
-                                self.selected_action.clone(),
+                                &mut self.step_num_state,
+                                (1..self.steps_len + 2).collect::<Vec<usize>>(),
                                 self.step_num,
-                                self.hours_value.clone(),
-                                self.mins_value.clone(),
-                                self.secs_value.clone(),
-                            ))
+                                AddStepMessage::NewNum,
+                            )
                             .padding(10)
-                            .width(Length::Units(100)),
+                            .width(Length::Shrink),
                         ),
-                ),
+                    )
+                    .push(
+                        // Destination
+                        Column::new().push(
+                            PickList::new(
+                                &mut self.destination_state,
+                                self.nodes_ref
+                                    .borrow()
+                                    .node
+                                    .iter()
+                                    .filter(|n| !n.name.contains("_inBath"))
+                                    .fold(Vec::new(), |mut v, n| {
+                                        v.push(n.name.clone());
+                                        v
+                                    }),
+                                self.selected_destination.clone(),
+                                AddStepMessage::NewDestination,
+                            )
+                            .padding(10)
+                            .width(Length::Shrink),
+                        ),
+                    )
+                    .push(
+                        // actions
+                        Column::new().push(
+                            Row::new()
+                                .push(
+                                    PickList::new(
+                                        &mut self.actions_state,
+                                        self.actions_ref.borrow().action.iter().fold(
+                                            Vec::new(),
+                                            |mut v, a| {
+                                                v.push(a.name.clone());
+                                                v
+                                            },
+                                        ),
+                                        self.selected_action.clone(),
+                                        AddStepMessage::NewAction,
+                                    )
+                                    .padding(10)
+                                    .width(Length::Shrink),
+                                )
+                                .push(
+                                    TextInput::new(
+                                        // hours
+                                        &mut self.hours_input,
+                                        "Hours",
+                                        &self.hours_value,
+                                        AddStepMessage::HoursChanged,
+                                    )
+                                    .on_scroll_up(AddStepMessage::HoursIncrement)
+                                    .on_scroll_down(AddStepMessage::HoursDecrement)
+                                    .padding(10)
+                                    .width(Length::Fill),
+                                )
+                                .push(
+                                    (TextInput::new(
+                                        // mins
+                                        &mut self.mins_input,
+                                        "Minutes",
+                                        &self.mins_value,
+                                        AddStepMessage::MinsChanged,
+                                    ))
+                                    .on_scroll_up(AddStepMessage::MinsIncrement)
+                                    .on_scroll_down(AddStepMessage::MinsDecrement)
+                                    .padding(10)
+                                    .width(Length::Fill),
+                                )
+                                .push(
+                                    TextInput::new(
+                                        // secs
+                                        &mut self.secs_input,
+                                        "Seconds",
+                                        &self.secs_value,
+                                        AddStepMessage::SecsChanged,
+                                    )
+                                    .on_scroll_up(AddStepMessage::SecsIncrement)
+                                    .on_scroll_down(AddStepMessage::SecsDecrement)
+                                    .padding(10)
+                                    .width(Length::Fill),
+                                )
+                                .push(
+                                    Button::new(
+                                        &mut self.add_btn,
+                                        Text::new("Add Step")
+                                            .horizontal_alignment(HorizontalAlignment::Center)
+                                            .font(CQ_MONO),
+                                    )
+                                    .on_press(AddStepMessage::Add(
+                                        self.selected_destination.clone(),
+                                        self.in_bath,
+                                        self.selected_action.clone(),
+                                        self.step_num,
+                                        self.hours_value.clone(),
+                                        self.mins_value.clone(),
+                                        self.secs_value.clone(),
+                                        self.require_input,
+                                    ))
+                                    .padding(10)
+                                    .width(Length::Units(100)),
+                                ),
+                        ),
+                    ),
+            )
+            .push(
+                Row::new()
+                    .push(Space::with_width(Length::Fill))
+                    .push(
+                        Column::new()
+                            .push(Checkbox::new(
+                                self.in_bath,
+                                "Enter Bath",
+                                AddStepMessage::ToggleBath,
+                            ))
+                            .padding(4)
+                            .width(Length::Shrink),
+                    )
+                    .push(Space::with_width(Length::Units(25)))
+                    .push(
+                        Column::new()
+                            .push(Checkbox::new(
+                                self.require_input,
+                                "Require Input",
+                                AddStepMessage::ToggleInput,
+                            ))
+                            .padding(4)
+                            .width(Length::Shrink),
+                    )
+                    .push(Space::with_width(Length::Fill)),
             )
             .into()
     }
