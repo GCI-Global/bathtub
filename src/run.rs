@@ -5,7 +5,6 @@ use iced::{
 };
 
 use super::build::ns;
-use super::Node;
 use serde::Deserialize;
 use std::sync::{Arc, Condvar, Mutex};
 use std::{fs::File, mem::discriminant};
@@ -20,8 +19,6 @@ pub struct Run {
     search_state: pick_list::State<String>,
     search_value: Option<String>,
     recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
-    current_node: Arc<Mutex<Node>>,
-    next_nodes: Arc<Mutex<Vec<Node>>>,
     pub steps: Vec<Step>,
     continue_btns: Vec<Option<ContinueButton>>,
     pub active_recipie: Option<Vec<Step>>,
@@ -39,11 +36,7 @@ pub enum RunMessage {
 }
 
 impl Run {
-    pub fn new(
-        recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
-        current_node: Arc<Mutex<Node>>,
-        next_nodes: Arc<Mutex<Vec<Node>>>,
-    ) -> Self {
+    pub fn new(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> Self {
         Run {
             scroll: scrollable::State::new(),
             run_btn: button::State::new(),
@@ -57,8 +50,6 @@ impl Run {
             continue_btns: Vec::new(),
             active_recipie: None,
             recipie_state,
-            current_node,
-            next_nodes,
         }
     }
 
@@ -93,15 +84,8 @@ impl Run {
                         for step in rdr.deserialize() {
                             let step: Step = step.unwrap();
                             if step.require_input {
-                                let in_bath = match step.in_bath {
-                                    true => "_inBath",
-                                    false => "",
-                                };
                                 self.continue_btns.push(Some(ContinueButton::new(
-                                    format!("{}{}", &step.selected_destination, in_bath),
                                     count,
-                                    Arc::clone(&self.current_node),
-                                    Arc::clone(&self.next_nodes),
                                     Arc::clone(&self.recipie_state),
                                 )));
                                 count += 1;
@@ -395,35 +379,17 @@ pub enum ContinueButtonMessage {
 }
 
 struct ContinueButton {
-    node_name: String,
     display_value: usize, // keep track of what buttons have been shown and what order they are in such that only one is shown when paused.
-    current_node: Arc<Mutex<Node>>,
-    next_nodes: Arc<Mutex<Vec<Node>>>,
     recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
     continue_btn: button::State,
 }
 
 impl ContinueButton {
-    fn new(
-        node_name: String,
-        display_value: usize,
-        current_node: Arc<Mutex<Node>>,
-        next_nodes: Arc<Mutex<Vec<Node>>>,
-        recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
-    ) -> Self {
+    fn new(display_value: usize, recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> Self {
         ContinueButton {
-            node_name,
             display_value,
-            current_node,
-            next_nodes,
             recipie_state,
             continue_btn: button::State::new(),
-        }
-    }
-
-    fn update(&mut self, message: ContinueButtonMessage) {
-        match message {
-            ContinueButtonMessage::Continue => {}
         }
     }
 

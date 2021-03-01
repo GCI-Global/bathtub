@@ -157,6 +157,7 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
     path_nodes
 }
 
+/*
 pub fn gen_gcode_paths(path_nodes: &Nodes) -> Vec<String> {
     let mut gcode_path: Vec<String> = vec![];
     for node in &path_nodes.node {
@@ -164,3 +165,4 @@ pub fn gen_gcode_paths(path_nodes: &Nodes) -> Vec<String> {
     }
     gcode_path
 }
+*/

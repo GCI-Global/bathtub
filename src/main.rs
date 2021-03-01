@@ -354,11 +354,7 @@ impl Application for Bathtub {
                             tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
                                 manual_btn: button::State::new(),
-                                run: Run::new(
-                                    Arc::clone(&recipie_state),
-                                    Arc::clone(&current_node),
-                                    Arc::clone(&next_nodes),
-                                ),
+                                run: Run::new(Arc::clone(&recipie_state)),
                                 run_btn: button::State::new(),
                                 build: Build::new(Rc::clone(&ref_node), Rc::clone(&ref_actions)),
                                 build_btn: button::State::new(),
@@ -806,16 +802,14 @@ fn loading_message<'a>() -> Element<'a, Message> {
 // this function will block the thread if on pause, and return true if the thread should close
 fn break_and_hold(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> bool {
     let mut stop = false;
+    let (recipie_state, cvar) = &*recipie_state;
+    let mut rs = recipie_state.lock().unwrap();
     while !stop {
-        {
-            let (recipie_state, cvar) = &*recipie_state;
-            let mut rs = recipie_state.lock().unwrap();
-            match *rs {
-                RecipieState::Stopped => stop = true,
-                RecipieState::RecipiePaused => rs = cvar.wait(rs).unwrap(),
-                RecipieState::RequireInput => rs = cvar.wait(rs).unwrap(),
-                _ => break,
-            }
+        match *rs {
+            RecipieState::Stopped => stop = true,
+            RecipieState::RecipiePaused => rs = cvar.wait(rs).unwrap(),
+            RecipieState::RequireInput => rs = cvar.wait(rs).unwrap(),
+            _ => break,
         }
     }
     stop
