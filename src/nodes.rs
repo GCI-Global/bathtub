@@ -16,7 +16,7 @@ pub struct Node {
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    pub is_rinse: bool,
+    pub hide: bool,
     pub neighbors: Vec<String>,
 }
 
@@ -46,25 +46,29 @@ impl Nodes {
         //let bath_iter = baths.bath.into_iter();
         for node in nodes.node {
             // create node for head in bath
-
-            new_nodes.push(Node {
-                name: format!("{}_inBath", node.name),
-                x: node.x,
-                y: node.y,
-                z: node.z,
-                is_rinse: node.is_rinse,
-                neighbors: vec![node.name.clone()],
-            });
+            if !node.hide {
+                // if hidden then we do not want to auto-generate realted nodes
+                new_nodes.push(Node {
+                    name: format!("{}_inBath", node.name),
+                    x: node.x,
+                    y: node.y,
+                    z: node.z,
+                    hide: false,
+                    neighbors: vec![node.name.clone()],
+                });
+            }
 
             // create node for head above bath
             new_neighbors = node.neighbors;
-            new_neighbors.push(format!("{}_inBath", &node.name));
+            if !node.hide {
+                new_neighbors.push(format!("{}_inBath", &node.name));
+            }
             new_nodes.push(Node {
                 name: node.name,
                 x: node.x,
                 y: node.y,
                 z: -1.0,
-                is_rinse: node.is_rinse,
+                hide: node.hide,
                 neighbors: new_neighbors,
             })
         }
@@ -89,7 +93,7 @@ impl NodeGrid2d {
         let mut push_vec: usize = 0;
         let mut build_grid: Vec<Vec<Node>> = vec![Vec::new()];
         for node in node_vec {
-            if (node.y - test_value).abs() < 2.0 {
+            if (node.y - test_value).abs() < 1.0 {
                 build_grid[push_vec].push(node);
             } else {
                 push_vec += 1;
@@ -123,7 +127,7 @@ impl NodeGrid2d {
         for i in 0..build_grid.len() {
             for j in 0..longest_axis.len() {
                 if j == relative_grid[i].len()
-                    || longest_axis[j].x - relative_grid[i][j].clone().unwrap().x > 2.0
+                    || longest_axis[j].x - relative_grid[i][j].clone().unwrap().x > 1.0
                 {
                     relative_grid[i].insert(j, None)
                 }

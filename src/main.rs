@@ -147,25 +147,11 @@ impl State {
                         RecipieState::Stopped => break,
                         RecipieState::RecipiePaused => {
                             grbl.push_command(Cmd::new("\u{85}".to_string()));
-                            let mut cn = current_node.lock().unwrap();
-                            let mut nn = next_nodes.lock().unwrap();
-                            match nn.first() {
-                                Some(nn) => {
-                                    let s = grbl.get_status().unwrap();
-                                    if cn.name != "paused_node" {
-                                        *cn = Node {
-                                            name: "paused_node".to_string(),
-                                            x: s.x,
-                                            y: s.y,
-                                            z: s.z,
-                                            is_rinse: false,
-                                            neighbors: vec![cn.name.clone(), nn.name.clone()],
-                                        }
-                                    }
-                                }
-                                None => (),
-                            }
-                            *nn = Vec::new();
+                            set_pause_node(
+                                Arc::clone(&current_node),
+                                Arc::clone(&next_nodes),
+                                grbl.clone(),
+                            );
                         }
                         _ => {}
                     }
@@ -344,7 +330,7 @@ impl Application for Bathtub {
                             Arc::new((Mutex::new(RecipieState::Stopped), Condvar::new()));
                         let current_node = Arc::new(Mutex::new(
                             state.nodes.node
-                                [state.node_map.get(&"Rinse 1".to_string()).unwrap().clone()]
+                                [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
                             .clone(),
                         ));
                         let next_nodes = Arc::new(Mutex::new(Vec::new()));
@@ -410,31 +396,11 @@ impl Application for Bathtub {
                             cvar.notify_all();
                         }
                         state.grbl.push_command(Cmd::new("\u{85}".to_string()));
-                        let pn = state.prev_node.lock().unwrap();
-                        let mut cn = state.current_node.lock().unwrap();
-                        let mut nn = state.next_nodes.lock().unwrap();
-                        match nn.first() {
-                            Some(nn) => {
-                                let s = state.grbl.get_status().unwrap();
-                                *cn = Node {
-                                    name: "paused_node".to_string(),
-                                    x: s.x,
-                                    y: s.y,
-                                    z: s.z,
-                                    is_rinse: false,
-                                    neighbors: if pn.as_ref().unwrap().name
-                                        == "paused_node".to_string()
-                                    {
-                                        pn.as_ref().unwrap().neighbors.clone()
-                                    } else {
-                                        vec![cn.name.clone(), nn.name.clone()]
-                                    },
-                                }
-                            }
-                            None => (),
-                        }
-                        *nn = Vec::new();
-                        //println!("pn: {:?}\ncn: {:?}\nnn: {:?}", pn, cn, nn);
+                        set_pause_node(
+                            Arc::clone(&state.current_node),
+                            Arc::clone(&state.next_nodes),
+                            state.grbl.clone(),
+                        );
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         let (recipie_state, _) = &*state.recipie_state;
@@ -516,30 +482,11 @@ impl Application for Bathtub {
                             cvar.notify_all();
                         }
                         state.grbl.push_command(Cmd::new("\u{85}".to_string()));
-                        let pn = state.prev_node.lock().unwrap();
-                        let mut cn = state.current_node.lock().unwrap();
-                        let mut nn = state.next_nodes.lock().unwrap();
-                        match nn.first() {
-                            Some(nn) => {
-                                let s = state.grbl.get_status().unwrap();
-                                *cn = Node {
-                                    name: "paused_node".to_string(),
-                                    x: s.x,
-                                    y: s.y,
-                                    z: s.z,
-                                    is_rinse: false,
-                                    neighbors: if pn.as_ref().unwrap().name
-                                        == "paused_node".to_string()
-                                    {
-                                        pn.as_ref().unwrap().neighbors.clone()
-                                    } else {
-                                        vec![cn.name.clone(), nn.name.clone()]
-                                    },
-                                }
-                            }
-                            None => (),
-                        }
-                        *nn = Vec::new();
+                        set_pause_node(
+                            Arc::clone(&state.current_node),
+                            Arc::clone(&state.next_nodes),
+                            state.grbl.clone(),
+                        );
                     }
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
@@ -813,6 +760,28 @@ fn break_and_hold(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> bool {
         }
     }
     stop
+}
+
+fn set_pause_node(current_node: Arc<Mutex<Node>>, next_nodes: Arc<Mutex<Vec<Node>>>, grbl: Grbl) {
+    let mut cn = current_node.lock().unwrap();
+    let mut nn = next_nodes.lock().unwrap();
+    match nn.first() {
+        Some(nn) => {
+            let s = grbl.get_status().unwrap();
+            if cn.name != "paused_node" {
+                *cn = Node {
+                    name: "paused_node".to_string(),
+                    x: s.x,
+                    y: s.y,
+                    z: s.z,
+                    hide: true,
+                    neighbors: vec![cn.name.clone(), nn.name.clone()],
+                }
+            }
+        }
+        None => (),
+    }
+    *nn = Vec::new();
 }
 
 const CQ_MONO: Font = Font::External {

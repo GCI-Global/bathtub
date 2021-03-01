@@ -452,7 +452,7 @@ impl Step {
                                             .borrow()
                                             .node
                                             .iter()
-                                            .filter(|n| !n.name.contains("_inBath"))
+                                            .filter(|n| !n.name.contains("_inBath") && !n.hide)
                                             .fold(Vec::new(), |mut v, n| {
                                                 v.push(n.name.clone());
                                                 v
@@ -920,7 +920,7 @@ impl AddStep {
                                     .borrow()
                                     .node
                                     .iter()
-                                    .filter(|n| !n.name.contains("_inBath"))
+                                    .filter(|n| !n.name.contains("_inBath") && !n.hide)
                                     .fold(Vec::new(), |mut v, n| {
                                         v.push(n.name.clone());
                                         v

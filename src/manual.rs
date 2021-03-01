@@ -32,7 +32,9 @@ impl Manual {
                 .fold(Vec::new(), |mut vec, axis| {
                     vec.push(axis.into_iter().fold(Vec::new(), |mut axis_vec, node| {
                         if let Some(n) = node {
-                            axis_vec.push(Some((n, button::State::new())));
+                            if !n.hide {
+                                axis_vec.push(Some((n, button::State::new())));
+                            }
                         } else {
                             axis_vec.push(None);
                         }
@@ -115,6 +117,7 @@ impl Manual {
                 .width(Length::Fill)
                 .on_press(ManualMessage::Stop),
             );
+
         let content = Column::new()
             .max_width(800)
             .spacing(20)
