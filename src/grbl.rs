@@ -1,4 +1,5 @@
 extern crate serial;
+use itertools::Itertools;
 use regex::Regex;
 use serial::prelude::*;
 use serial::SystemPort;
@@ -52,11 +53,11 @@ impl Grbl {
         }
         cb.insert(0, command)
     }
-    /*
     pub fn pop_command(&self) -> Option<Command> {
         let mut rb = self.response_buffer.lock().unwrap();
         rb.pop()
     }
+    /*
     pub fn clear_queue(&self) {
         let mut cb = self.command_buffer.lock().unwrap();
         *cb = Vec::new();
@@ -111,7 +112,6 @@ pub fn new() -> Grbl {
             //while cb.len() > 0 {
             if let Some(mut cmd) = cb.pop() {
                 let mut rb = rb_c.lock().unwrap();
-                //let mut cmd = cb.pop().unwrap();
                 send(&mut port, &mut cmd);
                 rb.push(cmd);
             }
@@ -168,10 +168,16 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
             if line.contains("$132=") {
                 output.push(line);
                 command.response_time = Some(Local::now());
-                command.result = Some(output.into_iter().fold(String::new(), |mut s, part| {
-                    s.push_str(&part[..]);
-                    s
-                }));
+                // update result, requires filtering because I can't figure out how to read the
+                // serial output correctly
+                command.result = Some(
+                    output
+                        .into_iter()
+                        .fold(String::new(), |s, part| format!("{}{}{}", s, part, "\n\r"))
+                        .split("\r")
+                        .unique()
+                        .collect::<String>(),
+                );
                 break;
             }
             output.push(line);

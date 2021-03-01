@@ -1,5 +1,6 @@
 #![feature(total_cmp)]
 mod actions;
+mod advanced;
 mod build;
 mod grbl;
 mod manual;
@@ -7,6 +8,7 @@ mod nodes;
 mod paths;
 mod run;
 use actions::Actions;
+use advanced::{Advanced, AdvancedMessage};
 use build::{Build, BuildMessage};
 use grbl::{Command as Cmd, Grbl, Status};
 use manual::{Manual, ManualMessage};
@@ -246,12 +248,14 @@ struct Tabs {
     manual: Manual,
     run: Run,
     build: Build,
+    advanced: Advanced,
 }
 
 struct TabBar {
     manual_btn: button::State,
     build_btn: button::State,
     run_btn: button::State,
+    advanced_btn: button::State,
 }
 
 #[derive(Debug, Clone)]
@@ -259,6 +263,7 @@ enum TabBarMessage {
     Manual,
     Run,
     Build,
+    Advanced,
 }
 
 impl TabBar {
@@ -267,49 +272,59 @@ impl TabBar {
             manual_btn: button::State::new(),
             run_btn: button::State::new(),
             build_btn: button::State::new(),
+            advanced_btn: button::State::new(),
         }
     }
 
     fn view(&mut self) -> Element<TabBarMessage> {
-        Column::new()
+        Row::new()
             .push(
-                Row::new()
-                    .push(
-                        Button::new(
-                            &mut self.manual_btn,
-                            Text::new("Manual")
-                                .horizontal_alignment(HorizontalAlignment::Center)
-                                .size(30)
-                                .font(CQ_MONO),
-                        )
-                        .width(Length::Fill)
-                        .padding(20)
-                        .on_press(TabBarMessage::Manual),
-                    )
-                    .push(
-                        Button::new(
-                            &mut self.run_btn,
-                            Text::new("Run")
-                                .horizontal_alignment(HorizontalAlignment::Center)
-                                .size(30)
-                                .font(CQ_MONO),
-                        )
-                        .width(Length::Fill)
-                        .padding(20)
-                        .on_press(TabBarMessage::Run),
-                    )
-                    .push(
-                        Button::new(
-                            &mut self.build_btn,
-                            Text::new("Build")
-                                .horizontal_alignment(HorizontalAlignment::Center)
-                                .size(30)
-                                .font(CQ_MONO),
-                        )
-                        .width(Length::Fill)
-                        .padding(20)
-                        .on_press(TabBarMessage::Build),
-                    ),
+                Button::new(
+                    &mut self.manual_btn,
+                    Text::new("Manual")
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .size(30)
+                        .font(CQ_MONO),
+                )
+                .width(Length::Fill)
+                .padding(20)
+                .on_press(TabBarMessage::Manual),
+            )
+            .push(
+                Button::new(
+                    &mut self.run_btn,
+                    Text::new("Run")
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .size(30)
+                        .font(CQ_MONO),
+                )
+                .width(Length::Fill)
+                .padding(20)
+                .on_press(TabBarMessage::Run),
+            )
+            .push(
+                Button::new(
+                    &mut self.build_btn,
+                    Text::new("Build")
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .size(30)
+                        .font(CQ_MONO),
+                )
+                .width(Length::Fill)
+                .padding(20)
+                .on_press(TabBarMessage::Build),
+            )
+            .push(
+                Button::new(
+                    &mut self.advanced_btn,
+                    Text::new("Advanced")
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .size(30)
+                        .font(CQ_MONO),
+                )
+                .width(Length::Fill)
+                .padding(20)
+                .on_press(TabBarMessage::Advanced),
             )
             .into()
     }
@@ -319,6 +334,7 @@ enum TabState {
     Manual,
     Run,
     Build,
+    Advanced,
 }
 
 #[derive(Debug, Clone)]
@@ -346,6 +362,7 @@ enum Message {
     Manual(ManualMessage),
     Build(BuildMessage),
     Run(RunMessage),
+    Advanced(AdvancedMessage),
     Loaded(Result<LoadState, LoadError>),
     Tick,
 }
@@ -396,6 +413,7 @@ impl Application for Bathtub {
                             .clone(),
                         ));
                         let next_nodes = Arc::new(Mutex::new(Vec::new()));
+                        let grbl = grbl::new();
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
@@ -403,6 +421,11 @@ impl Application for Bathtub {
                                 manual: Manual::new(state.node_grid2d),
                                 run: Run::new(Arc::clone(&recipie_state)),
                                 build: Build::new(Rc::clone(&ref_node), Rc::clone(&ref_actions)),
+                                advanced: Advanced::new(
+                                    grbl.clone(),
+                                    Rc::clone(&ref_node),
+                                    Rc::clone(&ref_actions),
+                                ),
                             },
                             tab_bar: TabBar::new(),
                             nodes: Rc::clone(&ref_node),
@@ -412,7 +435,7 @@ impl Application for Bathtub {
                             next_nodes: Arc::clone(&next_nodes),
                             actions: Rc::clone(&ref_actions),
                             connected: false,
-                            grbl: grbl::new(),
+                            grbl: grbl.clone(),
                             grbl_status: None,
                             recipie_regex: Regex::new(r"^[^.]+").unwrap(),
                             recipie_state: Arc::clone(&recipie_state),
@@ -431,6 +454,7 @@ impl Application for Bathtub {
                 match message {
                     Message::TabBar(TabBarMessage::Manual) => state.state = TabState::Manual,
                     Message::TabBar(TabBarMessage::Build) => state.state = TabState::Build,
+                    Message::TabBar(TabBarMessage::Advanced) => state.state = TabState::Advanced,
                     Message::TabBar(TabBarMessage::Run) => {
                         state.tabs.run.search = fs::read_dir("./recipies").unwrap().fold(
                             Vec::new(),
@@ -548,9 +572,6 @@ impl Application for Bathtub {
                             state.grbl.clone(),
                         );
                     }
-                    Message::Manual(msg) => state.tabs.manual.update(msg),
-                    Message::Build(msg) => state.tabs.build.update(msg),
-                    Message::Run(msg) => state.tabs.run.update(msg),
                     Message::RecipieDone(Ok(_)) => {
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         {
@@ -579,6 +600,10 @@ impl Application for Bathtub {
                             )
                         }
                     }
+                    Message::Manual(msg) => state.tabs.manual.update(msg),
+                    Message::Build(msg) => state.tabs.build.update(msg),
+                    Message::Run(msg) => state.tabs.run.update(msg),
+                    Message::Advanced(msg) => state.tabs.advanced.update(msg),
                     _ => {}
                 }
                 command
@@ -650,6 +675,30 @@ impl Application for Bathtub {
                     .push(tab_bar.view().map(move |msg| Message::TabBar(msg)))
                     .push(tabs.build.view().map(move |msg| Message::Build(msg)))
                     .into(),
+                TabState::Advanced => {
+                    let content =
+                        Column::new().push(tab_bar.view().map(move |msg| Message::TabBar(msg)));
+                    let rs: RecipieState;
+                    {
+                        let (recipie_state, _) = &**recipie_state;
+                        rs = *recipie_state.lock().unwrap();
+                    }
+                    if discriminant(&rs) != discriminant(&RecipieState::Stopped) {
+                        content
+                            .push(Space::with_height(Length::Units(100)))
+                            .push(
+                                Text::new("Unavailable while GRBL in motion")
+                                    .size(50)
+                                    .font(CQ_MONO),
+                            )
+                            .align_items(Align::Center)
+                            .into()
+                    } else {
+                        content
+                            .push(tabs.advanced.view().map(move |msg| Message::Advanced(msg)))
+                            .into()
+                    }
+                }
             },
         }
     }
