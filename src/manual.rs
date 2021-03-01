@@ -2,7 +2,7 @@ use super::nodes::{Node, NodeGrid2d};
 use crate::CQ_MONO;
 use iced::{
     button, scrollable, Button, Checkbox, Column, Container, Element, HorizontalAlignment, Length,
-    Row, Scrollable, Space, Text, VerticalAlignment,
+    Row, Scrollable, Space, Text,
 };
 use regex::Regex;
 

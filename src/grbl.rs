@@ -52,10 +52,16 @@ impl Grbl {
         }
         cb.insert(0, command)
     }
+    /*
     pub fn pop_command(&self) -> Option<Command> {
         let mut rb = self.response_buffer.lock().unwrap();
         rb.pop()
     }
+    pub fn clear_queue(&self) {
+        let mut cb = self.command_buffer.lock().unwrap();
+        *cb = Vec::new();
+    }
+    */
     pub fn get_status(&self) -> Option<Status> {
         self.mutex_status.lock().unwrap().clone()
     }
@@ -64,10 +70,6 @@ impl Grbl {
         let rb_c = rb.clone();
         *rb = Vec::new();
         rb_c
-    }
-    pub fn clear_queue(&self) {
-        let mut cb = self.command_buffer.lock().unwrap();
-        *cb = Vec::new();
     }
     pub fn queue_len(&self) -> usize {
         let cb = self.command_buffer.lock().unwrap();

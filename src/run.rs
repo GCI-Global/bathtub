@@ -6,8 +6,8 @@ use iced::{
 
 use super::build::ns;
 use serde::Deserialize;
-use std::fs::File;
 use std::sync::{Arc, Condvar, Mutex};
+use std::{fs::File, mem::discriminant};
 
 pub struct Run {
     scroll: scrollable::State,
@@ -18,8 +18,9 @@ pub struct Run {
     pub search: Vec<String>,
     search_state: pick_list::State<String>,
     search_value: Option<String>,
-    pub recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
+    recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
     pub steps: Vec<Step>,
+    continue_btns: Vec<Option<ContinueButton>>,
     pub active_recipie: Option<Vec<Step>>,
 }
 
@@ -46,6 +47,7 @@ impl Run {
             search_state: pick_list::State::default(),
             search_value: None,
             steps: Vec::new(),
+            continue_btns: Vec::new(),
             active_recipie: None,
             recipie_state,
         }
@@ -58,13 +60,38 @@ impl Run {
                     self.update(RunMessage::RecipieChanged(sv))
                 }
             }
+            RunMessage::Step => {
+                for btn in &mut self.continue_btns {
+                    if let Some(b) = btn {
+                        b.display_value = match b.display_value.overflowing_sub(1) {
+                            (n, false) => n,
+                            (_, true) => 0,
+                        }
+                    }
+                }
+                let (recipie_state, cvar) = &*self.recipie_state;
+                let mut recipie_state = recipie_state.lock().unwrap();
+                *recipie_state = RecipieState::RecipieRunning;
+                cvar.notify_all();
+            }
             RunMessage::RecipieChanged(recipie) => {
                 match File::open(format!("./recipies/{}.recipie", recipie)) {
                     Ok(file) => {
                         self.steps = Vec::new();
+                        self.continue_btns = Vec::new();
                         let mut rdr = csv::Reader::from_reader(file);
+                        let mut count = 1; // display vlue tracker
                         for step in rdr.deserialize() {
                             let step: Step = step.unwrap();
+                            if step.require_input {
+                                self.continue_btns.push(Some(ContinueButton::new(
+                                    count,
+                                    Arc::clone(&self.recipie_state),
+                                )));
+                                count += 1;
+                            } else {
+                                self.continue_btns.push(None)
+                            }
                             self.steps.push(step);
                         }
                     }
@@ -77,15 +104,33 @@ impl Run {
     }
 
     pub fn view(&mut self) -> Element<RunMessage> {
-        let search = PickList::new(
-            &mut self.search_state,
-            &self.search[..],
-            self.search_value.clone(),
-            RunMessage::RecipieChanged,
-        )
-        .padding(10)
-        .width(Length::Units(500));
-
+        let search: Element<_>;
+        {
+            let (recipie_state, _) = &*self.recipie_state;
+            search = match *recipie_state.lock().unwrap() {
+                RecipieState::Stopped => Row::new()
+                    .push(
+                        PickList::new(
+                            &mut self.search_state,
+                            &self.search[..],
+                            self.search_value.clone(),
+                            RunMessage::RecipieChanged,
+                        )
+                        .padding(10)
+                        .width(Length::Units(500)),
+                    )
+                    .into(),
+                _ => Row::new()
+                    .push(
+                        Text::new(self.search_value.clone().unwrap_or("".to_string()))
+                            .horizontal_alignment(HorizontalAlignment::Center)
+                            .size(30)
+                            .font(CQ_MONO),
+                    )
+                    .padding(6)
+                    .into(),
+            }
+        }
         let run = match self.search_value {
             Some(_) => {
                 let (recipie_state, _) = &*self.recipie_state;
@@ -154,6 +199,26 @@ impl Run {
                             .padding(10)
                             .width(Length::Units(200)),
                         ),
+                    RecipieState::RequireInput => Row::new()
+                        .push(
+                            Button::new(
+                                &mut self.stop_btn,
+                                Text::new("Stop")
+                                    .size(30)
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO),
+                            )
+                            .on_press(RunMessage::Stop)
+                            .padding(10)
+                            .width(Length::Units(200)),
+                        )
+                        .push(Space::with_width(Length::Units(100)))
+                        .push(
+                            Text::new("Waiting for user input")
+                                .font(CQ_MONO)
+                                .size(20)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        ),
                     _ => Row::new(),
                 }
             }
@@ -163,8 +228,18 @@ impl Run {
         let recipie: Element<_> = self
             .steps
             .iter_mut()
-            .fold(Column::new().spacing(15), |col, step| {
-                col.push(Row::new().push(step.view().map(move |_msg| RunMessage::Step)))
+            .zip(self.continue_btns.iter_mut())
+            .fold(Column::new().spacing(15), |col, (step, btn)| {
+                if let Some(b) = btn {
+                    //println!("adding btn {} next to {}",b.display_value, step.selected_destination);
+                    col.push(
+                        Row::new()
+                            .push(step.view().map(move |_msg| RunMessage::Step))
+                            .push(b.view().map(move |_msg| RunMessage::Step)),
+                    )
+                } else {
+                    col.push(Row::new().push(step.view().map(move |_msg| RunMessage::Step)))
+                }
             })
             .into();
 
@@ -265,7 +340,7 @@ impl Step {
                 ns(&s)
             ),
         };
-        Row::new()
+        let content = Row::new()
             .align_items(Align::Center)
             .push(
                 Text::new(format!("{}", self.step_num))
@@ -290,9 +365,58 @@ impl Step {
                             .vertical_alignment(VerticalAlignment::Center)
                             .font(CQ_MONO),
                     )
-                    .width(Length::Fill)
+                    .width(Length::Shrink)
                     .align_items(Align::Center),
-            )
-            .into()
+            );
+
+        content.into()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ContinueButtonMessage {
+    Continue,
+}
+
+struct ContinueButton {
+    display_value: usize, // keep track of what buttons have been shown and what order they are in such that only one is shown when paused.
+    recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
+    continue_btn: button::State,
+}
+
+impl ContinueButton {
+    fn new(display_value: usize, recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> Self {
+        ContinueButton {
+            display_value,
+            recipie_state,
+            continue_btn: button::State::new(),
+        }
+    }
+
+    fn view(&mut self) -> Element<ContinueButtonMessage> {
+        if self.display_value == 1 {
+            let (recipie_state, _) = &*self.recipie_state;
+            if discriminant(&*recipie_state.lock().unwrap())
+                == discriminant(&RecipieState::RequireInput)
+            {
+                Column::new()
+                    .push(
+                        Row::new().push(Space::with_width(Length::Units(25))).push(
+                            Button::new(
+                                &mut self.continue_btn,
+                                Text::new("Continue").font(CQ_MONO).size(30),
+                            )
+                            .width(Length::Shrink)
+                            .padding(10)
+                            .on_press(ContinueButtonMessage::Continue),
+                        ),
+                    )
+                    .into()
+            } else {
+                Column::new().into()
+            }
+        } else {
+            Column::new().into()
+        }
     }
 }
