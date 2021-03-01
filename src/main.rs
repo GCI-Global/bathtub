@@ -39,6 +39,7 @@ enum Bathtub {
 struct State {
     state: TabState,
     tabs: Tabs,
+    tab_bar: TabBar,
     nodes: Rc<RefCell<Nodes>>,
     node_map: HashMap<String, usize>,
     prev_node: Arc<Mutex<Option<Node>>>,
@@ -243,12 +244,75 @@ pub enum RecipieState {
 
 struct Tabs {
     manual: Manual,
-    manual_btn: button::State,
     run: Run,
-    run_btn: button::State,
     build: Build,
+}
+
+struct TabBar {
+    manual_btn: button::State,
     build_btn: button::State,
-    //settings: button::State,
+    run_btn: button::State,
+}
+
+#[derive(Debug, Clone)]
+enum TabBarMessage {
+    Manual,
+    Run,
+    Build,
+}
+
+impl TabBar {
+    fn new() -> Self {
+        TabBar {
+            manual_btn: button::State::new(),
+            run_btn: button::State::new(),
+            build_btn: button::State::new(),
+        }
+    }
+
+    fn view(&mut self) -> Element<TabBarMessage> {
+        Column::new()
+            .push(
+                Row::new()
+                    .push(
+                        Button::new(
+                            &mut self.manual_btn,
+                            Text::new("Manual")
+                                .horizontal_alignment(HorizontalAlignment::Center)
+                                .size(30)
+                                .font(CQ_MONO),
+                        )
+                        .width(Length::Fill)
+                        .padding(20)
+                        .on_press(TabBarMessage::Manual),
+                    )
+                    .push(
+                        Button::new(
+                            &mut self.run_btn,
+                            Text::new("Run")
+                                .horizontal_alignment(HorizontalAlignment::Center)
+                                .size(30)
+                                .font(CQ_MONO),
+                        )
+                        .width(Length::Fill)
+                        .padding(20)
+                        .on_press(TabBarMessage::Run),
+                    )
+                    .push(
+                        Button::new(
+                            &mut self.build_btn,
+                            Text::new("Build")
+                                .horizontal_alignment(HorizontalAlignment::Center)
+                                .size(30)
+                                .font(CQ_MONO),
+                        )
+                        .width(Length::Fill)
+                        .padding(20)
+                        .on_press(TabBarMessage::Build),
+                    ),
+            )
+            .into()
+    }
 }
 
 enum TabState {
@@ -277,9 +341,7 @@ enum Errors {
 
 #[derive(Debug, Clone)]
 enum Message {
-    ManualTab,
-    BuildTab,
-    RunTab,
+    TabBar(TabBarMessage),
     RecipieDone(Result<(), Errors>),
     Manual(ManualMessage),
     Build(BuildMessage),
@@ -339,12 +401,10 @@ impl Application for Bathtub {
                             state: TabState::Manual,
                             tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
-                                manual_btn: button::State::new(),
                                 run: Run::new(Arc::clone(&recipie_state)),
-                                run_btn: button::State::new(),
                                 build: Build::new(Rc::clone(&ref_node), Rc::clone(&ref_actions)),
-                                build_btn: button::State::new(),
                             },
+                            tab_bar: TabBar::new(),
                             nodes: Rc::clone(&ref_node),
                             node_map: state.node_map.clone(),
                             prev_node: Arc::new(Mutex::new(None)),
@@ -369,9 +429,9 @@ impl Application for Bathtub {
             }
             Bathtub::Loaded(state) => {
                 match message {
-                    Message::ManualTab => state.state = TabState::Manual,
-                    Message::BuildTab => state.state = TabState::Build,
-                    Message::RunTab => {
+                    Message::TabBar(TabBarMessage::Manual) => state.state = TabState::Manual,
+                    Message::TabBar(TabBarMessage::Build) => state.state = TabState::Build,
+                    Message::TabBar(TabBarMessage::Run) => {
                         state.tabs.run.search = fs::read_dir("./recipies").unwrap().fold(
                             Vec::new(),
                             |mut rec, file| {
@@ -532,49 +592,13 @@ impl Application for Bathtub {
             Bathtub::Loaded(State {
                 state,
                 tabs,
+                tab_bar,
                 recipie_state,
                 ..
             }) => match state {
                 TabState::Manual => {
-                    let content = Column::new().push(
-                        Row::new()
-                            .push(
-                                Button::new(
-                                    &mut tabs.manual_btn,
-                                    Text::new("Manual")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::ManualTab),
-                            )
-                            .push(
-                                Button::new(
-                                    &mut tabs.run_btn,
-                                    Text::new("Run")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::RunTab),
-                            )
-                            .push(
-                                Button::new(
-                                    &mut tabs.build_btn,
-                                    Text::new("Build")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::BuildTab),
-                            ),
-                    );
+                    let content =
+                        Column::new().push(tab_bar.view().map(move |msg| Message::TabBar(msg)));
                     let rs: RecipieState;
                     {
                         let (recipie_state, _) = &**recipie_state;
@@ -599,45 +623,8 @@ impl Application for Bathtub {
                     }
                 }
                 TabState::Run => {
-                    let content = Column::new().push(
-                        Row::new()
-                            .push(
-                                Button::new(
-                                    &mut tabs.manual_btn,
-                                    Text::new("Manual")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::ManualTab),
-                            )
-                            .push(
-                                Button::new(
-                                    &mut tabs.run_btn,
-                                    Text::new("Run")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::RunTab),
-                            )
-                            .push(
-                                Button::new(
-                                    &mut tabs.build_btn,
-                                    Text::new("Build")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::BuildTab),
-                            ),
-                    );
+                    let content =
+                        Column::new().push(tab_bar.view().map(move |msg| Message::TabBar(msg)));
                     let rs: RecipieState;
                     {
                         let (recipie_state, _) = &**recipie_state;
@@ -660,45 +647,7 @@ impl Application for Bathtub {
                     }
                 }
                 TabState::Build => Column::new()
-                    .push(
-                        Row::new()
-                            .push(
-                                Button::new(
-                                    &mut tabs.manual_btn,
-                                    Text::new("Manual")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::ManualTab),
-                            )
-                            .push(
-                                Button::new(
-                                    &mut tabs.run_btn,
-                                    Text::new("Run")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::RunTab),
-                            )
-                            .push(
-                                Button::new(
-                                    &mut tabs.build_btn,
-                                    Text::new("Build")
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .size(30)
-                                        .font(CQ_MONO),
-                                )
-                                .width(Length::Fill)
-                                .padding(20)
-                                .on_press(Message::BuildTab),
-                            ),
-                    )
+                    .push(tab_bar.view().map(move |msg| Message::TabBar(msg)))
                     .push(tabs.build.view().map(move |msg| Message::Build(msg)))
                     .into(),
             },
