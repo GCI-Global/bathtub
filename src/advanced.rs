@@ -44,7 +44,7 @@ impl Advanced {
             ref_nodes,
             ref_actions,
             tab_bar: TabBar::new(),
-            grbl_tab: GrblTab::new(grbl),
+            grbl_tab: GrblTab::new(grbl, Vec::new()),
         }
     }
 
@@ -62,11 +62,10 @@ impl Advanced {
                                     .fold(Vec::new(), |mut v, response| {
                                         let r: Vec<&str> = response.split("=").collect();
                                         if r.len() > 1 {
-                                            v.push(GrblSetting {
-                                                text: format!("{} =", r[0]),
-                                                input_value: r[1].to_string(),
-                                                input_state: text_input::State::new(),
-                                            });
+                                            v.push(GrblSetting::new(
+                                                format!("{}", r[0]),
+                                                r[1].to_string(),
+                                            ));
                                         }
                                         v
                                     });
@@ -75,10 +74,39 @@ impl Advanced {
                 }
                 self.state = TabState::Grbl
             }
+            AdvancedMessage::GrblTab(GrblMessage::SaveMessage(SaveBarMessage::Cancel)) => {
+                self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
+                loop {
+                    if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
+                        if cmd.command == "$$".to_string() {
+                            self.grbl_tab.settings =
+                                cmd.result
+                                    .unwrap()
+                                    .lines()
+                                    .fold(Vec::new(), |mut v, response| {
+                                        let r: Vec<&str> = response.split("=").collect();
+                                        if r.len() > 1 {
+                                            v.push(GrblSetting::new(
+                                                format!("{}", r[0]),
+                                                r[1].to_string(),
+                                            ));
+                                        }
+                                        v
+                                    });
+                            break;
+                        }
+                    }
+                }
+                self.grbl_tab.unsaved = false;
+            }
             AdvancedMessage::TabBar(TabBarMessage::Nodes) => self.state = TabState::Nodes,
             AdvancedMessage::TabBar(TabBarMessage::Actions) => self.state = TabState::Actions,
             AdvancedMessage::TabBar(TabBarMessage::Logs) => self.state = TabState::Logs,
-            _ => {}
+            AdvancedMessage::GrblTab(msg) => {
+                self.grbl_tab.unsaved = true;
+                self.grbl_tab.update(msg)
+            }
+            //_ => {}
         }
     }
 
@@ -142,6 +170,7 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .height(Length::Fill)
+                .width(Length::Units(200))
                 .padding(20)
                 .on_press(TabBarMessage::Grbl),
             )
@@ -155,6 +184,7 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .height(Length::Fill)
+                .width(Length::Units(200))
                 .padding(20)
                 .on_press(TabBarMessage::Nodes),
             )
@@ -168,6 +198,7 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .height(Length::Fill)
+                .width(Length::Units(200))
                 .padding(20)
                 .on_press(TabBarMessage::Actions),
             )
@@ -181,6 +212,7 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .height(Length::Fill)
+                .width(Length::Units(200))
                 .padding(20)
                 .on_press(TabBarMessage::Logs),
             )
@@ -209,8 +241,15 @@ impl SaveBar {
 
     fn view(&mut self) -> Element<'_, SaveBarMessage> {
         Row::new()
+            .height(Length::Units(50))
             .width(Length::Fill)
-            .push(Text::new("Unsaved Changes!").size(20).font(CQ_MONO))
+            .push(Space::with_width(Length::Units(50)))
+            .push(
+                Text::new("Unsaved Changes!")
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .size(20)
+                    .font(CQ_MONO),
+            )
             .push(Space::with_width(Length::Fill))
             .push(
                 Button::new(
@@ -222,6 +261,7 @@ impl SaveBar {
                 .padding(10)
                 .on_press(SaveBarMessage::Save),
             )
+            .push(Space::with_width(Length::Units(25)))
             .push(
                 Button::new(
                     &mut self.cancel_btn,
@@ -232,11 +272,13 @@ impl SaveBar {
                 .padding(10)
                 .on_press(SaveBarMessage::Cancel),
             )
+            .push(Space::with_width(Length::Units(50)))
             .into()
     }
 }
 
 struct GrblTab {
+    save_bar: SaveBar,
     unsaved: bool,
     grbl: Grbl,
     settings: Vec<GrblSetting>,
@@ -250,46 +292,116 @@ struct GrblSetting {
 
 #[derive(Debug, Clone)]
 enum GrblMessage {
-    TextChanged(String),
+    SettingChanged(usize, GrblSettingMessage),
+    SaveMessage(SaveBarMessage),
 }
 
 impl GrblTab {
-    fn new(grbl: Grbl) -> Self {
+    fn new(grbl: Grbl, settings: Vec<GrblSetting>) -> Self {
         GrblTab {
+            save_bar: SaveBar::new(),
             unsaved: false,
             grbl,
-            settings: Vec::new(),
+            settings,
+        }
+    }
+
+    fn update(&mut self, message: GrblMessage) {
+        match message {
+            GrblMessage::SettingChanged(i, GrblSettingMessage::TextChanged(val)) => {
+                self.settings[i].input_value = val
+            }
+            GrblMessage::SaveMessage(SaveBarMessage::Save) => {
+                for setting in &self.settings {
+                    self.grbl.push_command(Cmd::new(format!(
+                        "{}={}",
+                        &setting.text, &setting.input_value
+                    )));
+                }
+                if let Some(final_cmd) = self.settings.last().clone() {
+                    loop {
+                        if let Some(cmd) = self.grbl.pop_command() {
+                            if cmd.command
+                                == format!("{}={}", final_cmd.text, final_cmd.input_value)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                self.unsaved = false;
+            }
+            _ => {}
         }
     }
 
     fn view(&mut self) -> Element<'_, GrblMessage> {
-        self.settings
-            .iter_mut()
-            .enumerate()
-            .fold(Column::new().width(Length::Fill), |col, (_i, setting)| {
-                col.push(
-                    Row::new()
-                        .push(
-                            Column::new()
-                                .push(Text::new(&setting.text))
-                                .padding(10)
-                                .spacing(10)
-                                .width(Length::Units(100)),
-                        )
-                        .push(
-                            TextInput::new(
-                                &mut setting.input_state,
-                                "",
-                                &setting.input_value,
-                                GrblMessage::TextChanged,
-                            )
-                            .padding(10)
-                            .width(Length::Units(400)),
-                        ),
-                )
+        let content = match self.unsaved {
+            true => Column::new().align_items(Align::Center).push(
+                self.save_bar
+                    .view()
+                    .map(move |msg| GrblMessage::SaveMessage(msg)),
+            ),
+            false => Column::new()
                 .align_items(Align::Center)
-                .spacing(5)
-            })
+                .push(Space::with_height(Length::Units(50))),
+        };
+        content
+            .push(
+                self.settings
+                    .iter_mut()
+                    .enumerate()
+                    .fold(Column::new(), |col, (i, setting)| {
+                        col.push(
+                            setting
+                                .view()
+                                .map(move |msg| GrblMessage::SettingChanged(i, msg)),
+                        )
+                    }),
+            )
+            .into()
+    }
+}
+
+#[derive(Debug, Clone)]
+enum GrblSettingMessage {
+    TextChanged(String),
+}
+
+impl GrblSetting {
+    fn new(text: String, input_value: String) -> Self {
+        GrblSetting {
+            text,
+            input_value,
+            input_state: text_input::State::new(),
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, GrblSettingMessage> {
+        Row::new()
+            .padding(5)
+            .push(
+                Column::new()
+                    .push(Text::new(&self.text))
+                    .padding(10)
+                    .width(Length::Units(75)),
+            )
+            .push(
+                Column::new()
+                    .push(Text::new("="))
+                    .padding(10)
+                    .width(Length::Units(30)),
+            )
+            .push(
+                TextInput::new(
+                    &mut self.input_state,
+                    "",
+                    &self.input_value,
+                    GrblSettingMessage::TextChanged,
+                )
+                .padding(10)
+                .width(Length::Units(400)),
+            )
             .into()
     }
 }
