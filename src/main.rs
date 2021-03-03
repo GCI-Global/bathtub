@@ -367,7 +367,7 @@ enum Message {
     Tick,
 }
 
-impl Application for Bathtub {
+impl<'a> Application for Bathtub {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Flags = ();

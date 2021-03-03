@@ -1067,10 +1067,10 @@ fn icon(unicode: char) -> Text {
         .size(20)
 }
 
-fn okay_icon() -> Text {
+pub fn okay_icon() -> Text {
     icon('\u{F00C}')
 }
 
-fn delete_icon() -> Text {
+pub fn delete_icon() -> Text {
     icon('\u{F1F8}')
 }
