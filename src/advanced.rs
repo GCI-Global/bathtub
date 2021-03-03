@@ -753,8 +753,8 @@ impl ConfigNode {
                 .push(
                     Row::new()
                         .padding(5)
-                        .push(Text::new("Hidden:").vertical_alignment(VerticalAlignment::Center))
-                        .push(Space::with_width(Length::Units(38)))
+                        .push(Text::new("Hidden:"))
+                        .push(Space::with_width(Length::Units(36)))
                         .push(
                             PickList::new(
                                 &mut self.hide_state,

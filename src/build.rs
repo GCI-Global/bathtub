@@ -114,6 +114,8 @@ impl Build {
                     self.add_step.hours_value = "".to_string();
                     self.add_step.mins_value = "".to_string();
                     self.add_step.secs_value = "".to_string();
+                    self.add_step.in_bath = true;
+                    self.add_step.require_input = false;
                 }
             }
             BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
