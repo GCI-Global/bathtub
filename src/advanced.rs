@@ -1,4 +1,4 @@
-use super::actions::Actions;
+use super::actions::{Action, Actions};
 use super::nodes::{Node, Nodes};
 use crate::CQ_MONO;
 use iced::{
@@ -9,17 +9,17 @@ use iced::{
 
 use super::build::{delete_icon, okay_icon};
 use super::grbl::{Command as Cmd, Grbl};
+use regex::Regex;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct Advanced {
     scroll: scrollable::State,
     state: TabState,
-    //ref_nodes: Rc<RefCell<Nodes>>,
-    ref_actions: Rc<RefCell<Actions>>,
     tab_bar: TabBar,
     grbl_tab: GrblTab,
     nodes_tab: NodeTab,
+    actions_tab: ActionTab,
 }
 
 enum TabState {
@@ -34,6 +34,7 @@ pub enum AdvancedMessage {
     TabBar(TabBarMessage),
     GrblTab(GrblMessage),
     NodesTab(NodeTabMessage),
+    ActionsTab(ActionTabMessage),
 }
 
 impl Advanced {
@@ -45,10 +46,10 @@ impl Advanced {
         Advanced {
             scroll: scrollable::State::new(),
             state: TabState::Grbl,
-            ref_actions,
             tab_bar: TabBar::new(),
             grbl_tab: GrblTab::new(grbl, Vec::new()),
             nodes_tab: NodeTab::new(ref_nodes),
+            actions_tab: ActionTab::new(ref_actions),
         }
     }
 
@@ -56,14 +57,33 @@ impl Advanced {
         match message {
             AdvancedMessage::TabBar(TabBarMessage::Grbl) => {
                 if !self.grbl_tab.unsaved {
+                    self.grbl_tab.grbl.push_command(Cmd::new("$I".to_string()));
+                    loop {
+                        if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
+                            if cmd.command == "$I".to_string() {
+                                let r = Regex::new(r"[0-9]*\.+[0-9]*[a-z]*").unwrap();
+                                let r2 = Regex::new(r"[0-9]{8}").unwrap();
+                                if let Some(caps) = r.captures(&(cmd.result.as_ref().unwrap()[..]))
+                                {
+                                    self.grbl_tab.version = Some(caps[0].to_string());
+                                }
+                                if let Some(caps2) =
+                                    r2.captures(&(cmd.result.as_ref().unwrap()[..]))
+                                {
+                                    self.grbl_tab.version_release_date = Some(date(&caps2[0]));
+                                }
+
+                                break;
+                            }
+                        }
+                    }
                     self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
-                    if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
-                        if cmd.command == "$$".to_string() {
-                            self.grbl_tab.settings =
-                                cmd.result
-                                    .unwrap()
-                                    .lines()
-                                    .fold(Vec::new(), |mut v, response| {
+                    loop {
+                        if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
+                            if cmd.command == "$$".to_string() {
+                                self.grbl_tab.settings = cmd.result.unwrap().lines().fold(
+                                    Vec::new(),
+                                    |mut v, response| {
                                         let r: Vec<&str> = response.split("=").collect();
                                         if r.len() > 1 {
                                             v.push(GrblSetting::new(
@@ -72,7 +92,10 @@ impl Advanced {
                                             ));
                                         }
                                         v
-                                    });
+                                    },
+                                );
+                                break;
+                            }
                         }
                     }
                 }
@@ -115,6 +138,7 @@ impl Advanced {
                 self.scroll.scroll_to_bottom();
             }
             AdvancedMessage::NodesTab(msg) => self.nodes_tab.update(msg),
+            AdvancedMessage::ActionsTab(msg) => self.actions_tab.update(msg),
         }
     }
 
@@ -132,7 +156,10 @@ impl Advanced {
                 .nodes_tab
                 .view()
                 .map(move |msg| AdvancedMessage::NodesTab(msg)),
-            TabState::Actions => Column::new().into(),
+            TabState::Actions => self
+                .actions_tab
+                .view()
+                .map(move |msg| AdvancedMessage::ActionsTab(msg)),
             TabState::Logs => Column::new().into(),
         };
         let scrollable = Scrollable::new(&mut self.scroll)
@@ -237,7 +264,7 @@ struct SaveBar {
 }
 
 #[derive(Debug, Clone)]
-enum SaveBarMessage {
+pub enum SaveBarMessage {
     Save,
     Cancel,
 }
@@ -293,6 +320,8 @@ struct GrblTab {
     unsaved: bool,
     grbl: Grbl,
     settings: Vec<GrblSetting>,
+    version: Option<String>,
+    version_release_date: Option<String>,
 }
 
 struct GrblSetting {
@@ -314,6 +343,8 @@ impl GrblTab {
             unsaved: false,
             grbl,
             settings,
+            version: None,
+            version_release_date: None,
         }
     }
 
@@ -359,6 +390,28 @@ impl GrblTab {
         };
         content
             .push(
+                Text::new(format!(
+                    "Version: {}",
+                    self.version
+                        .as_ref()
+                        .unwrap_or(&"** Version Unavailable **".to_string())
+                ))
+                .horizontal_alignment(HorizontalAlignment::Left)
+                .font(CQ_MONO)
+                .size(40)
+                .width(Length::Units(505)),
+            )
+            .push(
+                Text::new(
+                    self.version_release_date
+                        .as_ref()
+                        .unwrap_or(&"** Release Date Unavailable **".to_string()),
+                )
+                .horizontal_alignment(HorizontalAlignment::Left)
+                .size(20)
+                .width(Length::Units(505)),
+            )
+            .push(
                 self.settings
                     .iter_mut()
                     .enumerate()
@@ -375,7 +428,7 @@ impl GrblTab {
 }
 
 #[derive(Debug, Clone)]
-enum GrblSettingMessage {
+pub enum GrblSettingMessage {
     TextChanged(String),
 }
 
@@ -427,7 +480,7 @@ struct NodeTab {
 }
 
 #[derive(Debug, Clone)]
-enum NodeTabMessage {
+pub enum NodeTabMessage {
     AddConfigNode,
     ConfigNode((usize, ConfigNodeMessage)),
     SaveMessage(SaveBarMessage),
@@ -684,7 +737,7 @@ enum ConfigNodeState {
 }
 
 #[derive(Debug, Clone)]
-enum ConfigNodeMessage {
+pub enum ConfigNodeMessage {
     NameChanged(String),
     HideChanged(Boolean),
     XChanged(String),
@@ -886,6 +939,7 @@ impl ConfigNode {
                                 &self.x,
                                 ConfigNodeMessage::XChanged,
                             )
+                            .font(CQ_MONO)
                             .padding(10)
                             .max_width(400),
                         ),
@@ -902,6 +956,7 @@ impl ConfigNode {
                                 &self.y,
                                 ConfigNodeMessage::YChanged,
                             )
+                            .font(CQ_MONO)
                             .padding(10)
                             .max_width(400),
                         ),
@@ -918,6 +973,7 @@ impl ConfigNode {
                                 &self.z,
                                 ConfigNodeMessage::ZChanged,
                             )
+                            .font(CQ_MONO)
                             .padding(10)
                             .max_width(400),
                         ),
@@ -988,21 +1044,21 @@ impl ConfigNode {
                         .padding(5)
                         .push(Text::new("X Pos (cm):"))
                         .push(Space::with_width(Length::Units(10)))
-                        .push(Text::new(&self.x)),
+                        .push(Text::new(&self.x).font(CQ_MONO)),
                 )
                 .push(
                     Row::new()
                         .padding(5)
                         .push(Text::new("Y Pos (cm):"))
                         .push(Space::with_width(Length::Units(10)))
-                        .push(Text::new(&self.y)),
+                        .push(Text::new(&self.y).font(CQ_MONO)),
                 )
                 .push(
                     Row::new()
                         .padding(5)
                         .push(Text::new("Z Pos (cm):"))
                         .push(Space::with_width(Length::Units(10)))
-                        .push(Text::new(&self.z)),
+                        .push(Text::new(&self.z).font(CQ_MONO)),
                 )
                 .push(
                     Row::new()
@@ -1035,7 +1091,7 @@ struct StringPickList {
 }
 
 #[derive(Debug, Clone)]
-enum StringPickListMessage {
+pub enum StringPickListMessage {
     Changed(String),
     Delete,
 }
@@ -1127,4 +1183,397 @@ impl std::fmt::Display for Boolean {
             }
         )
     }
+}
+
+// ======================= //
+// ----- ACTIONS TAB ---- //
+// ===================== //
+struct ActionTab {
+    unsaved: bool,
+    save_bar: SaveBar,
+    ref_actions: Rc<RefCell<Actions>>,
+    modified_actions: Rc<RefCell<Actions>>,
+    config_actions: Vec<ConfigAction>,
+    add_config_action_btn: button::State,
+}
+
+#[derive(Debug, Clone)]
+pub enum ActionTabMessage {
+    AddConfigAction,
+    ConfigAction(usize, ConfigActionMessage),
+    SaveMessage(SaveBarMessage),
+}
+
+impl ActionTab {
+    fn new(ref_actions: Rc<RefCell<Actions>>) -> Self {
+        let modified_actions = Rc::new(RefCell::new(ref_actions.borrow().clone()));
+        ActionTab {
+            unsaved: false,
+            save_bar: SaveBar::new(),
+            ref_actions: Rc::clone(&ref_actions),
+            modified_actions: Rc::clone(&modified_actions),
+            config_actions: Rc::clone(&modified_actions).borrow().action.iter().fold(
+                Vec::new(),
+                |mut v, a| {
+                    v.push(ConfigAction::new(a.name.clone(), a.commands.clone()));
+                    v
+                },
+            ),
+            add_config_action_btn: button::State::new(),
+        }
+    }
+
+    fn update(&mut self, message: ActionTabMessage) {
+        match message {
+            ActionTabMessage::ConfigAction(i, ConfigActionMessage::Delete) => {
+                self.config_actions.remove(i);
+            }
+            ActionTabMessage::ConfigAction(i, ConfigActionMessage::NameChanged(name)) => {
+                // mark unsaved, change value in UI and modfied_nodes
+                self.unsaved = true;
+                let index = self
+                    .modified_actions
+                    .borrow()
+                    .action
+                    .iter()
+                    .position(|a| a.name == self.config_actions[i].name)
+                    .unwrap();
+                self.modified_actions.borrow_mut().action[index].name = name.clone();
+                self.config_actions[i].update(ConfigActionMessage::NameChanged(name))
+            }
+            ActionTabMessage::ConfigAction(i, ConfigActionMessage::Edit) => {
+                for config_action in &mut self.config_actions {
+                    config_action.update(ConfigActionMessage::Okay);
+                }
+                self.unsaved = true;
+                self.config_actions[i].update(ConfigActionMessage::Edit);
+            }
+            ActionTabMessage::ConfigAction(i, msg) => self.config_actions[i].update(msg),
+            ActionTabMessage::AddConfigAction => {
+                // generate unique name
+                let mut i = 2;
+                let name = if self
+                    .modified_actions
+                    .borrow()
+                    .action
+                    .iter()
+                    .any(|n| n.name == "New Action".to_string())
+                {
+                    while self
+                        .modified_actions
+                        .borrow()
+                        .action
+                        .iter()
+                        .any(|n| n.name == format!("New Action #{}", i))
+                    {
+                        i += 1;
+                    }
+                    format!("New Action #{}", i)
+                } else {
+                    "New Action".to_string()
+                };
+
+                // push node to UI and data
+                self.modified_actions.borrow_mut().action.push(Action {
+                    name: name.clone(),
+                    commands: Vec::new(),
+                });
+                self.config_actions
+                    .push(ConfigAction::new(name, Vec::new()));
+            }
+            ActionTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
+                self.modified_actions = Rc::new(RefCell::new(self.ref_actions.borrow().clone()));
+                self.config_actions = Rc::clone(&self.modified_actions)
+                    .borrow()
+                    .action
+                    .iter()
+                    .fold(Vec::new(), |mut v, a| {
+                        v.push(ConfigAction::new(a.name.clone(), a.commands.clone()));
+                        v
+                    });
+
+                self.unsaved = false;
+            }
+            _ => {}
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, ActionTabMessage> {
+        let content = match self.unsaved {
+            true => Column::new().align_items(Align::Center).push(
+                self.save_bar
+                    .view()
+                    .map(move |msg| ActionTabMessage::SaveMessage(msg)),
+            ),
+            false => Column::new()
+                .align_items(Align::Center)
+                .push(Space::with_height(Length::Units(50))),
+        };
+        content
+            .push(self.config_actions.iter_mut().enumerate().fold(
+                Column::new(),
+                |col, (i, config_action)| {
+                    col.push(
+                        Row::new().max_width(400).padding(20).push(
+                            config_action
+                                .view()
+                                .map(move |msg| ActionTabMessage::ConfigAction(i, msg)),
+                        ),
+                    )
+                },
+            ))
+            .push(Space::with_height(Length::Units(50)))
+            .push(
+                Button::new(
+                    &mut self.add_config_action_btn,
+                    Text::new("Add Action")
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .size(20)
+                        .font(CQ_MONO),
+                )
+                .padding(10)
+                .width(Length::Units(400))
+                .on_press(ActionTabMessage::AddConfigAction),
+            )
+            .into()
+    }
+}
+
+struct ConfigAction {
+    name: String,
+    name_state: text_input::State,
+    command_inputs: Vec<CommandInput>,
+    add_command_btn: button::State,
+    state: ConfigActionState,
+    edit_btn: button::State,
+    okay_btn: button::State,
+    delete_btn: button::State,
+}
+
+#[derive(Debug, Clone)]
+enum ConfigActionState {
+    Editing,
+    Idle,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConfigActionMessage {
+    NameChanged(String),
+    Commands(usize, CommandInputMessage),
+    AddCommand,
+    Edit,
+    Okay,
+    Delete,
+}
+
+impl ConfigAction {
+    fn new(name: String, commands: Vec<String>) -> Self {
+        ConfigAction {
+            name_state: text_input::State::new(),
+            command_inputs: commands.iter().fold(Vec::new(), |mut v, cmd| {
+                v.push(CommandInput::new(cmd.clone()));
+                v
+            }),
+            name,
+            add_command_btn: button::State::new(),
+            state: ConfigActionState::Idle,
+            edit_btn: button::State::new(),
+            okay_btn: button::State::new(),
+            delete_btn: button::State::new(),
+        }
+    }
+
+    fn update(&mut self, message: ConfigActionMessage) {
+        // TODO: Disallow save if multiple actions have same name
+        match message {
+            ConfigActionMessage::Edit => self.state = ConfigActionState::Editing,
+            ConfigActionMessage::Okay => {
+                for i in (0..self.command_inputs.len()).rev() {
+                    if self.command_inputs[i].value == "G-code Command".to_string() {
+                        self.command_inputs.remove(i);
+                    }
+                }
+                self.state = ConfigActionState::Idle
+            }
+            ConfigActionMessage::NameChanged(name) => self.name = name,
+            ConfigActionMessage::Commands(i, CommandInputMessage::Delete) => {
+                self.command_inputs.remove(i);
+            }
+            ConfigActionMessage::Commands(i, msg) => self.command_inputs[i].update(msg),
+            ConfigActionMessage::AddCommand => {
+                self.command_inputs.push(CommandInput::new("".to_string()))
+            }
+            _ => {}
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, ConfigActionMessage> {
+        match self.state {
+            ConfigActionState::Editing => Column::new()
+                .push(
+                    Row::new()
+                        .push(
+                            TextInput::new(
+                                &mut self.name_state,
+                                "Name",
+                                &self.name,
+                                ConfigActionMessage::NameChanged,
+                            )
+                            .padding(10),
+                        )
+                        .push(
+                            Button::new(&mut self.okay_btn, okay_icon())
+                                .on_press(ConfigActionMessage::Okay)
+                                .width(Length::Units(50))
+                                .padding(10),
+                        )
+                        .push(
+                            Button::new(&mut self.delete_btn, delete_icon())
+                                .on_press(ConfigActionMessage::Delete)
+                                .width(Length::Units(50))
+                                .padding(10),
+                        ),
+                )
+                .push(
+                    Row::new()
+                        .padding(5)
+                        .push(Text::new("G-code\nCommands:"))
+                        .push(Space::with_width(Length::Units(25)))
+                        .push(
+                            Column::new()
+                                .push(
+                                    self.command_inputs
+                                        .iter_mut()
+                                        .enumerate()
+                                        .fold(Column::new(), |col, (i, input)| {
+                                            col.push(input.view().map(move |msg| {
+                                                ConfigActionMessage::Commands(i, msg)
+                                            }))
+                                        })
+                                        .push(
+                                            Button::new(
+                                                &mut self.add_command_btn,
+                                                Text::new("Add Command").horizontal_alignment(
+                                                    HorizontalAlignment::Center,
+                                                ),
+                                            )
+                                            .on_press(ConfigActionMessage::AddCommand)
+                                            .width(Length::Fill)
+                                            .padding(10),
+                                        ),
+                                )
+                                .max_width(400),
+                        ),
+                )
+                .into(),
+            ConfigActionState::Idle => Column::new()
+                .push(
+                    Row::new()
+                        .push(
+                            TextInput::new(
+                                &mut self.name_state,
+                                "Name",
+                                &self.name,
+                                ConfigActionMessage::NameChanged,
+                            )
+                            .padding(10),
+                        )
+                        .push(
+                            Button::new(
+                                &mut self.edit_btn,
+                                Text::new("Edit").horizontal_alignment(HorizontalAlignment::Center),
+                            )
+                            .on_press(ConfigActionMessage::Edit)
+                            .width(Length::Units(100))
+                            .padding(10),
+                        ),
+                )
+                .push(
+                    Row::new()
+                        .padding(5)
+                        .push(Text::new("G-code\nCommands:"))
+                        .push(Space::with_width(Length::Units(25)))
+                        .push(
+                            self.command_inputs
+                                .iter()
+                                .fold(Column::new(), |col, input| {
+                                    col.push(Text::new(&input.value))
+                                }),
+                        ),
+                )
+                .into(),
+        }
+    }
+}
+
+struct CommandInput {
+    state: text_input::State,
+    delete_btn: button::State,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum CommandInputMessage {
+    InputChanged(String),
+    Delete,
+}
+
+impl CommandInput {
+    fn new(value: String) -> Self {
+        CommandInput {
+            state: text_input::State::new(),
+            value,
+            delete_btn: button::State::new(),
+        }
+    }
+
+    fn update(&mut self, message: CommandInputMessage) {
+        match message {
+            CommandInputMessage::InputChanged(input) => self.value = input,
+            _ => {}
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, CommandInputMessage> {
+        Row::new()
+            .push(
+                TextInput::new(
+                    &mut self.state,
+                    "Gcode Command",
+                    &self.value[..],
+                    CommandInputMessage::InputChanged,
+                )
+                .padding(10),
+            )
+            .push(
+                Button::new(&mut self.delete_btn, delete_icon())
+                    .width(Length::Units(50))
+                    .padding(10)
+                    .on_press(CommandInputMessage::Delete),
+            )
+            .into()
+    }
+}
+
+fn date(date_num: &str) -> String {
+    format!(
+        "{} {}, {}",
+        match &date_num[4..6] {
+            "01" => "January",
+            "02" => "Febuary",
+            "03" => "March",
+            "04" => "April",
+            "05" => "May",
+            "06" => "June",
+            "07" => "July",
+            "08" => "August",
+            "09" => "September",
+            "10" => "October",
+            "11" => "November",
+            "12" => "December",
+            _ => "",
+        },
+        &date_num[6..8],
+        &date_num[0..4]
+    )
 }
