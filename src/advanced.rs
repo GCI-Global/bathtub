@@ -110,6 +110,10 @@ impl Advanced {
                 self.grbl_tab.unsaved = true;
                 self.grbl_tab.update(msg)
             }
+            AdvancedMessage::NodesTab(NodeTabMessage::AddConfigNode) => {
+                self.nodes_tab.update(NodeTabMessage::AddConfigNode);
+                self.scroll.scroll_to_bottom();
+            }
             AdvancedMessage::NodesTab(msg) => self.nodes_tab.update(msg),
         }
     }
@@ -419,6 +423,7 @@ struct NodeTab {
     ref_nodes: Rc<RefCell<Nodes>>,
     modified_nodes: Rc<RefCell<Nodes>>,
     config_nodes: Vec<ConfigNode>,
+    add_config_node_btn: button::State,
 }
 
 #[derive(Debug, Clone)]
@@ -436,7 +441,7 @@ impl NodeTab {
             save_bar: SaveBar::new(),
             ref_nodes: Rc::clone(&ref_nodes),
             modified_nodes: Rc::clone(&modified_nodes),
-            config_nodes: ref_nodes
+            config_nodes: Rc::clone(&modified_nodes)
                 .borrow()
                 .node
                 .iter()
@@ -454,12 +459,14 @@ impl NodeTab {
                     ));
                     v
                 }),
+            add_config_node_btn: button::State::new(),
         }
     }
 
     fn update(&mut self, message: NodeTabMessage) {
         match message {
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::NameChanged(name))) => {
+                self.unsaved = true;
                 // If a name is changed update all other instances of the node name
                 let original_name = self.config_nodes[i].name.clone();
                 let index = self
@@ -499,7 +506,7 @@ impl NodeTab {
             }
             NodeTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
                 self.modified_nodes = Rc::new(RefCell::new(self.ref_nodes.borrow().clone()));
-                self.config_nodes = Rc::clone(&self.ref_nodes)
+                self.config_nodes = Rc::clone(&self.modified_nodes)
                     .borrow()
                     .node
                     .iter()
@@ -540,7 +547,50 @@ impl NodeTab {
                     });
                 *rn = Nodes { node }
             }
-            _ => {}
+            NodeTabMessage::AddConfigNode => {
+                // generate unique name
+                let mut i = 2;
+                let name = if self
+                    .modified_nodes
+                    .borrow()
+                    .node
+                    .iter()
+                    .any(|n| n.name == "New Node".to_string())
+                {
+                    while self
+                        .modified_nodes
+                        .borrow()
+                        .node
+                        .iter()
+                        .any(|n| n.name == format!("New Node #{}", i))
+                    {
+                        i += 1;
+                    }
+                    format!("New Node #{}", i)
+                } else {
+                    "New Node".to_string()
+                };
+
+                // push node to UI and data
+                self.modified_nodes.borrow_mut().node.push(Node {
+                    name: name.clone(),
+                    hide: false,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    neighbors: Vec::new(),
+                });
+                self.config_nodes.push(ConfigNode::new(
+                    name,
+                    false,
+                    0.0,
+                    0.0,
+                    0.0,
+                    Vec::new(),
+                    Rc::clone(&self.ref_nodes),
+                    Rc::clone(&self.modified_nodes),
+                ));
+            }
         }
     }
 
@@ -568,6 +618,19 @@ impl NodeTab {
                     )
                 },
             ))
+            .push(Space::with_height(Length::Units(50)))
+            .push(
+                Button::new(
+                    &mut self.add_config_node_btn,
+                    Text::new("Add Config Node")
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .size(20)
+                        .font(CQ_MONO),
+                )
+                .padding(10)
+                .width(Length::Units(400))
+                .on_press(NodeTabMessage::AddConfigNode),
+            )
             .into()
     }
 }
