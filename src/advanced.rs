@@ -490,6 +490,27 @@ impl NodeTab {
                 self.config_nodes[i].update(ConfigNodeMessage::NameChanged(name))
             }
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::Delete)) => {
+                let delete_name = self.config_nodes[i].name.clone();
+                let index = self
+                    .modified_nodes
+                    .borrow()
+                    .node
+                    .iter()
+                    .position(|n| n.name == delete_name)
+                    .unwrap();
+                self.modified_nodes.borrow_mut().node.remove(index);
+                for node in &mut self.config_nodes {
+                    match node
+                        .neighbors_pick_lists
+                        .iter()
+                        .position(|pick_list| pick_list.value.as_ref().unwrap() == &delete_name)
+                    {
+                        Some(i) => {
+                            node.neighbors_pick_lists.remove(i);
+                        }
+                        None => {}
+                    }
+                }
                 self.config_nodes.remove(i);
             }
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::Edit)) => {
