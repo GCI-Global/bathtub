@@ -516,7 +516,7 @@ impl NodeTab {
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::Edit)) => {
                 // only alow one to en in edit mode at a time
                 for node in &mut self.config_nodes {
-                    node.state = ConfigNodeState::Idle;
+                    node.update(ConfigNodeMessage::Okay);
                 }
                 self.unsaved = true;
                 self.config_nodes[i].update(ConfigNodeMessage::Edit)
