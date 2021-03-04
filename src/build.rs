@@ -70,6 +70,13 @@ impl Build {
                 self.steps
                     .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
             }
+            BuildMessage::StepMessage(i, StepMessage::Edit) => {
+                // reset all to idle so ony one can be edited at a time
+                for step in &mut self.steps {
+                    step.update(StepMessage::Okay)
+                }
+                self.steps[i].update(StepMessage::Edit)
+            }
             BuildMessage::StepMessage(i, msg) => {
                 if let Some(step) = self.steps.get_mut(i) {
                     step.update(msg)
@@ -213,6 +220,7 @@ impl Build {
             .push(name_and_save)
             .push(column_text)
             .push(steps)
+            .push(Space::with_height(Length::Units(25)))
             .push(add_step);
         Scrollable::new(&mut self.scroll)
             .padding(40)
