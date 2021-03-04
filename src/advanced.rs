@@ -150,7 +150,7 @@ struct TabBar {
 }
 
 #[derive(Debug, Clone)]
-enum TabBarMessage {
+pub enum TabBarMessage {
     Grbl,
     Nodes,
     Actions,
@@ -743,6 +743,20 @@ impl ConfigNode {
             ConfigNodeMessage::ZChanged(z) => self.z = z,
             ConfigNodeMessage::Neighbors(i, StringPickListMessage::Delete) => {
                 self.neighbors_pick_lists.remove(i);
+                let siblings =
+                    self.neighbors_pick_lists
+                        .iter()
+                        .fold(Vec::new(), |mut v, pick_list| {
+                            v.push(pick_list.value.clone().unwrap());
+                            v
+                        });
+                for pick_list in &mut self.neighbors_pick_lists {
+                    pick_list.siblings = siblings
+                        .clone()
+                        .into_iter()
+                        .filter(|sibling| sibling != pick_list.value.as_ref().unwrap())
+                        .collect(); // remove itself from siblings
+                }
             }
             ConfigNodeMessage::Neighbors(i, StringPickListMessage::Changed(new_value)) => {
                 // update siblings of sibling nodes so that no node can have two identical
