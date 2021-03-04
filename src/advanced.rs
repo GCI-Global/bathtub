@@ -816,7 +816,17 @@ impl ConfigNode {
                     }),
             )),
             ConfigNodeMessage::Edit => self.state = ConfigNodeState::Editing,
-            ConfigNodeMessage::Okay => self.state = ConfigNodeState::Idle,
+            ConfigNodeMessage::Okay => {
+                for i in (0..self.neighbors_pick_lists.len()).rev() {
+                    if self.neighbors_pick_lists[i].value.as_ref().unwrap()
+                        == &"Choose Neighbor".to_string()
+                    {
+                        self.neighbors_pick_lists.remove(i);
+                    }
+                }
+                //self.neighbors_pick_lists.into_iter().filter(|pick_list| pick_list.value.as_ref().unwrap() == "Choose Neighbor").collect::<Vec<StringPickList>>();
+                self.state = ConfigNodeState::Idle
+            }
             _ => {}
         }
     }
