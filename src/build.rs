@@ -84,7 +84,7 @@ impl Build {
             }
             BuildMessage::AddStepMessage(AddStepMessage::Add(
                 dest,
-                inbath,
+                hover,
                 action,
                 nodes,
                 hours,
@@ -102,7 +102,7 @@ impl Build {
                         Rc::clone(&self.nodes_ref),
                         Rc::clone(&self.actions_ref),
                         Some(d),
-                        inbath,
+                        hover,
                         action,
                         hours,
                         mins,
@@ -121,7 +121,7 @@ impl Build {
                     self.add_step.hours_value = "".to_string();
                     self.add_step.mins_value = "".to_string();
                     self.add_step.secs_value = "".to_string();
-                    self.add_step.in_bath = true;
+                    self.add_step.hover = true;
                     self.add_step.require_input = false;
                 }
             }
@@ -141,7 +141,7 @@ impl Build {
                             "hours_value",
                             "mins_value",
                             "secs_value",
-                            "in_bath",
+                            "hover",
                             "require_input",
                         ])
                         .unwrap();
@@ -154,7 +154,7 @@ impl Build {
                                 (*step.hours_value).to_string(),
                                 (*step.mins_value).to_string(),
                                 (*step.secs_value).to_string(),
-                                step.in_bath.to_string(),
+                                step.hover.to_string(),
                                 step.require_input.to_string(),
                             ])
                             .unwrap();
@@ -236,7 +236,7 @@ pub struct Step {
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
     selected_destination: Option<String>,
-    in_bath: bool,
+    hover: bool,
     selected_action: Option<String>,
     secs_value: String,
     mins_value: String,
@@ -278,7 +278,7 @@ pub enum StepMessage {
     MinsChanged(String),
     HoursChanged(String),
     NewNum(usize),
-    ToggleBath(bool),
+    ToggleHover(bool),
     ToggleInput(bool),
     HoursIncrement,
     HoursDecrement,
@@ -298,7 +298,7 @@ impl Step {
         nodes_ref: Rc<RefCell<Nodes>>,
         actions_ref: Rc<RefCell<Actions>>,
         selected_destination: Option<String>,
-        in_bath: bool,
+        hover: bool,
         selected_action: Option<String>,
         hours_value: String,
         mins_value: String,
@@ -311,7 +311,7 @@ impl Step {
             nodes_ref,
             actions_ref,
             selected_destination,
-            in_bath,
+            hover,
             selected_action,
             secs_value,
             mins_value,
@@ -329,7 +329,7 @@ impl Step {
                 self.selected_destination = Some(destination)
             }
             StepMessage::NewAction(action) => self.selected_action = Some(action),
-            StepMessage::ToggleBath(b) => self.in_bath = b,
+            StepMessage::ToggleHover(b) => self.hover = b,
             StepMessage::ToggleInput(b) => self.require_input = b,
             StepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
@@ -462,7 +462,7 @@ impl Step {
                                             .borrow()
                                             .node
                                             .iter()
-                                            .filter(|n| !n.name.contains("_inBath") && !n.hide)
+                                            .filter(|n| !n.name.contains("_hover") && !n.hide)
                                             .fold(Vec::new(), |mut v, n| {
                                                 v.push(n.name.clone());
                                                 v
@@ -554,9 +554,9 @@ impl Step {
                             .push(
                                 Column::new()
                                     .push(Checkbox::new(
-                                        self.in_bath,
-                                        "Enter Bath",
-                                        StepMessage::ToggleBath,
+                                        self.hover,
+                                        "Hover Above",
+                                        StepMessage::ToggleHover,
                                     ))
                                     .padding(4)
                                     .width(Length::Shrink),
@@ -578,8 +578,8 @@ impl Step {
             }
             StepState::Idle { edit_btn } => {
                 let e = "".to_string(); //empty
-                let eb = match self.in_bath {
-                    true => "\n in bath",
+                let hover = match self.hover {
+                    true => "Hover above\n",
                     false => "",
                 };
                 let ri = match self.require_input {
@@ -689,10 +689,10 @@ impl Step {
                         Column::new().push(
                             Text::new(format!(
                                 "{}{}",
+                                hover,
                                 self.selected_destination
                                     .as_ref()
                                     .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
-                                eb
                             ))
                             .font(CQ_MONO)
                             .width(Length::Units(120))
@@ -737,7 +737,7 @@ pub struct AddStep {
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
     destination_state: pick_list::State<String>,
-    in_bath: bool,
+    hover: bool,
     selected_destination: Option<String>,
     actions_state: pick_list::State<String>,
     step_num_state: pick_list::State<usize>,
@@ -770,7 +770,7 @@ pub enum AddStepMessage {
     MinsChanged(String),
     HoursChanged(String),
     NewNum(usize),
-    ToggleBath(bool),
+    ToggleHover(bool),
     ToggleInput(bool),
     HoursIncrement,
     HoursDecrement,
@@ -794,7 +794,7 @@ impl AddStep {
             actions_ref: Rc::clone(&actions_ref),
             destination_state: pick_list::State::default(),
             selected_destination: None,
-            in_bath: true,
+            hover: false,
             actions_state: pick_list::State::default(),
             step_num_state: pick_list::State::default(),
             selected_action: actions_ref
@@ -819,7 +819,7 @@ impl AddStep {
                 self.selected_destination = Some(destination)
             }
             AddStepMessage::NewAction(action) => self.selected_action = Some(action),
-            AddStepMessage::ToggleBath(b) => self.in_bath = b,
+            AddStepMessage::ToggleHover(b) => self.hover = b,
             AddStepMessage::ToggleInput(b) => self.require_input = b,
             AddStepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
@@ -930,7 +930,7 @@ impl AddStep {
                                     .borrow()
                                     .node
                                     .iter()
-                                    .filter(|n| !n.name.contains("_inBath") && !n.hide)
+                                    .filter(|n| !n.name.contains("_hover") && !n.hide)
                                     .fold(Vec::new(), |mut v, n| {
                                         v.push(n.name.clone());
                                         v
@@ -1010,7 +1010,7 @@ impl AddStep {
                                     )
                                     .on_press(AddStepMessage::Add(
                                         self.selected_destination.clone(),
-                                        self.in_bath,
+                                        self.hover,
                                         self.selected_action.clone(),
                                         self.step_num,
                                         self.hours_value.clone(),
@@ -1030,9 +1030,9 @@ impl AddStep {
                     .push(
                         Column::new()
                             .push(Checkbox::new(
-                                self.in_bath,
-                                "Enter Bath",
-                                AddStepMessage::ToggleBath,
+                                self.hover,
+                                "Hover Above",
+                                AddStepMessage::ToggleHover,
                             ))
                             .padding(4)
                             .width(Length::Shrink),

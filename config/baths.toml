@@ -72,7 +72,7 @@ x = -1.0
 y = -14.5
 z = -1.0
 hide = true
-neighbors = ["Rinse 1"]
+neighbors = ["Rinse 1_hover"]
 
 [[node]]
 name = "Rinse 1"

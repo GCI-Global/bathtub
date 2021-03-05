@@ -100,6 +100,7 @@ impl State {
                                 let mut pn = px.lock().unwrap();
                                 *pn = Some(cn.clone());
                                 *cn = nn.remove(0);
+                                println!("current node: {}", cn.name);
                             }
                         }
                         None => {}
@@ -118,16 +119,17 @@ impl State {
                 break;
             }
             // gen paths and send
-            let in_bath = match step.in_bath {
-                true => "_inBath",
+            let hover = match step.hover {
+                true => "_hover",
                 false => "",
             };
             while !break_and_hold(Arc::clone(&recipie_state)) {
                 {
                     let cn = current_node.lock().unwrap();
                     let mut nn = next_nodes.lock().unwrap();
+                    println!("going to {}{}", step.selected_destination, hover);
                     let future_node = &nodes.node[match node_map
-                        .get(&format!("{}{}", step.selected_destination, in_bath))
+                        .get(&format!("{}{}", step.selected_destination, hover))
                     {
                         Some(n) => n,
                         _ => break,
@@ -505,7 +507,7 @@ impl<'a> Application for Bathtub {
                                     secs_value: 0.to_string(),
                                     mins_value: 0.to_string(),
                                     hours_value: 0.to_string(),
-                                    in_bath: state.tabs.manual.in_bath,
+                                    hover: state.tabs.manual.hover,
                                     require_input: false,
                                 }],
                                 state.node_map.clone(),

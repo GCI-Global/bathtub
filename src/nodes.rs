@@ -42,34 +42,39 @@ impl Nodes {
     }
     fn to_nodes(nodes: Nodes) -> Nodes {
         let mut new_nodes: Vec<Node> = vec![];
-        let mut new_neighbors: Vec<String>;
         //let bath_iter = baths.bath.into_iter();
         for node in nodes.node {
-            // create node for head in bath
+            // create node for hovering
             if !node.hide {
                 // if hidden then we do not want to auto-generate realted nodes
                 new_nodes.push(Node {
-                    name: format!("{}_inBath", node.name),
+                    name: format!("{}_hover", node.name),
                     x: node.x,
                     y: node.y,
-                    z: node.z,
+                    z: -1.0,
                     hide: false,
-                    neighbors: vec![node.name.clone()],
+                    neighbors: node
+                        .neighbors
+                        .iter()
+                        .fold(vec![node.name.clone()], |mut v, n| {
+                            v.push(format!("{}_hover", n));
+                            v
+                        }),
                 });
             }
 
-            // create node for head above bath
-            new_neighbors = node.neighbors;
-            if !node.hide {
-                new_neighbors.push(format!("{}_inBath", &node.name));
-            }
+            // create node for head in bath
             new_nodes.push(Node {
-                name: node.name,
+                name: node.name.clone(),
                 x: node.x,
                 y: node.y,
-                z: -1.0,
+                z: node.z,
                 hide: node.hide,
-                neighbors: new_neighbors,
+                neighbors: if node.hide {
+                    node.neighbors
+                } else {
+                    vec![format!("{}_hover", node.name)]
+                },
             })
         }
         Nodes { node: new_nodes }
@@ -86,7 +91,7 @@ impl NodeGrid2d {
     pub fn from_nodes(nodes: Nodes) -> NodeGrid2d {
         let mut node_vec = nodes.node.clone();
         // sort by y
-        node_vec.retain(|n| n.z == -1.0);
+        node_vec.retain(|n| !n.name.contains("_hover"));
         node_vec.sort_by(|a, b| (b.y).total_cmp(&a.y));
         // split into many y vecs
         let mut test_value: f32 = node_vec[0].y;

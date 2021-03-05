@@ -266,7 +266,7 @@ pub struct Step {
     pub secs_value: String,
     pub mins_value: String,
     pub hours_value: String,
-    pub in_bath: bool,
+    pub hover: bool,
     pub require_input: bool,
 }
 
@@ -276,8 +276,8 @@ pub enum StepMessage {}
 impl Step {
     fn view(&mut self) -> Element<StepMessage> {
         let e = "".to_string(); //empty
-        let eb = match self.in_bath {
-            true => "\n in bath",
+        let eb = match self.hover {
+            true => "\n Hover Above",
             false => "",
         };
         let ri = match self.require_input {

@@ -331,7 +331,7 @@ struct GrblSetting {
 }
 
 #[derive(Debug, Clone)]
-enum GrblMessage {
+pub enum GrblMessage {
     SettingChanged(usize, GrblSettingMessage),
     SaveMessage(SaveBarMessage),
 }
@@ -394,7 +394,7 @@ impl GrblTab {
                     "Version: {}",
                     self.version
                         .as_ref()
-                        .unwrap_or(&"** Version Unavailable **".to_string())
+                        .unwrap_or(&"** Unavailable **".to_string())
                 ))
                 .horizontal_alignment(HorizontalAlignment::Left)
                 .font(CQ_MONO)
@@ -405,7 +405,7 @@ impl GrblTab {
                 Text::new(
                     self.version_release_date
                         .as_ref()
-                        .unwrap_or(&"** Release Date Unavailable **".to_string()),
+                        .unwrap_or(&"** Unavailable **".to_string()),
                 )
                 .horizontal_alignment(HorizontalAlignment::Left)
                 .size(20)
@@ -488,7 +488,30 @@ pub enum NodeTabMessage {
 
 impl NodeTab {
     fn new(ref_nodes: Rc<RefCell<Nodes>>) -> Self {
-        let modified_nodes = Rc::new(RefCell::new(ref_nodes.borrow().clone()));
+        // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
+        // nested iter if to flatten the 3d nodes
+        let modified_nodes = Rc::new(RefCell::new(Nodes {
+            node: ref_nodes
+                .borrow()
+                .clone()
+                .node
+                .iter_mut()
+                .filter(|n| n.name.contains("_hover"))
+                .map(|n| Node {
+                    name: n.name.replace("_hover", ""),
+                    neighbors: n
+                        .neighbors
+                        .iter()
+                        .filter(|name| n.name.replace("_hover", "") != name.replace("_hover", ""))
+                        .map(|name| name.replace("_hover", ""))
+                        .collect(),
+                    x: n.x,
+                    y: n.y,
+                    z: n.z,
+                    hide: n.hide,
+                })
+                .collect(),
+        }));
         NodeTab {
             unsaved: false,
             save_bar: SaveBar::new(),
@@ -498,7 +521,7 @@ impl NodeTab {
                 .borrow()
                 .node
                 .iter()
-                .filter(|n| !n.name.contains("_inBath"))
+                .filter(|n| !n.name.contains("_hover"))
                 .fold(Vec::new(), |mut v, n| {
                     v.push(ConfigNode::new(
                         n.name.clone(),
@@ -507,7 +530,6 @@ impl NodeTab {
                         n.y,
                         n.z,
                         n.neighbors.clone(),
-                        Rc::clone(&ref_nodes),
                         Rc::clone(&modified_nodes),
                     ));
                     v
@@ -579,12 +601,38 @@ impl NodeTab {
                 self.config_nodes[i].update(msg);
             }
             NodeTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
-                self.modified_nodes = Rc::new(RefCell::new(self.ref_nodes.borrow().clone()));
+                // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
+                // nested iter if to flatten the 3d nodes
+                self.modified_nodes = Rc::new(RefCell::new(Nodes {
+                    node: self
+                        .ref_nodes
+                        .borrow()
+                        .clone()
+                        .node
+                        .iter_mut()
+                        .filter(|n| n.name.contains("_hover"))
+                        .map(|n| Node {
+                            name: n.name.replace("_hover", ""),
+                            neighbors: n
+                                .neighbors
+                                .iter()
+                                .filter(|name| {
+                                    name.replace("_hover", "") != n.name.replace("_hover", "")
+                                })
+                                .map(|name| name.replace("_hover", ""))
+                                .collect(),
+                            x: n.x,
+                            y: n.y,
+                            z: n.z,
+                            hide: n.hide,
+                        })
+                        .collect(),
+                }));
                 self.config_nodes = Rc::clone(&self.modified_nodes)
                     .borrow()
                     .node
                     .iter()
-                    .filter(|n| !n.name.contains("_inBath"))
+                    .filter(|n| !n.name.contains("_hover"))
                     .fold(Vec::new(), |mut v, n| {
                         v.push(ConfigNode::new(
                             n.name.clone(),
@@ -593,7 +641,6 @@ impl NodeTab {
                             n.y,
                             n.z,
                             n.neighbors.clone(),
-                            Rc::clone(&self.ref_nodes),
                             Rc::clone(&self.modified_nodes),
                         ));
                         v
@@ -622,6 +669,7 @@ impl NodeTab {
                 *rn = Nodes { node }
             }
             NodeTabMessage::AddConfigNode => {
+                self.unsaved = true;
                 // generate unique name
                 let mut i = 2;
                 let name = if self
@@ -661,7 +709,6 @@ impl NodeTab {
                     0.0,
                     0.0,
                     Vec::new(),
-                    Rc::clone(&self.ref_nodes),
                     Rc::clone(&self.modified_nodes),
                 ));
             }
@@ -696,7 +743,7 @@ impl NodeTab {
             .push(
                 Button::new(
                     &mut self.add_config_node_btn,
-                    Text::new("Add Config Node")
+                    Text::new("Add Node")
                         .horizontal_alignment(HorizontalAlignment::Center)
                         .size(20)
                         .font(CQ_MONO),
@@ -717,7 +764,6 @@ struct ConfigNode {
     x: String,
     y: String,
     z: String,
-    ref_nodes: Rc<RefCell<Nodes>>,
     modified_nodes: Rc<RefCell<Nodes>>,
     neighbors_pick_lists: Vec<StringPickList>,
     x_state: text_input::State,
@@ -758,7 +804,6 @@ impl ConfigNode {
         y: f32,
         z: f32,
         neighbors: Vec<String>,
-        ref_nodes: Rc<RefCell<Nodes>>,
         modified_nodes: Rc<RefCell<Nodes>>,
     ) -> Self {
         ConfigNode {
@@ -771,7 +816,7 @@ impl ConfigNode {
             x: x.to_string(),
             y: y.to_string(),
             z: z.to_string(),
-            neighbors_pick_lists: neighbors.iter().filter(|n| !n.contains("_inBath")).fold(
+            neighbors_pick_lists: neighbors.iter().filter(|n| !n.contains("_hover")).fold(
                 Vec::new(),
                 |mut v, n| {
                     v.push(StringPickList::new(
@@ -789,7 +834,6 @@ impl ConfigNode {
             ),
             name,
             modified_nodes,
-            ref_nodes,
             x_state: text_input::State::new(),
             y_state: text_input::State::new(),
             z_state: text_input::State::new(),
@@ -1132,7 +1176,7 @@ impl StringPickList {
                         .node
                         .iter()
                         .filter(|n| {
-                            !n.name.contains("_inBath")
+                            !n.name.contains("_hover")
                                 && n.name != "HOME".to_string()
                                 && *n.name != parent
                                 && !siblings.iter().any(|s| s == &n.name)
@@ -1250,6 +1294,7 @@ impl ActionTab {
             }
             ActionTabMessage::ConfigAction(i, msg) => self.config_actions[i].update(msg),
             ActionTabMessage::AddConfigAction => {
+                self.unsaved = true;
                 // generate unique name
                 let mut i = 2;
                 let name = if self
