@@ -18,12 +18,14 @@ pub struct Build {
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
     steps: Vec<Step>,
-    before_required_inputs: Vec<RequiredInput>,
-    after_required_inputs: Vec<RequiredInput>,
+    before_inputs: Vec<RequiredInput>,
+    after_inputs: Vec<RequiredInput>,
+    modified_steps: Vec<Step>,
+    modified_before_inputs: Vec<RequiredInput>,
+    modified_after_inputs: Vec<RequiredInput>,
     add_step: AddStep,
     recipie_name: text_input::State,
     recipie_name_value: String,
-    save_button: button::State,
     required_input_tab_btn: button::State,
     steps_tab_btn: button::State,
     add_input_before_btn: button::State,
@@ -61,14 +63,16 @@ impl Build {
             actions_ref,
             recipie_name: text_input::State::new(),
             recipie_name_value: "".to_string(),
-            save_button: button::State::new(),
             required_input_tab_btn: button::State::new(),
             steps_tab_btn: button::State::new(),
             add_input_before_btn: button::State::new(),
             add_input_after_btn: button::State::new(),
             steps: Vec::new(),
-            before_required_inputs: Vec::new(),
-            after_required_inputs: Vec::new(),
+            before_inputs: Vec::new(),
+            after_inputs: Vec::new(),
+            modified_steps: Vec::new(),
+            modified_before_inputs: Vec::new(),
+            modified_after_inputs: Vec::new(),
             state: BuildState::Steps,
         }
     }
@@ -76,40 +80,42 @@ impl Build {
     pub fn update(&mut self, message: BuildMessage) {
         match message {
             BuildMessage::StepMessage(i, StepMessage::Delete) => {
-                self.steps.remove(i);
-                for i in 0..self.steps.len() {
-                    self.steps[i].step_num = Some(i + 1);
+                self.modified_steps.remove(i);
+                for i in 0..self.modified_steps.len() {
+                    self.modified_steps[i].step_num = Some(i + 1);
                 }
-                for i in 0..self.steps.len() {
-                    self.steps[i].steps_len = self.steps.len();
+                for i in 0..self.modified_steps.len() {
+                    self.modified_steps[i].steps_len = self.modified_steps.len();
                 }
-                self.add_step.step_num = Some(self.steps.len() + 1);
-                self.add_step.steps_len = self.steps.len();
+                self.add_step.step_num = Some(self.modified_steps.len() + 1);
+                self.add_step.steps_len = self.modified_steps.len();
             }
             BuildMessage::StepMessage(i, StepMessage::NewNum(num)) => {
-                self.steps[i].step_num = Some(num);
+                self.modified_steps[i].step_num = Some(num);
                 if num <= i {
                     for j in num - 1..i {
-                        self.steps[j].step_num = Some(self.steps[j].step_num.unwrap() + 1);
+                        self.modified_steps[j].step_num =
+                            Some(self.modified_steps[j].step_num.unwrap() + 1);
                     }
                 } else {
                     for j in i + 1..num {
-                        self.steps[j].step_num = Some(self.steps[j].step_num.unwrap() - 1);
+                        self.modified_steps[j].step_num =
+                            Some(self.modified_steps[j].step_num.unwrap() - 1);
                     }
                 }
-                self.steps
+                self.modified_steps
                     .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
             }
             BuildMessage::StepMessage(i, StepMessage::Edit) => {
                 self.unsaved = true;
                 // reset all to idle so ony one can be edited at a time
-                for step in &mut self.steps {
+                for step in &mut self.modified_steps {
                     step.update(StepMessage::Okay)
                 }
-                self.steps[i].update(StepMessage::Edit)
+                self.modified_steps[i].update(StepMessage::Edit)
             }
             BuildMessage::StepMessage(i, msg) => {
-                if let Some(step) = self.steps.get_mut(i) {
+                if let Some(step) = self.modified_steps.get_mut(i) {
                     step.update(msg)
                 }
             }
@@ -125,10 +131,11 @@ impl Build {
             )) => {
                 if let Some(d) = dest {
                     self.unsaved = true;
-                    for i in nodes.unwrap() - 1..self.steps.len() {
-                        self.steps[i].step_num = Some(self.steps[i].step_num.unwrap() + 1);
+                    for i in nodes.unwrap() - 1..self.modified_steps.len() {
+                        self.modified_steps[i].step_num =
+                            Some(self.modified_steps[i].step_num.unwrap() + 1);
                     }
-                    self.steps.push(Step::new(
+                    self.modified_steps.push(Step::new(
                         nodes,
                         self.steps.len(),
                         Rc::clone(&self.nodes_ref),
@@ -142,19 +149,19 @@ impl Build {
                         req_input,
                     ));
 
-                    self.steps
+                    self.modified_steps
                         .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
-                    for i in 0..self.steps.len() {
-                        self.steps[i].steps_len = self.steps.len();
+                    for i in 0..self.modified_steps.len() {
+                        self.modified_steps[i].steps_len = self.modified_steps.len();
                     }
                     self.scroll.scroll_to_bottom();
-                    self.add_step.step_num = Some(self.steps.len() + 1);
-                    self.add_step.steps_len = self.steps.len();
+                    self.add_step.step_num = Some(self.modified_steps.len() + 1);
+                    self.add_step.steps_len = self.modified_steps.len();
                     self.add_step.hours_value = "".to_string();
                     self.add_step.mins_value = "".to_string();
                     self.add_step.secs_value = "".to_string();
                     self.add_step.hover = false;
-                    self.add_step.require_input = false;
+                    self.add_step.wait = false;
                 }
             }
             BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
@@ -162,30 +169,31 @@ impl Build {
             BuildMessage::StepsTab => self.state = BuildState::Steps,
             BuildMessage::BeforeRequiredInputMessage(i, RequiredInputMessage::Delete) => {
                 self.unsaved = true;
-                self.before_required_inputs.remove(i);
+                self.modified_before_inputs.remove(i);
             }
             BuildMessage::BeforeRequiredInputMessage(i, msg) => {
-                self.before_required_inputs[i].update(msg)
+                self.modified_before_inputs[i].update(msg)
             }
             BuildMessage::AddInputBefore => {
                 self.unsaved = true;
-                self.before_required_inputs
+                self.modified_before_inputs
                     .push(RequiredInput::new("".to_string()));
             }
             BuildMessage::AfterRequiredInputMessage(i, RequiredInputMessage::Delete) => {
                 self.unsaved = true;
-                self.after_required_inputs.remove(i);
+                self.modified_after_inputs.remove(i);
             }
-            BuildMessage::AfterRequiredInputMessage(i, msg) => {
-                self.after_required_inputs[i].update(msg)
-            }
+            BuildMessage::AfterRequiredInputMessage(i, msg) => self.after_inputs[i].update(msg),
             BuildMessage::AddInputAfter => {
                 self.unsaved = true;
-                self.after_required_inputs
+                self.modified_after_inputs
                     .push(RequiredInput::new("".to_string()));
             }
             BuildMessage::UserChangedName(new_name) => self.recipie_name_value = new_name,
             BuildMessage::SaveMessage(SaveBarMessage::Cancel) => {
+                self.modified_steps = self.steps.clone();
+                self.modified_before_inputs = self.before_inputs.clone();
+                self.modified_after_inputs = self.after_inputs.clone();
                 self.unsaved = false;
             }
             BuildMessage::SaveMessage(SaveBarMessage::Save) => {
@@ -216,7 +224,7 @@ impl Build {
                                 (*step.mins_value).to_string(),
                                 (*step.secs_value).to_string(),
                                 step.hover.to_string(),
-                                step.require_input.to_string(),
+                                step.wait.to_string(),
                             ])
                             .unwrap();
                     }
@@ -290,7 +298,7 @@ impl Build {
                 );
 
                 let steps: Element<_> = self
-                    .steps
+                    .modified_steps
                     .iter_mut()
                     .enumerate()
                     .fold(Column::new().spacing(15), |column, (i, step)| {
@@ -322,7 +330,7 @@ impl Build {
                     .size(40)
                     .width(Length::Fill);
                 let before_required_inputs = self
-                    .before_required_inputs
+                    .modified_before_inputs
                     .iter_mut()
                     .enumerate()
                     .fold(Column::new().spacing(5), |col, (i, input)| {
@@ -350,7 +358,7 @@ impl Build {
                     .font(CQ_MONO)
                     .size(40)
                     .width(Length::Fill);
-                let after_required_inputs = self.after_required_inputs.iter_mut().enumerate().fold(
+                let after_required_inputs = self.modified_after_inputs.iter_mut().enumerate().fold(
                     Column::new().spacing(5),
                     |col, (i, input)| {
                         col.push(
@@ -405,6 +413,7 @@ impl Build {
     }
 }
 
+#[derive(Debug, Clone)]
 struct RequiredInput {
     state: text_input::State,
     delete_btn: button::State,
@@ -454,7 +463,7 @@ impl RequiredInput {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Step {
     step_num: Option<usize>,
     steps_len: usize,
@@ -466,7 +475,7 @@ pub struct Step {
     secs_value: String,
     mins_value: String,
     hours_value: String,
-    require_input: bool,
+    wait: bool,
     state: StepState,
 }
 
@@ -504,7 +513,7 @@ pub enum StepMessage {
     HoursChanged(String),
     NewNum(usize),
     ToggleHover(bool),
-    ToggleInput(bool),
+    ToggleWait(bool),
     HoursIncrement,
     HoursDecrement,
     MinsIncrement,
@@ -528,7 +537,7 @@ impl Step {
         hours_value: String,
         mins_value: String,
         secs_value: String,
-        require_input: bool,
+        wait: bool,
     ) -> Self {
         Step {
             step_num,
@@ -541,7 +550,7 @@ impl Step {
             secs_value,
             mins_value,
             hours_value,
-            require_input,
+            wait,
             state: StepState::Idle {
                 edit_btn: button::State::new(),
             },
@@ -555,7 +564,7 @@ impl Step {
             }
             StepMessage::NewAction(action) => self.selected_action = Some(action),
             StepMessage::ToggleHover(b) => self.hover = b,
-            StepMessage::ToggleInput(b) => self.require_input = b,
+            StepMessage::ToggleWait(b) => self.wait = b,
             StepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
                 if hours == "".to_string() {
@@ -670,7 +679,7 @@ impl Step {
                                 Column::new().push(
                                     PickList::new(
                                         step_num_state,
-                                        (1..self.steps_len + 2).collect::<Vec<usize>>(),
+                                        (1..self.steps_len + 1).collect::<Vec<usize>>(),
                                         self.step_num,
                                         StepMessage::NewNum,
                                     )
@@ -790,9 +799,9 @@ impl Step {
                             .push(
                                 Column::new()
                                     .push(Checkbox::new(
-                                        self.require_input,
+                                        self.wait,
                                         "Require Input",
-                                        StepMessage::ToggleInput,
+                                        StepMessage::ToggleWait,
                                     ))
                                     .padding(4)
                                     .width(Length::Shrink),
@@ -807,7 +816,7 @@ impl Step {
                     true => "Hover above\n",
                     false => "",
                 };
-                let ri = match self.require_input {
+                let ri = match self.wait {
                     true => "Wait for user input then\n ",
                     false => "",
                 };
@@ -973,7 +982,7 @@ pub struct AddStep {
     mins_value: String,
     hours_input: text_input::State,
     hours_value: String,
-    require_input: bool,
+    wait: bool,
     add_btn: button::State,
 }
 
@@ -996,7 +1005,7 @@ pub enum AddStepMessage {
     HoursChanged(String),
     NewNum(usize),
     ToggleHover(bool),
-    ToggleInput(bool),
+    ToggleWait(bool),
     HoursIncrement,
     HoursDecrement,
     MinsIncrement,
@@ -1033,7 +1042,7 @@ impl AddStep {
             mins_value: "".to_string(),
             hours_input: text_input::State::new(),
             hours_value: "".to_string(),
-            require_input: false,
+            wait: false,
             add_btn: button::State::new(),
         }
     }
@@ -1045,7 +1054,7 @@ impl AddStep {
             }
             AddStepMessage::NewAction(action) => self.selected_action = Some(action),
             AddStepMessage::ToggleHover(b) => self.hover = b,
-            AddStepMessage::ToggleInput(b) => self.require_input = b,
+            AddStepMessage::ToggleWait(b) => self.wait = b,
             AddStepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
                 if hours == "".to_string() {
@@ -1241,7 +1250,7 @@ impl AddStep {
                                         self.hours_value.clone(),
                                         self.mins_value.clone(),
                                         self.secs_value.clone(),
-                                        self.require_input,
+                                        self.wait,
                                     ))
                                     .padding(10)
                                     .width(Length::Units(100)),
@@ -1266,9 +1275,9 @@ impl AddStep {
                     .push(
                         Column::new()
                             .push(Checkbox::new(
-                                self.require_input,
-                                "Require Input",
-                                AddStepMessage::ToggleInput,
+                                self.wait,
+                                "Wait for User",
+                                AddStepMessage::ToggleWait,
                             ))
                             .padding(4)
                             .width(Length::Shrink),
