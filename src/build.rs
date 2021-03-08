@@ -1,4 +1,5 @@
 use super::actions::Actions;
+use super::advanced::{SaveBar, SaveBarMessage};
 use super::nodes::Nodes;
 use crate::CQ_MONO;
 use iced::{
@@ -11,27 +12,49 @@ use std::fs::File;
 use std::rc::Rc;
 
 pub struct Build {
+    unsaved: bool,
+    save_bar: SaveBar,
     scroll: scrollable::State,
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
     steps: Vec<Step>,
+    before_required_inputs: Vec<RequiredInput>,
+    after_required_inputs: Vec<RequiredInput>,
     add_step: AddStep,
     recipie_name: text_input::State,
     recipie_name_value: String,
     save_button: button::State,
+    required_input_tab_btn: button::State,
+    steps_tab_btn: button::State,
+    add_input_before_btn: button::State,
+    add_input_after_btn: button::State,
+    state: BuildState,
+}
+
+enum BuildState {
+    Steps,
+    RequiredInput,
 }
 
 #[derive(Debug, Clone)]
 pub enum BuildMessage {
     StepMessage(usize, StepMessage),
+    BeforeRequiredInputMessage(usize, RequiredInputMessage),
+    AfterRequiredInputMessage(usize, RequiredInputMessage),
     AddStepMessage(AddStepMessage),
     UserChangedName(String),
-    Save,
+    SaveMessage(SaveBarMessage),
+    StepsTab,
+    RequiredInputTab,
+    AddInputBefore,
+    AddInputAfter,
 }
 
 impl Build {
     pub fn new(nodes_ref: Rc<RefCell<Nodes>>, actions_ref: Rc<RefCell<Actions>>) -> Self {
         Build {
+            unsaved: false,
+            save_bar: SaveBar::new(),
             scroll: scrollable::State::new(),
             add_step: AddStep::new(1, 0, Rc::clone(&nodes_ref), Rc::clone(&actions_ref)),
             nodes_ref,
@@ -39,7 +62,14 @@ impl Build {
             recipie_name: text_input::State::new(),
             recipie_name_value: "".to_string(),
             save_button: button::State::new(),
+            required_input_tab_btn: button::State::new(),
+            steps_tab_btn: button::State::new(),
+            add_input_before_btn: button::State::new(),
+            add_input_after_btn: button::State::new(),
             steps: Vec::new(),
+            before_required_inputs: Vec::new(),
+            after_required_inputs: Vec::new(),
+            state: BuildState::Steps,
         }
     }
 
@@ -71,6 +101,7 @@ impl Build {
                     .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
             }
             BuildMessage::StepMessage(i, StepMessage::Edit) => {
+                self.unsaved = true;
                 // reset all to idle so ony one can be edited at a time
                 for step in &mut self.steps {
                     step.update(StepMessage::Okay)
@@ -93,6 +124,7 @@ impl Build {
                 req_input,
             )) => {
                 if let Some(d) = dest {
+                    self.unsaved = true;
                     for i in nodes.unwrap() - 1..self.steps.len() {
                         self.steps[i].step_num = Some(self.steps[i].step_num.unwrap() + 1);
                     }
@@ -121,13 +153,42 @@ impl Build {
                     self.add_step.hours_value = "".to_string();
                     self.add_step.mins_value = "".to_string();
                     self.add_step.secs_value = "".to_string();
-                    self.add_step.hover = true;
+                    self.add_step.hover = false;
                     self.add_step.require_input = false;
                 }
             }
             BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
+            BuildMessage::RequiredInputTab => self.state = BuildState::RequiredInput,
+            BuildMessage::StepsTab => self.state = BuildState::Steps,
+            BuildMessage::BeforeRequiredInputMessage(i, RequiredInputMessage::Delete) => {
+                self.unsaved = true;
+                self.before_required_inputs.remove(i);
+            }
+            BuildMessage::BeforeRequiredInputMessage(i, msg) => {
+                self.before_required_inputs[i].update(msg)
+            }
+            BuildMessage::AddInputBefore => {
+                self.unsaved = true;
+                self.before_required_inputs
+                    .push(RequiredInput::new("".to_string()));
+            }
+            BuildMessage::AfterRequiredInputMessage(i, RequiredInputMessage::Delete) => {
+                self.unsaved = true;
+                self.after_required_inputs.remove(i);
+            }
+            BuildMessage::AfterRequiredInputMessage(i, msg) => {
+                self.after_required_inputs[i].update(msg)
+            }
+            BuildMessage::AddInputAfter => {
+                self.unsaved = true;
+                self.after_required_inputs
+                    .push(RequiredInput::new("".to_string()));
+            }
             BuildMessage::UserChangedName(new_name) => self.recipie_name_value = new_name,
-            BuildMessage::Save => {
+            BuildMessage::SaveMessage(SaveBarMessage::Cancel) => {
+                self.unsaved = false;
+            }
+            BuildMessage::SaveMessage(SaveBarMessage::Save) => {
                 if self.recipie_name_value != "".to_string() {
                     let mut recipie = csv::Writer::from_writer(
                         File::create(format!("./recipies/{}.recipie", &self.recipie_name_value))
@@ -164,67 +225,231 @@ impl Build {
         }
     }
     pub fn view(&mut self) -> Element<BuildMessage> {
-        let name_and_save = Row::new()
-            .push(Space::with_width(Length::Fill))
+        let save_bar = match self.unsaved {
+            true => Column::new().align_items(Align::Center).push(
+                self.save_bar
+                    .view()
+                    .map(move |msg| BuildMessage::SaveMessage(msg)),
+            ),
+            false => Column::new()
+                .align_items(Align::Center)
+                .push(Space::with_height(Length::Units(50))),
+        };
+        let tab_btns = Column::new().align_items(Align::Center).push(
+            Row::new()
+                .push(Space::with_width(Length::Fill))
+                .push(
+                    Button::new(
+                        &mut self.steps_tab_btn,
+                        Text::new("Steps")
+                            .font(CQ_MONO)
+                            .horizontal_alignment(HorizontalAlignment::Center),
+                    )
+                    .padding(10)
+                    .on_press(BuildMessage::StepsTab)
+                    .width(Length::Units(200)),
+                )
+                .push(
+                    Button::new(
+                        &mut self.required_input_tab_btn,
+                        Text::new("Required Input")
+                            .font(CQ_MONO)
+                            .horizontal_alignment(HorizontalAlignment::Center),
+                    )
+                    .padding(10)
+                    .on_press(BuildMessage::RequiredInputTab)
+                    .width(Length::Units(200)),
+                )
+                .push(Space::with_width(Length::Fill)),
+        );
+        let search = Row::new().height(Length::Units(40)).push(
+            TextInput::new(
+                &mut self.recipie_name,
+                "Recipie Name",
+                &self.recipie_name_value,
+                BuildMessage::UserChangedName,
+            )
+            .padding(10)
+            .width(Length::Fill),
+        );
+        match self.state {
+            BuildState::Steps => {
+                let column_text = Row::new()
+                    .push(Space::with_width(Length::Units(70)))
+                    .push(
+                        Text::new("Destination")
+                            .width(Length::Units(125))
+                            .font(CQ_MONO),
+                    )
+                    .push(Text::new("Action").width(Length::Units(120)).font(CQ_MONO));
+
+                let add_step = Row::new().push(
+                    self.add_step
+                        .view()
+                        .map(move |msg| BuildMessage::AddStepMessage(msg)),
+                );
+
+                let steps: Element<_> = self
+                    .steps
+                    .iter_mut()
+                    .enumerate()
+                    .fold(Column::new().spacing(15), |column, (i, step)| {
+                        column.push(
+                            step.view()
+                                .map(move |msg| BuildMessage::StepMessage(i, msg)),
+                        )
+                    })
+                    .into();
+
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(10)
+                    .push(save_bar)
+                    .push(search)
+                    .push(tab_btns)
+                    .push(column_text)
+                    .push(steps)
+                    .push(Space::with_height(Length::Units(25)))
+                    .push(add_step);
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            BuildState::RequiredInput => {
+                let before_title = Text::new("Before Run")
+                    .font(CQ_MONO)
+                    .size(40)
+                    .width(Length::Fill);
+                let before_required_inputs = self
+                    .before_required_inputs
+                    .iter_mut()
+                    .enumerate()
+                    .fold(Column::new().spacing(5), |col, (i, input)| {
+                        col.push(
+                            input
+                                .view()
+                                .map(move |msg| BuildMessage::BeforeRequiredInputMessage(i, msg)),
+                        )
+                    });
+                let add_input_before_btn = Row::new()
+                    .push(Space::with_width(Length::Fill))
+                    .push(
+                        Button::new(
+                            &mut self.add_input_before_btn,
+                            Text::new("Add Input")
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .on_press(BuildMessage::AddInputBefore)
+                        .padding(10)
+                        .width(Length::Units(400)),
+                    )
+                    .push(Space::with_width(Length::Fill));
+                let after_title = Text::new("After Run")
+                    .font(CQ_MONO)
+                    .size(40)
+                    .width(Length::Fill);
+                let after_required_inputs = self.after_required_inputs.iter_mut().enumerate().fold(
+                    Column::new().spacing(5),
+                    |col, (i, input)| {
+                        col.push(
+                            input
+                                .view()
+                                .map(move |msg| BuildMessage::AfterRequiredInputMessage(i, msg)),
+                        )
+                    },
+                );
+                let add_input_after_btn = Row::new()
+                    .push(Space::with_width(Length::Fill))
+                    .push(
+                        Button::new(
+                            &mut self.add_input_after_btn,
+                            Text::new("Add Input")
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .on_press(BuildMessage::AddInputAfter)
+                        .padding(10)
+                        .width(Length::Units(400)),
+                    )
+                    .push(Space::with_width(Length::Fill));
+                let width_limit = Column::new()
+                    .width(Length::Units(500))
+                    .push(before_title)
+                    .push(before_required_inputs)
+                    .push(Space::with_height(Length::Units(5)))
+                    .push(add_input_before_btn)
+                    .push(after_title)
+                    .push(after_required_inputs)
+                    .push(Space::with_height(Length::Units(5)))
+                    .push(add_input_after_btn);
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(10)
+                    .push(save_bar)
+                    .push(search)
+                    .push(tab_btns)
+                    .push(
+                        Row::new()
+                            .push(Space::with_width(Length::Fill))
+                            .push(width_limit)
+                            .push(Space::with_width(Length::Fill)),
+                    );
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+        }
+    }
+}
+
+struct RequiredInput {
+    state: text_input::State,
+    delete_btn: button::State,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum RequiredInputMessage {
+    InputChanged(String),
+    Delete,
+}
+
+impl RequiredInput {
+    fn new(value: String) -> Self {
+        RequiredInput {
+            state: text_input::State::new(),
+            value,
+            delete_btn: button::State::new(),
+        }
+    }
+
+    fn update(&mut self, message: RequiredInputMessage) {
+        match message {
+            RequiredInputMessage::InputChanged(input) => self.value = input,
+            _ => {}
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, RequiredInputMessage> {
+        Row::new()
             .push(
                 TextInput::new(
-                    &mut self.recipie_name,
-                    "Recipie Name",
-                    &self.recipie_name_value,
-                    BuildMessage::UserChangedName,
+                    &mut self.state,
+                    "Required Input",
+                    &self.value[..],
+                    RequiredInputMessage::InputChanged,
                 )
-                .padding(10)
-                .width(Length::Units(300)),
+                .padding(10),
             )
             .push(
-                Button::new(
-                    &mut self.save_button,
-                    Text::new("Save").horizontal_alignment(HorizontalAlignment::Center),
-                )
-                .padding(10)
-                .width(Length::Units(100))
-                .on_press(BuildMessage::Save),
+                Button::new(&mut self.delete_btn, delete_icon())
+                    .width(Length::Units(50))
+                    .padding(10)
+                    .on_press(RequiredInputMessage::Delete),
             )
-            .push(Space::with_width(Length::Fill));
-
-        let column_text = Row::new()
-            .push(Space::with_width(Length::Units(70)))
-            .push(
-                Text::new("Destination")
-                    .width(Length::Units(125))
-                    .font(CQ_MONO),
-            )
-            .push(Text::new("Action").width(Length::Units(120)).font(CQ_MONO));
-
-        let add_step = Row::new().push(
-            self.add_step
-                .view()
-                .map(move |msg| BuildMessage::AddStepMessage(msg)),
-        );
-
-        let steps: Element<_> = self
-            .steps
-            .iter_mut()
-            .enumerate()
-            .fold(Column::new().spacing(15), |column, (i, step)| {
-                column.push(
-                    step.view()
-                        .map(move |msg| BuildMessage::StepMessage(i, msg)),
-                )
-            })
-            .into();
-
-        let content = Column::new()
-            .max_width(800)
-            .spacing(20)
-            .push(name_and_save)
-            .push(column_text)
-            .push(steps)
-            .push(Space::with_height(Length::Units(25)))
-            .push(add_step);
-        Scrollable::new(&mut self.scroll)
-            .padding(40)
-            .push(Container::new(content).width(Length::Fill).center_x())
             .into()
     }
 }

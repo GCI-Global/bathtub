@@ -258,7 +258,7 @@ impl TabBar {
     }
 }
 
-struct SaveBar {
+pub struct SaveBar {
     save_btn: button::State,
     cancel_btn: button::State,
 }
@@ -270,14 +270,14 @@ pub enum SaveBarMessage {
 }
 
 impl SaveBar {
-    fn new() -> Self {
+    pub fn new() -> Self {
         SaveBar {
             save_btn: button::State::new(),
             cancel_btn: button::State::new(),
         }
     }
 
-    fn view(&mut self) -> Element<'_, SaveBarMessage> {
+    pub fn view(&mut self) -> Element<'_, SaveBarMessage> {
         Row::new()
             .height(Length::Units(50))
             .width(Length::Fill)
