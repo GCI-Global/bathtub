@@ -7,8 +7,9 @@ use iced::{
     Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
     VerticalAlignment,
 };
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::fs::File;
+use std::fs;
 use std::rc::Rc;
 
 pub struct Build {
@@ -183,7 +184,9 @@ impl Build {
                 self.unsaved = true;
                 self.modified_after_inputs.remove(i);
             }
-            BuildMessage::AfterRequiredInputMessage(i, msg) => self.after_inputs[i].update(msg),
+            BuildMessage::AfterRequiredInputMessage(i, msg) => {
+                self.modified_after_inputs[i].update(msg)
+            }
             BuildMessage::AddInputAfter => {
                 self.unsaved = true;
                 self.modified_after_inputs
@@ -198,36 +201,58 @@ impl Build {
             }
             BuildMessage::SaveMessage(SaveBarMessage::Save) => {
                 if self.recipie_name_value != "".to_string() {
-                    let mut recipie = csv::Writer::from_writer(
-                        File::create(format!("./recipies/{}.recipie", &self.recipie_name_value))
-                            .expect("unable to create file"),
-                    );
-                    recipie
-                        .write_record(&[
-                            "step_num",
-                            "selected_destination",
-                            "selected_action",
-                            "hours_value",
-                            "mins_value",
-                            "secs_value",
-                            "hover",
-                            "require_input",
-                        ])
-                        .unwrap();
-                    for step in self.steps.iter() {
-                        recipie
-                            .write_record(&[
-                                step.step_num.unwrap().to_string(),
-                                format!("{}", step.selected_destination.as_ref().unwrap()),
-                                format!("{}", step.selected_action.as_ref().unwrap()),
-                                (*step.hours_value).to_string(),
-                                (*step.mins_value).to_string(),
-                                (*step.secs_value).to_string(),
-                                step.hover.to_string(),
-                                step.wait.to_string(),
-                            ])
-                            .unwrap();
-                    }
+                    self.modified_before_inputs
+                        .retain(|input| input.value != "".to_string());
+                    self.modified_after_inputs
+                        .retain(|input| input.value != "".to_string());
+                    let save_data = SaveData {
+                        required_inputs: RequiredInputSave {
+                            before: self.modified_before_inputs.iter().fold(
+                                Vec::with_capacity(self.modified_before_inputs.len()),
+                                |mut v, input| {
+                                    v.push(input.value.clone());
+                                    v
+                                },
+                            ),
+                            after: self.modified_after_inputs.iter().fold(
+                                Vec::with_capacity(self.modified_after_inputs.len()),
+                                |mut v, input| {
+                                    v.push(input.value.clone());
+                                    v
+                                },
+                            ),
+                        },
+                        steps: self.modified_steps.iter().fold(
+                            Vec::with_capacity(self.modified_steps.len()),
+                            |mut v, step| {
+                                v.push(StepSave {
+                                    step_num: step.step_num.unwrap(),
+                                    selected_destination: step
+                                        .selected_destination
+                                        .clone()
+                                        .unwrap(),
+                                    hover: step.hover,
+                                    selected_action: step.selected_action.clone().unwrap(),
+                                    secs_value: step.secs_value.clone(),
+                                    mins_value: step.mins_value.clone(),
+                                    hours_value: step.hours_value.clone(),
+                                    wait: step.wait,
+                                });
+                                v
+                            },
+                        ),
+                    };
+                    let save_toml = toml::to_string_pretty(&save_data).unwrap();
+                    fs::write(
+                        format!("./recipes/{}.toml", &self.recipie_name_value),
+                        save_toml,
+                    )
+                    .expect("unable to save file");
+                    self.steps = self.modified_steps.clone();
+                    self.before_inputs = self.modified_before_inputs.clone();
+                    self.after_inputs = self.modified_after_inputs.clone();
+                    self.unsaved = false;
+                    // TODO: Have errors show to user if unable to save
                 }
             }
         }
@@ -411,6 +436,29 @@ impl Build {
             }
         }
     }
+}
+#[derive(Serialize, Deserialize)]
+struct SaveData {
+    required_inputs: RequiredInputSave,
+    steps: Vec<StepSave>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RequiredInputSave {
+    before: Vec<String>,
+    after: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StepSave {
+    step_num: usize,
+    selected_destination: String,
+    hover: bool,
+    selected_action: String,
+    secs_value: String,
+    mins_value: String,
+    hours_value: String,
+    wait: bool,
 }
 
 #[derive(Debug, Clone)]

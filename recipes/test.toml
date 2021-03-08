@@ -1,0 +1,63 @@
+[required_inputs]
+before = ['test']
+after = ['test']
+
+[[steps]]
+step_num = 1
+selected_destination = 'Rinse 5'
+hover = true
+selected_action = 'Rest'
+secs_value = ''
+mins_value = ''
+hours_value = ''
+wait = true
+
+[[steps]]
+step_num = 2
+selected_destination = 'Rinse 5'
+hover = false
+selected_action = 'Rest'
+secs_value = ''
+mins_value = ''
+hours_value = ''
+wait = false
+
+[[steps]]
+step_num = 3
+selected_destination = 'Rinse 5'
+hover = false
+selected_action = 'Rest'
+secs_value = ''
+mins_value = ''
+hours_value = ''
+wait = false
+
+[[steps]]
+step_num = 4
+selected_destination = 'Rinse 5'
+hover = false
+selected_action = 'Rest'
+secs_value = ''
+mins_value = ''
+hours_value = ''
+wait = false
+
+[[steps]]
+step_num = 5
+selected_destination = 'Rinse 5'
+hover = false
+selected_action = 'Rest'
+secs_value = ''
+mins_value = ''
+hours_value = ''
+wait = false
+
+[[steps]]
+step_num = 6
+selected_destination = 'Rinse 5'
+hover = false
+selected_action = 'Rest'
+secs_value = ''
+mins_value = ''
+hours_value = ''
+wait = false
