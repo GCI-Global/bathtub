@@ -50,15 +50,15 @@ struct State {
     actions: Rc<RefCell<Actions>>,
     grbl: Grbl,
     connected: bool,
-    recipie_regex: Regex,
+    recipe_regex: Regex,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
-    recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
+    recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
 }
 
 impl State {
     async fn run_recipie(
         grbl: Grbl,
-        recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
+        recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
         prev_node: Arc<Mutex<Option<Node>>>,
         current_node: Arc<Mutex<Node>>,
         next_nodes: Arc<Mutex<Vec<Node>>>,
@@ -85,9 +85,9 @@ impl State {
         let px = Arc::clone(&prev_node);
         let cx = Arc::clone(&current_node);
         let nx = Arc::clone(&next_nodes);
-        let recipie_state2 = Arc::clone(&recipie_state);
+        let recipe_state2 = Arc::clone(&recipe_state);
         thread::spawn(move || {
-            while !break_and_hold(Arc::clone(&recipie_state2)) {
+            while !break_and_hold(Arc::clone(&recipe_state2)) {
                 if let Some(grbl_stat) = gx.get_status() {
                     let mut nn = nx.lock().unwrap();
                     match nn.first() {
@@ -110,12 +110,12 @@ impl State {
             }
         });
         for step in recipie {
-            if step.require_input {
-                let (recipie_state, _) = &*recipie_state;
-                let mut recipie_state = recipie_state.lock().unwrap();
-                *recipie_state = RecipieState::RequireInput;
+            if step.wait {
+                let (recipe_state, _) = &*recipe_state;
+                let mut recipe_state = recipe_state.lock().unwrap();
+                *recipe_state = RecipeState::RequireInput;
             }
-            if break_and_hold(Arc::clone(&recipie_state)) {
+            if break_and_hold(Arc::clone(&recipe_state)) {
                 break;
             }
             // gen paths and send
@@ -123,7 +123,7 @@ impl State {
                 true => "_hover",
                 false => "",
             };
-            while !break_and_hold(Arc::clone(&recipie_state)) {
+            while !break_and_hold(Arc::clone(&recipe_state)) {
                 {
                     let cn = current_node.lock().unwrap();
                     let mut nn = next_nodes.lock().unwrap();
@@ -145,12 +145,10 @@ impl State {
                     }
                 }
                 while (*next_nodes.lock().unwrap()).len() != 0 {
-                    let (recipie_state, _) = &*recipie_state;
-                    match *recipie_state.lock().unwrap() {
-                        //RecipieState::ManualRunning => {}
-                        //RecipieState::RecipieRunning => {}
-                        RecipieState::Stopped => break,
-                        RecipieState::RecipiePaused => {
+                    let (recipe_state, _) = &*recipe_state;
+                    match *recipe_state.lock().unwrap() {
+                        RecipeState::Stopped => break,
+                        RecipeState::RecipePaused => {
                             grbl.push_command(Cmd::new("\u{85}".to_string()));
                             set_pause_node(
                                 Arc::clone(&current_node),
@@ -167,12 +165,12 @@ impl State {
                     break;
                 };
             }
-            if break_and_hold(Arc::clone(&recipie_state)) {
+            if break_and_hold(Arc::clone(&recipe_state)) {
                 break;
             }
             let (tx, rx) = mpsc::channel();
             let step_c = step.clone();
-            let recipie_state3 = Arc::clone(&recipie_state);
+            let recipe_state3 = Arc::clone(&recipe_state);
             thread::spawn(move || {
                 let mut seconds = match (step_c.hours_value.clone().parse::<u64>().unwrap_or(0)
                     * 3600000
@@ -183,7 +181,7 @@ impl State {
                     (n, false) => n,
                     (_, true) => 0,
                 }; // calcualte then subtract half a second because of code delay
-                while !break_and_hold(Arc::clone(&recipie_state3)) {
+                while !break_and_hold(Arc::clone(&recipe_state3)) {
                     match seconds.overflowing_sub(500) {
                         (n, false) => seconds = n,
                         (_, true) => break,
@@ -199,12 +197,12 @@ impl State {
             for action in actions.action.clone() {
                 action_map.insert(action.name, action.commands);
             }
-            if break_and_hold(Arc::clone(&recipie_state)) {
+            if break_and_hold(Arc::clone(&recipe_state)) {
                 break;
             }
             let action_commands = action_map.get(&step.selected_action).unwrap();
             for command in action_commands {
-                if break_and_hold(Arc::clone(&recipie_state)) {
+                if break_and_hold(Arc::clone(&recipe_state)) {
                     break;
                 }
                 if command != &"WAIT".to_string() {
@@ -214,7 +212,7 @@ impl State {
                 }
             }
             loop {
-                if break_and_hold(Arc::clone(&recipie_state)) {
+                if break_and_hold(Arc::clone(&recipe_state)) {
                     break;
                 }
                 if rx.try_recv() == Ok("Stop") {
@@ -224,7 +222,7 @@ impl State {
                     grbl.clear_responses();
                     if grbl.queue_len() < action_commands.len() {
                         for command in action_commands {
-                            if break_and_hold(Arc::clone(&recipie_state)) {
+                            if break_and_hold(Arc::clone(&recipe_state)) {
                                 break;
                             }
                             grbl.push_command(Cmd::new(command.clone()));
@@ -238,11 +236,11 @@ impl State {
 }
 
 #[derive(Clone, Copy)]
-pub enum RecipieState {
+pub enum RecipeState {
     Stopped,
     ManualRunning,
-    RecipieRunning,
-    RecipiePaused,
+    RecipeRunning,
+    RecipePaused,
     RequireInput,
 }
 
@@ -407,8 +405,8 @@ impl<'a> Application for Bathtub {
                     Message::Loaded(Ok(state)) => {
                         let ref_node = Rc::new(RefCell::new(state.nodes.clone()));
                         let ref_actions = Rc::new(RefCell::new(state.actions));
-                        let recipie_state =
-                            Arc::new((Mutex::new(RecipieState::Stopped), Condvar::new()));
+                        let recipe_state =
+                            Arc::new((Mutex::new(RecipeState::Stopped), Condvar::new()));
                         let current_node = Arc::new(Mutex::new(
                             state.nodes.node
                                 [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
@@ -421,7 +419,7 @@ impl<'a> Application for Bathtub {
                             state: TabState::Manual,
                             tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
-                                run: Run::new(Arc::clone(&recipie_state)),
+                                run: Run::new(Arc::clone(&recipe_state)),
                                 build: Build::new(Rc::clone(&ref_node), Rc::clone(&ref_actions)),
                                 advanced: Advanced::new(
                                     grbl.clone(),
@@ -439,8 +437,8 @@ impl<'a> Application for Bathtub {
                             connected: false,
                             grbl: grbl.clone(),
                             grbl_status: None,
-                            recipie_regex: Regex::new(r"^[^.]+").unwrap(),
-                            recipie_state: Arc::clone(&recipie_state),
+                            recipe_regex: Regex::new(r"^[^.]+").unwrap(),
+                            recipe_state: Arc::clone(&recipe_state),
                         });
                     }
                     Message::Loaded(Err(_)) => {
@@ -458,27 +456,27 @@ impl<'a> Application for Bathtub {
                     Message::TabBar(TabBarMessage::Build) => state.state = TabState::Build,
                     Message::TabBar(TabBarMessage::Advanced) => state.state = TabState::Advanced,
                     Message::TabBar(TabBarMessage::Run) => {
-                        state.tabs.run.search = fs::read_dir("./recipies").unwrap().fold(
-                            Vec::new(),
-                            |mut rec, file| {
-                                if let Some(caps) = state
-                                    .recipie_regex
-                                    .captures(&file.unwrap().file_name().to_str().unwrap())
-                                {
-                                    rec.push(caps[0].to_string());
-                                }
-                                rec
-                            },
-                        );
+                        state.tabs.run.search =
+                            fs::read_dir("./recipes")
+                                .unwrap()
+                                .fold(Vec::new(), |mut rec, file| {
+                                    if let Some(caps) = state
+                                        .recipe_regex
+                                        .captures(&file.unwrap().file_name().to_str().unwrap())
+                                    {
+                                        rec.push(caps[0].to_string());
+                                    }
+                                    rec
+                                });
                         state.tabs.run.search.sort();
                         state.tabs.run.update(RunMessage::TabActive);
                         state.state = TabState::Run
                     }
                     Message::Manual(ManualMessage::Stop) => {
                         {
-                            let (recipie_state, cvar) = &*state.recipie_state;
-                            let mut recipie_state = recipie_state.lock().unwrap();
-                            *recipie_state = RecipieState::Stopped;
+                            let (recipe_state, cvar) = &*state.recipe_state;
+                            let mut recipe_state = recipe_state.lock().unwrap();
+                            *recipe_state = RecipeState::Stopped;
                             cvar.notify_all();
                         }
                         state.grbl.push_command(Cmd::new("\u{85}".to_string()));
@@ -489,14 +487,14 @@ impl<'a> Application for Bathtub {
                         );
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
-                        let (recipie_state, _) = &*state.recipie_state;
-                        let mut recipie_state = recipie_state.lock().unwrap();
-                        *recipie_state = RecipieState::ManualRunning;
+                        let (recipe_state, _) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        *recipe_state = RecipeState::ManualRunning;
                         state.connected = true;
                         command = Command::perform(
                             State::run_recipie(
                                 state.grbl.clone(),
-                                Arc::clone(&state.recipie_state),
+                                Arc::clone(&state.recipe_state),
                                 Arc::clone(&state.prev_node),
                                 Arc::clone(&state.current_node),
                                 Arc::clone(&state.next_nodes),
@@ -508,7 +506,7 @@ impl<'a> Application for Bathtub {
                                     mins_value: 0.to_string(),
                                     hours_value: 0.to_string(),
                                     hover: state.tabs.manual.hover,
-                                    require_input: false,
+                                    wait: false,
                                 }],
                                 state.node_map.clone(),
                                 state.nodes.borrow().clone(),
@@ -518,27 +516,27 @@ impl<'a> Application for Bathtub {
                         )
                     }
                     Message::Run(RunMessage::Run) => {
-                        let rs: RecipieState;
+                        let rs: RecipeState;
                         {
-                            let (recipie_state, _) = &*state.recipie_state;
-                            rs = *recipie_state.lock().unwrap();
+                            let (recipe_state, _) = &*state.recipe_state;
+                            rs = *recipe_state.lock().unwrap();
                         }
-                        if discriminant(&rs) == discriminant(&RecipieState::Stopped) {
+                        if discriminant(&rs) == discriminant(&RecipeState::Stopped) {
                             {
-                                let (recipie_state, cvar) = &*state.recipie_state;
-                                let mut recipie_state = recipie_state.lock().unwrap();
-                                *recipie_state = RecipieState::RecipieRunning;
+                                let (recipe_state, cvar) = &*state.recipe_state;
+                                let mut recipe_state = recipe_state.lock().unwrap();
+                                *recipe_state = RecipeState::RecipeRunning;
                                 cvar.notify_all();
                             }
                             state.connected = true;
                             command = Command::perform(
                                 State::run_recipie(
                                     state.grbl.clone(),
-                                    Arc::clone(&state.recipie_state),
+                                    Arc::clone(&state.recipe_state),
                                     Arc::clone(&state.prev_node),
                                     Arc::clone(&state.current_node),
                                     Arc::clone(&state.next_nodes),
-                                    state.tabs.run.steps.clone(),
+                                    state.tabs.run.recipe.as_ref().unwrap().steps.clone(),
                                     state.node_map.clone(),
                                     state.nodes.borrow().clone(),
                                     state.actions.borrow().clone(),
@@ -548,23 +546,23 @@ impl<'a> Application for Bathtub {
                         }
                     }
                     Message::Run(RunMessage::Pause) => {
-                        let (recipie_state, cvar) = &*state.recipie_state;
-                        let mut recipie_state = recipie_state.lock().unwrap();
-                        *recipie_state = RecipieState::RecipiePaused;
+                        let (recipe_state, cvar) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        *recipe_state = RecipeState::RecipePaused;
                         cvar.notify_all();
                         state.grbl.push_command(Cmd::new("\u{85}".to_string()));
                     }
                     Message::Run(RunMessage::Resume) => {
-                        let (recipie_state, cvar) = &*state.recipie_state;
-                        let mut recipie_state = recipie_state.lock().unwrap();
-                        *recipie_state = RecipieState::RecipieRunning;
+                        let (recipe_state, cvar) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        *recipe_state = RecipeState::RecipeRunning;
                         cvar.notify_all();
                     }
                     Message::Run(RunMessage::Stop) => {
                         {
-                            let (recipie_state, cvar) = &*state.recipie_state;
-                            let mut recipie_state = recipie_state.lock().unwrap();
-                            *recipie_state = RecipieState::Stopped;
+                            let (recipe_state, cvar) = &*state.recipe_state;
+                            let mut recipe_state = recipe_state.lock().unwrap();
+                            *recipe_state = RecipeState::Stopped;
                             cvar.notify_all();
                         }
                         state.grbl.push_command(Cmd::new("\u{85}".to_string()));
@@ -577,18 +575,18 @@ impl<'a> Application for Bathtub {
                     Message::RecipieDone(Ok(_)) => {
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         {
-                            let (recipie_state, cvar) = &*state.recipie_state;
-                            let mut recipie_state = recipie_state.lock().unwrap();
-                            *recipie_state = RecipieState::Stopped;
+                            let (recipe_state, cvar) = &*state.recipe_state;
+                            let mut recipe_state = recipe_state.lock().unwrap();
+                            *recipe_state = RecipeState::Stopped;
                             cvar.notify_all();
                         }
                         state.connected = true;
                     }
                     Message::RecipieDone(Err(_err)) => {
                         {
-                            let (recipie_state, cvar) = &*state.recipie_state;
-                            let mut recipie_state = recipie_state.lock().unwrap();
-                            *recipie_state = RecipieState::Stopped;
+                            let (recipe_state, cvar) = &*state.recipe_state;
+                            let mut recipe_state = recipe_state.lock().unwrap();
+                            *recipe_state = RecipeState::Stopped;
                             cvar.notify_all();
                         }
                         state.connected = false
@@ -620,19 +618,19 @@ impl<'a> Application for Bathtub {
                 state,
                 tabs,
                 tab_bar,
-                recipie_state,
+                recipe_state,
                 ..
             }) => match state {
                 TabState::Manual => {
                     let content =
                         Column::new().push(tab_bar.view().map(move |msg| Message::TabBar(msg)));
-                    let rs: RecipieState;
+                    let rs: RecipeState;
                     {
-                        let (recipie_state, _) = &**recipie_state;
-                        rs = *recipie_state.lock().unwrap();
+                        let (recipe_state, _) = &**recipe_state;
+                        rs = *recipe_state.lock().unwrap();
                     }
-                    if discriminant(&rs) == discriminant(&RecipieState::RecipieRunning)
-                        || discriminant(&rs) == discriminant(&RecipieState::RecipiePaused)
+                    if discriminant(&rs) == discriminant(&RecipeState::RecipeRunning)
+                        || discriminant(&rs) == discriminant(&RecipeState::RecipePaused)
                     {
                         content
                             .push(Space::with_height(Length::Units(100)))
@@ -652,12 +650,12 @@ impl<'a> Application for Bathtub {
                 TabState::Run => {
                     let content =
                         Column::new().push(tab_bar.view().map(move |msg| Message::TabBar(msg)));
-                    let rs: RecipieState;
+                    let rs: RecipeState;
                     {
-                        let (recipie_state, _) = &**recipie_state;
-                        rs = *recipie_state.lock().unwrap();
+                        let (recipe_state, _) = &**recipe_state;
+                        rs = *recipe_state.lock().unwrap();
                     }
-                    if discriminant(&rs) == discriminant(&RecipieState::ManualRunning) {
+                    if discriminant(&rs) == discriminant(&RecipeState::ManualRunning) {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
@@ -680,12 +678,12 @@ impl<'a> Application for Bathtub {
                 TabState::Advanced => {
                     let content =
                         Column::new().push(tab_bar.view().map(move |msg| Message::TabBar(msg)));
-                    let rs: RecipieState;
+                    let rs: RecipeState;
                     {
-                        let (recipie_state, _) = &**recipie_state;
-                        rs = *recipie_state.lock().unwrap();
+                        let (recipe_state, _) = &**recipe_state;
+                        rs = *recipe_state.lock().unwrap();
                     }
-                    if discriminant(&rs) != discriminant(&RecipieState::Stopped) {
+                    if discriminant(&rs) != discriminant(&RecipeState::Stopped) {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
@@ -747,15 +745,15 @@ fn loading_message<'a>() -> Element<'a, Message> {
 
 // used by grbl control threads to see if they need to stop or wait for recipie to resume
 // this function will block the thread if on pause, and return true if the thread should close
-fn break_and_hold(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> bool {
+fn break_and_hold(recipe_state: Arc<(Mutex<RecipeState>, Condvar)>) -> bool {
     let mut stop = false;
-    let (recipie_state, cvar) = &*recipie_state;
-    let mut rs = recipie_state.lock().unwrap();
+    let (recipe_state, cvar) = &*recipe_state;
+    let mut rs = recipe_state.lock().unwrap();
     while !stop {
         match *rs {
-            RecipieState::Stopped => stop = true,
-            RecipieState::RecipiePaused => rs = cvar.wait(rs).unwrap(),
-            RecipieState::RequireInput => rs = cvar.wait(rs).unwrap(),
+            RecipeState::Stopped => stop = true,
+            RecipeState::RecipePaused => rs = cvar.wait(rs).unwrap(),
+            RecipeState::RequireInput => rs = cvar.wait(rs).unwrap(),
             _ => break,
         }
     }

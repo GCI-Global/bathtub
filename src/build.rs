@@ -1,6 +1,7 @@
 use super::actions::Actions;
 use super::advanced::{SaveBar, SaveBarMessage};
 use super::nodes::Nodes;
+use super::run::Step;
 use crate::CQ_MONO;
 use iced::{
     button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Container, Element,
@@ -18,15 +19,15 @@ pub struct Build {
     scroll: scrollable::State,
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
-    steps: Vec<Step>,
+    steps: Vec<BuildStep>,
     before_inputs: Vec<RequiredInput>,
     after_inputs: Vec<RequiredInput>,
-    modified_steps: Vec<Step>,
+    modified_steps: Vec<BuildStep>,
     modified_before_inputs: Vec<RequiredInput>,
     modified_after_inputs: Vec<RequiredInput>,
     add_step: AddStep,
-    recipie_name: text_input::State,
-    recipie_name_value: String,
+    recipe_name: text_input::State,
+    recipe_name_value: String,
     required_input_tab_btn: button::State,
     steps_tab_btn: button::State,
     add_input_before_btn: button::State,
@@ -62,8 +63,8 @@ impl Build {
             add_step: AddStep::new(1, 0, Rc::clone(&nodes_ref), Rc::clone(&actions_ref)),
             nodes_ref,
             actions_ref,
-            recipie_name: text_input::State::new(),
-            recipie_name_value: "".to_string(),
+            recipe_name: text_input::State::new(),
+            recipe_name_value: "".to_string(),
             required_input_tab_btn: button::State::new(),
             steps_tab_btn: button::State::new(),
             add_input_before_btn: button::State::new(),
@@ -136,7 +137,7 @@ impl Build {
                         self.modified_steps[i].step_num =
                             Some(self.modified_steps[i].step_num.unwrap() + 1);
                     }
-                    self.modified_steps.push(Step::new(
+                    self.modified_steps.push(BuildStep::new(
                         nodes,
                         self.steps.len(),
                         Rc::clone(&self.nodes_ref),
@@ -192,7 +193,7 @@ impl Build {
                 self.modified_after_inputs
                     .push(RequiredInput::new("".to_string()));
             }
-            BuildMessage::UserChangedName(new_name) => self.recipie_name_value = new_name,
+            BuildMessage::UserChangedName(new_name) => self.recipe_name_value = new_name,
             BuildMessage::SaveMessage(SaveBarMessage::Cancel) => {
                 self.modified_steps = self.steps.clone();
                 self.modified_before_inputs = self.before_inputs.clone();
@@ -200,13 +201,13 @@ impl Build {
                 self.unsaved = false;
             }
             BuildMessage::SaveMessage(SaveBarMessage::Save) => {
-                if self.recipie_name_value != "".to_string() {
+                if self.recipe_name_value != "".to_string() {
                     self.modified_before_inputs
                         .retain(|input| input.value != "".to_string());
                     self.modified_after_inputs
                         .retain(|input| input.value != "".to_string());
-                    let save_data = SaveData {
-                        required_inputs: RequiredInputSave {
+                    let save_data = Recipe {
+                        required_inputs: Input {
                             before: self.modified_before_inputs.iter().fold(
                                 Vec::with_capacity(self.modified_before_inputs.len()),
                                 |mut v, input| {
@@ -225,8 +226,8 @@ impl Build {
                         steps: self.modified_steps.iter().fold(
                             Vec::with_capacity(self.modified_steps.len()),
                             |mut v, step| {
-                                v.push(StepSave {
-                                    step_num: step.step_num.unwrap(),
+                                v.push(Step {
+                                    step_num: step.step_num.unwrap().to_string(),
                                     selected_destination: step
                                         .selected_destination
                                         .clone()
@@ -244,7 +245,7 @@ impl Build {
                     };
                     let save_toml = toml::to_string_pretty(&save_data).unwrap();
                     fs::write(
-                        format!("./recipes/{}.toml", &self.recipie_name_value),
+                        format!("./recipes/{}.toml", &self.recipe_name_value),
                         save_toml,
                     )
                     .expect("unable to save file");
@@ -297,9 +298,9 @@ impl Build {
         );
         let search = Row::new().height(Length::Units(40)).push(
             TextInput::new(
-                &mut self.recipie_name,
+                &mut self.recipe_name,
                 "Recipie Name",
-                &self.recipie_name_value,
+                &self.recipe_name_value,
                 BuildMessage::UserChangedName,
             )
             .padding(10)
@@ -438,31 +439,20 @@ impl Build {
     }
 }
 #[derive(Serialize, Deserialize)]
-struct SaveData {
-    required_inputs: RequiredInputSave,
-    steps: Vec<StepSave>,
+// Step found in ./run.rs
+pub struct Recipe {
+    pub required_inputs: Input,
+    pub steps: Vec<Step>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct RequiredInputSave {
-    before: Vec<String>,
-    after: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct StepSave {
-    step_num: usize,
-    selected_destination: String,
-    hover: bool,
-    selected_action: String,
-    secs_value: String,
-    mins_value: String,
-    hours_value: String,
-    wait: bool,
+pub struct Input {
+    pub before: Vec<String>,
+    pub after: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
-struct RequiredInput {
+pub struct RequiredInput {
     state: text_input::State,
     delete_btn: button::State,
     value: String,
@@ -512,7 +502,7 @@ impl RequiredInput {
 }
 
 #[derive(Debug, Clone)]
-pub struct Step {
+pub struct BuildStep {
     step_num: Option<usize>,
     steps_len: usize,
     nodes_ref: Rc<RefCell<Nodes>>,
@@ -573,7 +563,7 @@ pub enum StepMessage {
     Okay,
 }
 
-impl Step {
+impl BuildStep {
     fn new(
         step_num: Option<usize>,
         steps_len: usize,
@@ -587,7 +577,7 @@ impl Step {
         secs_value: String,
         wait: bool,
     ) -> Self {
-        Step {
+        BuildStep {
             step_num,
             steps_len,
             nodes_ref,

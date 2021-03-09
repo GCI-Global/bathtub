@@ -1,13 +1,13 @@
-use crate::{RecipieState, CQ_MONO};
+use crate::{RecipeState, CQ_MONO};
 use iced::{
     button, pick_list, scrollable, Align, Button, Column, Container, Element, HorizontalAlignment,
     Length, PickList, Row, Scrollable, Space, Text, VerticalAlignment,
 };
 
-use super::build::ns;
-use serde::Deserialize;
+use super::build::{ns, Recipe};
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar, Mutex};
-use std::{fs::File, mem::discriminant};
+use std::{fs, mem::discriminant};
 
 pub struct Run {
     scroll: scrollable::State,
@@ -18,8 +18,8 @@ pub struct Run {
     pub search: Vec<String>,
     search_state: pick_list::State<String>,
     search_value: Option<String>,
-    recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
-    pub steps: Vec<Step>,
+    recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
+    pub recipe: Option<Recipe>,
     continue_btns: Vec<Option<ContinueButton>>,
     pub active_recipie: Option<Vec<Step>>,
 }
@@ -36,7 +36,7 @@ pub enum RunMessage {
 }
 
 impl Run {
-    pub fn new(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> Self {
+    pub fn new(recipe_state: Arc<(Mutex<RecipeState>, Condvar)>) -> Self {
         Run {
             scroll: scrollable::State::new(),
             run_btn: button::State::new(),
@@ -46,10 +46,10 @@ impl Run {
             search: Vec::new(),
             search_state: pick_list::State::default(),
             search_value: None,
-            steps: Vec::new(),
             continue_btns: Vec::new(),
+            recipe: None,
             active_recipie: None,
-            recipie_state,
+            recipe_state,
         }
     }
 
@@ -69,35 +69,36 @@ impl Run {
                         }
                     }
                 }
-                let (recipie_state, cvar) = &*self.recipie_state;
-                let mut recipie_state = recipie_state.lock().unwrap();
-                *recipie_state = RecipieState::RecipieRunning;
+                let (recipe_state, cvar) = &*self.recipe_state;
+                let mut recipe_state = recipe_state.lock().unwrap();
+                *recipe_state = RecipeState::RecipeRunning;
                 cvar.notify_all();
             }
-            RunMessage::RecipieChanged(recipie) => {
-                match File::open(format!("./recipies/{}.recipie", recipie)) {
-                    Ok(file) => {
-                        self.steps = Vec::new();
-                        self.continue_btns = Vec::new();
-                        let mut rdr = csv::Reader::from_reader(file);
-                        let mut count = 1; // display vlue tracker
-                        for step in rdr.deserialize() {
-                            let step: Step = step.unwrap();
-                            if step.require_input {
+            RunMessage::RecipieChanged(recipe) => {
+                match &fs::read_to_string(format!("./recipes/{}.toml", recipe)) {
+                    Ok(toml_str) => {
+                        let rec: Recipe = toml::from_str(toml_str).unwrap();
+                        self.continue_btns = Vec::with_capacity(rec.steps.len());
+                        let mut count = 1;
+                        for step in &rec.steps {
+                            if step.wait {
                                 self.continue_btns.push(Some(ContinueButton::new(
                                     count,
-                                    Arc::clone(&self.recipie_state),
+                                    Arc::clone(&self.recipe_state),
                                 )));
                                 count += 1;
                             } else {
-                                self.continue_btns.push(None)
+                                self.continue_btns.push(None);
                             }
-                            self.steps.push(step);
                         }
+                        self.recipe = Some(rec);
                     }
-                    Err(_err) => self.steps = Vec::new(),
+                    // TODO: Display Error when unable to read file
+                    Err(_err) => {
+                        self.recipe = None;
+                    }
                 }
-                self.search_value = Some(recipie);
+                self.search_value = Some(recipe);
             }
             _ => {}
         }
@@ -106,9 +107,9 @@ impl Run {
     pub fn view(&mut self) -> Element<RunMessage> {
         let search: Element<_>;
         {
-            let (recipie_state, _) = &*self.recipie_state;
+            let (recipie_state, _) = &*self.recipe_state;
             search = match *recipie_state.lock().unwrap() {
-                RecipieState::Stopped => Row::new()
+                RecipeState::Stopped => Row::new()
                     .push(
                         PickList::new(
                             &mut self.search_state,
@@ -133,9 +134,9 @@ impl Run {
         }
         let run = match self.search_value {
             Some(_) => {
-                let (recipie_state, _) = &*self.recipie_state;
-                match *recipie_state.lock().unwrap() {
-                    RecipieState::Stopped => Row::new().push(
+                let (recipe_state, _) = &*self.recipe_state;
+                match *recipe_state.lock().unwrap() {
+                    RecipeState::Stopped => Row::new().push(
                         Button::new(
                             &mut self.run_btn,
                             Text::new("Run")
@@ -147,7 +148,7 @@ impl Run {
                         .padding(10)
                         .width(Length::Units(500)),
                     ),
-                    RecipieState::RecipieRunning => Row::new()
+                    RecipeState::RecipeRunning => Row::new()
                         .push(
                             Button::new(
                                 &mut self.stop_btn,
@@ -173,7 +174,7 @@ impl Run {
                             .padding(10)
                             .width(Length::Units(200)),
                         ),
-                    RecipieState::RecipiePaused => Row::new()
+                    RecipeState::RecipePaused => Row::new()
                         .push(
                             Button::new(
                                 &mut self.stop_btn,
@@ -199,7 +200,7 @@ impl Run {
                             .padding(10)
                             .width(Length::Units(200)),
                         ),
-                    RecipieState::RequireInput => Row::new()
+                    RecipeState::RequireInput => Row::new()
                         .push(
                             Button::new(
                                 &mut self.stop_btn,
@@ -225,23 +226,29 @@ impl Run {
             None => Row::new(),
         };
 
-        let recipie: Element<_> = self
-            .steps
-            .iter_mut()
-            .zip(self.continue_btns.iter_mut())
-            .fold(Column::new().spacing(15), |col, (step, btn)| {
-                if let Some(b) = btn {
-                    //println!("adding btn {} next to {}",b.display_value, step.selected_destination);
-                    col.push(
-                        Row::new()
-                            .push(step.view().map(move |_msg| RunMessage::Step))
-                            .push(b.view().map(move |_msg| RunMessage::Step)),
-                    )
-                } else {
-                    col.push(Row::new().push(step.view().map(move |_msg| RunMessage::Step)))
-                }
-            })
-            .into();
+        let recipie: Element<_> = match self.recipe.as_mut() {
+            Some(recipe) => recipe
+                .steps
+                .iter_mut()
+                .zip(self.continue_btns.iter_mut())
+                .fold(Column::new().spacing(15), |col, (step, btn)| {
+                    if let Some(b) = btn {
+                        println!(
+                            "adding btn {} next to {}",
+                            b.display_value, step.selected_destination
+                        );
+                        col.push(
+                            Row::new()
+                                .push(step.view().map(move |_msg| RunMessage::Step))
+                                .push(b.view().map(move |_msg| RunMessage::Step)),
+                        )
+                    } else {
+                        col.push(Row::new().push(step.view().map(move |_msg| RunMessage::Step)))
+                    }
+                })
+                .into(),
+            None => Column::new().into(),
+        };
 
         let content = Column::new()
             .max_width(800)
@@ -258,7 +265,7 @@ impl Run {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Step {
     pub step_num: String,
     pub selected_destination: String,
@@ -267,7 +274,7 @@ pub struct Step {
     pub mins_value: String,
     pub hours_value: String,
     pub hover: bool,
-    pub require_input: bool,
+    pub wait: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -280,7 +287,7 @@ impl Step {
             true => "\n Hover Above",
             false => "",
         };
-        let ri = match self.require_input {
+        let ri = match self.wait {
             true => "Wait for user input then\n ",
             false => "",
         };
@@ -380,12 +387,12 @@ pub enum ContinueButtonMessage {
 
 struct ContinueButton {
     display_value: usize, // keep track of what buttons have been shown and what order they are in such that only one is shown when paused.
-    recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
+    recipie_state: Arc<(Mutex<RecipeState>, Condvar)>,
     continue_btn: button::State,
 }
 
 impl ContinueButton {
-    fn new(display_value: usize, recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> Self {
+    fn new(display_value: usize, recipie_state: Arc<(Mutex<RecipeState>, Condvar)>) -> Self {
         ContinueButton {
             display_value,
             recipie_state,
@@ -397,7 +404,7 @@ impl ContinueButton {
         if self.display_value == 1 {
             let (recipie_state, _) = &*self.recipie_state;
             if discriminant(&*recipie_state.lock().unwrap())
-                == discriminant(&RecipieState::RequireInput)
+                == discriminant(&RecipeState::RequireInput)
             {
                 Column::new()
                     .push(
