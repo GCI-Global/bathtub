@@ -1,5 +1,6 @@
 use super::actions::Actions;
 use super::advanced::{SaveBar, SaveBarMessage};
+use super::logger::Logger;
 use super::nodes::Nodes;
 use super::run::Step;
 use crate::CQ_MONO;
@@ -33,6 +34,7 @@ pub struct Build {
     add_input_before_btn: button::State,
     add_input_after_btn: button::State,
     state: BuildState,
+    logger: Logger,
 }
 
 enum BuildState {
@@ -55,7 +57,11 @@ pub enum BuildMessage {
 }
 
 impl Build {
-    pub fn new(nodes_ref: Rc<RefCell<Nodes>>, actions_ref: Rc<RefCell<Actions>>) -> Self {
+    pub fn new(
+        nodes_ref: Rc<RefCell<Nodes>>,
+        actions_ref: Rc<RefCell<Actions>>,
+        logger: Logger,
+    ) -> Self {
         Build {
             unsaved: false,
             save_bar: SaveBar::new(),
@@ -76,6 +82,7 @@ impl Build {
             modified_before_inputs: Vec::new(),
             modified_after_inputs: Vec::new(),
             state: BuildState::Steps,
+            logger,
         }
     }
 
@@ -243,6 +250,7 @@ impl Build {
                             },
                         ),
                     };
+                    // TODO: add error is unable to build toml
                     let save_toml = toml::to_string_pretty(&save_data).unwrap();
                     fs::write(
                         format!("./recipes/{}.toml", &self.recipe_name_value),
@@ -1338,7 +1346,7 @@ pub fn ns(string: &String) -> String {
 // Fonts
 const ICONS_FONT: Font = Font::External {
     name: "Icons",
-    bytes: include_bytes!("../fonts/icons.ttf"),
+    bytes: include_bytes!("../fonts/Icons.ttf"),
 };
 
 fn icon(unicode: char) -> Text {
@@ -1350,9 +1358,37 @@ fn icon(unicode: char) -> Text {
 }
 
 pub fn okay_icon() -> Text {
-    icon('\u{F00C}')
+    icon('\u{E801}')
 }
 
 pub fn delete_icon() -> Text {
-    icon('\u{F1F8}')
+    icon('\u{E800}')
+}
+
+pub fn play_icon() -> Text {
+    icon('\u{E804}')
+}
+
+pub fn pause_icon() -> Text {
+    icon('\u{E805}')
+}
+
+pub fn attention_icon() -> Text {
+    icon('\u{E806}')
+}
+
+pub fn close_icon() -> Text {
+    icon('\u{E807}')
+}
+
+pub fn edit_icon() -> Text {
+    icon('\u{E808}')
+}
+
+pub fn down_icon() -> Text {
+    icon('\u{E802}')
+}
+
+pub fn right_icon() -> Text {
+    icon('\u{E803}')
 }

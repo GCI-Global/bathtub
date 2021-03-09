@@ -4,7 +4,7 @@ use iced::{
     Length, PickList, Row, Scrollable, Space, Text, VerticalAlignment,
 };
 
-use super::build::{ns, Recipe};
+use super::build::{attention_icon, ns, pause_icon, play_icon, Recipe};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar, Mutex};
 use std::{fs, mem::discriminant};
@@ -17,7 +17,7 @@ pub struct Run {
     resume_btn: button::State,
     pub search: Vec<String>,
     search_state: pick_list::State<String>,
-    search_value: Option<String>,
+    pub search_value: Option<String>,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
     pub recipe: Option<Recipe>,
     continue_btns: Vec<Option<ContinueButton>>,
@@ -165,10 +165,9 @@ impl Run {
                         .push(
                             Button::new(
                                 &mut self.pause_btn,
-                                Text::new("Pause")
+                                pause_icon()
                                     .size(30)
-                                    .horizontal_alignment(HorizontalAlignment::Center)
-                                    .font(CQ_MONO),
+                                    .horizontal_alignment(HorizontalAlignment::Center),
                             )
                             .on_press(RunMessage::Pause)
                             .padding(10)
@@ -191,10 +190,9 @@ impl Run {
                         .push(
                             Button::new(
                                 &mut self.resume_btn,
-                                Text::new("Resume")
+                                play_icon()
                                     .size(30)
-                                    .horizontal_alignment(HorizontalAlignment::Center)
-                                    .font(CQ_MONO),
+                                    .horizontal_alignment(HorizontalAlignment::Center),
                             )
                             .on_press(RunMessage::Resume)
                             .padding(10)
@@ -233,10 +231,6 @@ impl Run {
                 .zip(self.continue_btns.iter_mut())
                 .fold(Column::new().spacing(15), |col, (step, btn)| {
                     if let Some(b) = btn {
-                        println!(
-                            "adding btn {} next to {}",
-                            b.display_value, step.selected_destination
-                        );
                         col.push(
                             Row::new()
                                 .push(step.view().map(move |_msg| RunMessage::Step))
@@ -409,13 +403,10 @@ impl ContinueButton {
                 Column::new()
                     .push(
                         Row::new().push(Space::with_width(Length::Units(25))).push(
-                            Button::new(
-                                &mut self.continue_btn,
-                                Text::new("Continue").font(CQ_MONO).size(30),
-                            )
-                            .width(Length::Shrink)
-                            .padding(10)
-                            .on_press(ContinueButtonMessage::Continue),
+                            Button::new(&mut self.continue_btn, attention_icon().size(30))
+                                .width(Length::Units(50))
+                                .padding(10)
+                                .on_press(ContinueButtonMessage::Continue),
                         ),
                     )
                     .into()

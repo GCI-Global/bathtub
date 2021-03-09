@@ -3,6 +3,7 @@ mod actions;
 mod advanced;
 mod build;
 mod grbl;
+mod logger;
 mod manual;
 mod nodes;
 mod paths;
@@ -10,7 +11,9 @@ mod run;
 use actions::Actions;
 use advanced::{Advanced, AdvancedMessage};
 use build::{Build, BuildMessage};
+use chrono::prelude::*;
 use grbl::{Command as Cmd, Grbl, Status};
+use logger::Logger;
 use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
 use regex::Regex;
@@ -49,6 +52,8 @@ struct State {
     next_nodes: Arc<Mutex<Vec<Node>>>,
     actions: Rc<RefCell<Actions>>,
     grbl: Grbl,
+    logger: Logger,
+    current_log: String,
     connected: bool,
     recipe_regex: Regex,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
@@ -58,6 +63,8 @@ struct State {
 impl State {
     async fn run_recipie(
         grbl: Grbl,
+        logger: Logger,
+        current_log: String,
         recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
         prev_node: Arc<Mutex<Option<Node>>>,
         current_node: Arc<Mutex<Node>>,
@@ -86,6 +93,8 @@ impl State {
         let cx = Arc::clone(&current_node);
         let nx = Arc::clone(&next_nodes);
         let recipe_state2 = Arc::clone(&recipe_state);
+        let logger2 = logger.clone();
+        let current_log2 = current_log.clone();
         thread::spawn(move || {
             while !break_and_hold(Arc::clone(&recipe_state2)) {
                 if let Some(grbl_stat) = gx.get_status() {
@@ -100,7 +109,16 @@ impl State {
                                 let mut pn = px.lock().unwrap();
                                 *pn = Some(cn.clone());
                                 *cn = nn.remove(0);
-                                println!("current node: {}", cn.name);
+                                logger2
+                                    .send_line(
+                                        current_log2.clone(),
+                                        format!(
+                                            "{} => Arrived @{}",
+                                            Local::now().to_rfc2822(),
+                                            &*cn
+                                        ),
+                                    )
+                                    .unwrap();
                             }
                         }
                         None => {}
@@ -110,14 +128,56 @@ impl State {
             }
         });
         for step in recipie {
-            if step.wait {
+            let notify_user_input_recv = if step.wait {
+                logger
+                    .send_line(
+                        current_log.clone(),
+                        format!(
+                            "{} => Step {}) Waiting for user input",
+                            Local::now().to_rfc2822(),
+                            step.step_num
+                        ),
+                    )
+                    .unwrap();
                 let (recipe_state, _) = &*recipe_state;
                 let mut recipe_state = recipe_state.lock().unwrap();
                 *recipe_state = RecipeState::RequireInput;
-            }
+                true
+            } else {
+                false
+            };
             if break_and_hold(Arc::clone(&recipe_state)) {
+                logger
+                    .send_line(
+                        current_log.clone(),
+                        format!("{} => Stopped By User", Local::now().to_rfc2822()),
+                    )
+                    .unwrap();
                 break;
             }
+            if notify_user_input_recv {
+                logger
+                    .send_line(
+                        current_log.clone(),
+                        format!(
+                            "{} => Step {}) User input received. Continuing.",
+                            Local::now().to_rfc2822(),
+                            step.step_num
+                        ),
+                    )
+                    .unwrap();
+            }
+            logger
+                .send_line(
+                    current_log.clone(),
+                    format!(
+                        "{} => Step {}) Going to {}",
+                        Local::now().to_rfc2822(),
+                        step.step_num,
+                        step.selected_destination
+                    ),
+                )
+                .unwrap();
             // gen paths and send
             let hover = match step.hover {
                 true => "_hover",
@@ -127,7 +187,6 @@ impl State {
                 {
                     let cn = current_node.lock().unwrap();
                     let mut nn = next_nodes.lock().unwrap();
-                    println!("going to {}{}", step.selected_destination, hover);
                     let future_node = &nodes.node[match node_map
                         .get(&format!("{}{}", step.selected_destination, hover))
                     {
@@ -166,11 +225,28 @@ impl State {
                 };
             }
             if break_and_hold(Arc::clone(&recipe_state)) {
+                logger
+                    .send_line(
+                        current_log.clone(),
+                        format!("{} => Stopped By User", Local::now().to_rfc2822()),
+                    )
+                    .unwrap();
                 break;
             }
             let (tx, rx) = mpsc::channel();
             let step_c = step.clone();
             let recipe_state3 = Arc::clone(&recipe_state);
+            logger
+                .send_line(
+                    current_log.clone(),
+                    format!(
+                        "{} => Step {}) starting {}",
+                        Local::now().to_rfc2822(),
+                        step.step_num,
+                        step.selected_action
+                    ),
+                )
+                .unwrap();
             thread::spawn(move || {
                 let mut seconds = match (step_c.hours_value.clone().parse::<u64>().unwrap_or(0)
                     * 3600000
@@ -198,11 +274,23 @@ impl State {
                 action_map.insert(action.name, action.commands);
             }
             if break_and_hold(Arc::clone(&recipe_state)) {
+                logger
+                    .send_line(
+                        current_log.clone(),
+                        format!("{} => Stopped By User", Local::now().to_rfc2822()),
+                    )
+                    .unwrap();
                 break;
             }
             let action_commands = action_map.get(&step.selected_action).unwrap();
             for command in action_commands {
                 if break_and_hold(Arc::clone(&recipe_state)) {
+                    logger
+                        .send_line(
+                            current_log.clone(),
+                            format!("{} => Stopped By User", Local::now().to_rfc2822()),
+                        )
+                        .unwrap();
                     break;
                 }
                 if command != &"WAIT".to_string() {
@@ -213,16 +301,39 @@ impl State {
             }
             loop {
                 if break_and_hold(Arc::clone(&recipe_state)) {
+                    logger
+                        .send_line(
+                            current_log.clone(),
+                            format!("{} => Stopped By User", Local::now().to_rfc2822()),
+                        )
+                        .unwrap();
                     break;
                 }
                 if rx.try_recv() == Ok("Stop") {
                     grbl.push_command(Cmd::new("\u{85}".to_string()));
+                    logger
+                        .send_line(
+                            current_log.clone(),
+                            format!(
+                                "{} => Step {}) finished {}",
+                                Local::now().to_rfc2822(),
+                                step.step_num,
+                                step.selected_action
+                            ),
+                        )
+                        .unwrap();
                     break;
                 } else if !contains_wait {
                     grbl.clear_responses();
                     if grbl.queue_len() < action_commands.len() {
                         for command in action_commands {
                             if break_and_hold(Arc::clone(&recipe_state)) {
+                                logger
+                                    .send_line(
+                                        current_log.clone(),
+                                        format!("{} => Stopped By User", Local::now().to_rfc2822()),
+                                    )
+                                    .unwrap();
                                 break;
                             }
                             grbl.push_command(Cmd::new(command.clone()));
@@ -414,15 +525,21 @@ impl<'a> Application for Bathtub {
                         ));
                         let next_nodes = Arc::new(Mutex::new(Vec::new()));
                         let grbl = grbl::new();
+                        let logger = Logger::new();
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
                             tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
                                 run: Run::new(Arc::clone(&recipe_state)),
-                                build: Build::new(Rc::clone(&ref_node), Rc::clone(&ref_actions)),
+                                build: Build::new(
+                                    Rc::clone(&ref_node),
+                                    Rc::clone(&ref_actions),
+                                    logger.clone(),
+                                ),
                                 advanced: Advanced::new(
                                     grbl.clone(),
+                                    logger.clone(),
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
                                 ),
@@ -436,6 +553,8 @@ impl<'a> Application for Bathtub {
                             actions: Rc::clone(&ref_actions),
                             connected: false,
                             grbl: grbl.clone(),
+                            logger: logger.clone(),
+                            current_log: String::new(),
                             grbl_status: None,
                             recipe_regex: Regex::new(r"^[^.]+").unwrap(),
                             recipe_state: Arc::clone(&recipe_state),
@@ -454,7 +573,10 @@ impl<'a> Application for Bathtub {
                 match message {
                     Message::TabBar(TabBarMessage::Manual) => state.state = TabState::Manual,
                     Message::TabBar(TabBarMessage::Build) => state.state = TabState::Build,
-                    Message::TabBar(TabBarMessage::Advanced) => state.state = TabState::Advanced,
+                    Message::TabBar(TabBarMessage::Advanced) => {
+                        state.tabs.advanced.update_logs();
+                        state.state = TabState::Advanced;
+                    }
                     Message::TabBar(TabBarMessage::Run) => {
                         state.tabs.run.search =
                             fs::read_dir("./recipes")
@@ -491,9 +613,29 @@ impl<'a> Application for Bathtub {
                         let mut recipe_state = recipe_state.lock().unwrap();
                         *recipe_state = RecipeState::ManualRunning;
                         state.connected = true;
+                        let log_title = format!(
+                            "{} - Manual - Going to {}",
+                            Local::now().to_rfc2822(),
+                            &node
+                        );
+                        state
+                            .logger
+                            .send_line(log_title.clone(), log_title.clone())
+                            .unwrap();
+                        state
+                            .logger
+                            .send_line(
+                                log_title.clone(),
+                                "------------------------------".to_string(),
+                            )
+                            .unwrap();
+                        state.current_log = log_title;
+
                         command = Command::perform(
                             State::run_recipie(
                                 state.grbl.clone(),
+                                state.logger.clone(),
+                                state.current_log.clone(),
                                 Arc::clone(&state.recipe_state),
                                 Arc::clone(&state.prev_node),
                                 Arc::clone(&state.current_node),
@@ -529,9 +671,28 @@ impl<'a> Application for Bathtub {
                                 cvar.notify_all();
                             }
                             state.connected = true;
+                            let log_title = format!(
+                                "{} - Run - {}",
+                                Local::now().to_rfc2822(),
+                                state.tabs.run.search_value.as_ref().unwrap()
+                            );
+                            state
+                                .logger
+                                .send_line(log_title.clone(), log_title.clone())
+                                .unwrap();
+                            state
+                                .logger
+                                .send_line(
+                                    log_title.clone(),
+                                    "------------------------------".to_string(),
+                                )
+                                .unwrap();
+                            state.current_log = log_title;
                             command = Command::perform(
                                 State::run_recipie(
                                     state.grbl.clone(),
+                                    state.logger.clone(),
+                                    state.current_log.clone(),
                                     Arc::clone(&state.recipe_state),
                                     Arc::clone(&state.prev_node),
                                     Arc::clone(&state.current_node),
@@ -573,6 +734,14 @@ impl<'a> Application for Bathtub {
                         );
                     }
                     Message::RecipieDone(Ok(_)) => {
+                        state
+                            .logger
+                            .send_line(
+                                state.current_log.clone(),
+                                format!("{} => Done", Local::now().to_rfc2822()),
+                            )
+                            .unwrap();
+                        state.current_log = "".to_string();
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         {
                             let (recipe_state, cvar) = &*state.recipe_state;

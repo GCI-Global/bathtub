@@ -1,4 +1,5 @@
 use super::actions::{Action, Actions};
+use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use crate::CQ_MONO;
 use iced::{
@@ -7,11 +8,14 @@ use iced::{
     VerticalAlignment,
 };
 
-use super::build::{delete_icon, okay_icon};
+use super::build::{delete_icon, down_icon, okay_icon, right_icon};
 use super::grbl::{Command as Cmd, Grbl};
 use regex::Regex;
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::{fs, thread};
 
 pub struct Advanced {
     scroll: scrollable::State,
@@ -20,6 +24,7 @@ pub struct Advanced {
     grbl_tab: GrblTab,
     nodes_tab: NodeTab,
     actions_tab: ActionTab,
+    logs_tab: LogTab,
 }
 
 enum TabState {
@@ -35,11 +40,16 @@ pub enum AdvancedMessage {
     GrblTab(GrblMessage),
     NodesTab(NodeTabMessage),
     ActionsTab(ActionTabMessage),
+    LogsTab(LogTabMessage),
 }
 
 impl Advanced {
+    pub fn update_logs(&mut self) {
+        self.logs_tab.update_logs();
+    }
     pub fn new(
         grbl: Grbl,
+        logger: Logger,
         ref_nodes: Rc<RefCell<Nodes>>,
         ref_actions: Rc<RefCell<Actions>>,
     ) -> Self {
@@ -47,9 +57,10 @@ impl Advanced {
             scroll: scrollable::State::new(),
             state: TabState::Grbl,
             tab_bar: TabBar::new(),
-            grbl_tab: GrblTab::new(grbl, Vec::new()),
-            nodes_tab: NodeTab::new(ref_nodes),
-            actions_tab: ActionTab::new(ref_actions),
+            grbl_tab: GrblTab::new(grbl, Vec::new(), logger.clone()),
+            nodes_tab: NodeTab::new(ref_nodes, logger.clone()),
+            actions_tab: ActionTab::new(ref_actions, logger),
+            logs_tab: LogTab::new(),
         }
     }
 
@@ -128,7 +139,10 @@ impl Advanced {
             }
             AdvancedMessage::TabBar(TabBarMessage::Nodes) => self.state = TabState::Nodes,
             AdvancedMessage::TabBar(TabBarMessage::Actions) => self.state = TabState::Actions,
-            AdvancedMessage::TabBar(TabBarMessage::Logs) => self.state = TabState::Logs,
+            AdvancedMessage::TabBar(TabBarMessage::Logs) => {
+                self.logs_tab.update_logs();
+                self.state = TabState::Logs
+            }
             AdvancedMessage::GrblTab(msg) => {
                 self.grbl_tab.unsaved = true;
                 self.grbl_tab.update(msg)
@@ -139,6 +153,10 @@ impl Advanced {
             }
             AdvancedMessage::NodesTab(msg) => self.nodes_tab.update(msg),
             AdvancedMessage::ActionsTab(msg) => self.actions_tab.update(msg),
+            AdvancedMessage::LogsTab(msg) => {
+                self.logs_tab.update_logs();
+                self.logs_tab.update(msg);
+            }
         }
     }
 
@@ -160,7 +178,10 @@ impl Advanced {
                 .actions_tab
                 .view()
                 .map(move |msg| AdvancedMessage::ActionsTab(msg)),
-            TabState::Logs => Column::new().into(),
+            TabState::Logs => self
+                .logs_tab
+                .view()
+                .map(move |msg| AdvancedMessage::LogsTab(msg)),
         };
         let scrollable = Scrollable::new(&mut self.scroll)
             .push(Container::new(content).width(Length::Fill).center_x())
@@ -319,6 +340,7 @@ struct GrblTab {
     save_bar: SaveBar,
     unsaved: bool,
     grbl: Grbl,
+    logger: Logger,
     settings: Vec<GrblSetting>,
     version: Option<String>,
     version_release_date: Option<String>,
@@ -337,7 +359,7 @@ pub enum GrblMessage {
 }
 
 impl GrblTab {
-    fn new(grbl: Grbl, settings: Vec<GrblSetting>) -> Self {
+    fn new(grbl: Grbl, settings: Vec<GrblSetting>, logger: Logger) -> Self {
         GrblTab {
             save_bar: SaveBar::new(),
             unsaved: false,
@@ -345,6 +367,7 @@ impl GrblTab {
             settings,
             version: None,
             version_release_date: None,
+            logger,
         }
     }
 
@@ -477,6 +500,7 @@ struct NodeTab {
     modified_nodes: Rc<RefCell<Nodes>>,
     config_nodes: Vec<ConfigNode>,
     add_config_node_btn: button::State,
+    logger: Logger,
 }
 
 #[derive(Debug, Clone)]
@@ -487,7 +511,7 @@ pub enum NodeTabMessage {
 }
 
 impl NodeTab {
-    fn new(ref_nodes: Rc<RefCell<Nodes>>) -> Self {
+    fn new(ref_nodes: Rc<RefCell<Nodes>>, logger: Logger) -> Self {
         // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
         // nested iter if to flatten the 3d nodes
         let modified_nodes = Rc::new(RefCell::new(Nodes {
@@ -535,6 +559,7 @@ impl NodeTab {
                     v
                 }),
             add_config_node_btn: button::State::new(),
+            logger,
         }
     }
 
@@ -1239,6 +1264,7 @@ struct ActionTab {
     modified_actions: Rc<RefCell<Actions>>,
     config_actions: Vec<ConfigAction>,
     add_config_action_btn: button::State,
+    logger: Logger,
 }
 
 #[derive(Debug, Clone)]
@@ -1249,7 +1275,7 @@ pub enum ActionTabMessage {
 }
 
 impl ActionTab {
-    fn new(ref_actions: Rc<RefCell<Actions>>) -> Self {
+    fn new(ref_actions: Rc<RefCell<Actions>>, logger: Logger) -> Self {
         let modified_actions = Rc::new(RefCell::new(ref_actions.borrow().clone()));
         ActionTab {
             unsaved: false,
@@ -1264,6 +1290,7 @@ impl ActionTab {
                 },
             ),
             add_config_action_btn: button::State::new(),
+            logger,
         }
     }
 
@@ -1597,6 +1624,188 @@ impl CommandInput {
                     .on_press(CommandInputMessage::Delete),
             )
             .into()
+    }
+}
+
+struct LogTab {
+    logs: Vec<Log>,
+    search_bar_state: text_input::State,
+    search_bar_value: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum LogTabMessage {
+    SearchChanged(String),
+    Log(usize, LogMessage),
+}
+
+impl LogTab {
+    fn new() -> Self {
+        let log_folder = Path::new("./logs");
+        LogTab {
+            logs: fs::read_dir(log_folder)
+                .unwrap()
+                .fold(Vec::new(), |mut v, file| {
+                    v.push(Log::new(
+                        file.unwrap().file_name().to_string_lossy().to_string(),
+                    ));
+                    v
+                }),
+            search_bar_state: text_input::State::new(),
+            search_bar_value: "".to_string(),
+        }
+    }
+
+    pub fn update_logs(&mut self) {
+        let log_folder = Path::new("./logs");
+        self.logs = fs::read_dir(log_folder)
+            .unwrap()
+            .fold(self.logs.clone(), |mut v, file| {
+                let file_name = file.unwrap().file_name().to_string_lossy().to_string();
+                if !self.logs.iter().any(|log| log.title == file_name) {
+                    v.push(Log::new(file_name));
+                }
+                v
+            });
+    }
+
+    fn update(&mut self, message: LogTabMessage) {
+        match message {
+            LogTabMessage::SearchChanged(val) => {
+                // create threads to read all log files end test for value
+                let logs_len = self.logs.len();
+                let mut handles = Vec::with_capacity(logs_len);
+                let search_value = Arc::new(val.clone().to_lowercase());
+                let logs = Arc::new(Mutex::new(self.logs.clone()));
+                for i in 0..logs_len {
+                    let logs2 = Arc::clone(&logs);
+                    let search_value2 = Arc::clone(&search_value);
+                    handles.push(thread::spawn(move || {
+                        let title = {
+                            let logs = logs2.lock().unwrap();
+                            logs[i].title.clone()
+                        };
+                        let test_string =
+                            fs::read_to_string(Path::new(&format!("./logs/{}", title)))
+                                .unwrap()
+                                .to_lowercase();
+                        let mut logs = logs2.lock().unwrap();
+                        if test_string.contains(&search_value2[..]) {
+                            logs[i].filtered = false
+                        } else {
+                            logs[i].filtered = true
+                        }
+                    }))
+                }
+                // wait for all to be tested
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                self.logs = (**logs.lock().unwrap()).to_vec();
+                self.search_bar_value = val;
+            }
+            LogTabMessage::Log(i, msg) => self.logs[i].update(msg),
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, LogTabMessage> {
+        Column::new()
+            .push(
+                TextInput::new(
+                    &mut self.search_bar_state,
+                    "Search",
+                    &self.search_bar_value,
+                    LogTabMessage::SearchChanged,
+                )
+                .padding(10),
+            )
+            .push(
+                self.logs
+                    .iter_mut()
+                    .enumerate()
+                    .filter(|(_, log)| !log.filtered)
+                    .fold(Column::new(), |col, (i, log)| {
+                        col.push(log.view().map(move |msg| LogTabMessage::Log(i, msg)))
+                    }),
+            )
+            .into()
+    }
+}
+
+#[derive(Clone)]
+struct Log {
+    title: String,
+    content: String,
+    opened: bool,
+    toggle_view_btn: button::State,
+    filtered: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum LogMessage {
+    ToggleView,
+}
+
+impl Log {
+    fn new(title: String) -> Self {
+        Log {
+            title,
+            content: "".to_string(), // leave empty until opened
+            opened: false,
+            toggle_view_btn: button::State::new(),
+            filtered: false,
+        }
+    }
+
+    fn update(&mut self, message: LogMessage) {
+        match message {
+            LogMessage::ToggleView => {
+                if self.opened {
+                    self.opened = false;
+                } else {
+                    self.content =
+                        fs::read_to_string(Path::new(&format!("./logs/{}", &self.title)))
+                            .unwrap_or(format!("Error: Unable to read file {}!", &self.title));
+                    self.opened = true;
+                }
+            }
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, LogMessage> {
+        match self.opened {
+            true => Column::new()
+                .push(
+                    Button::new(
+                        &mut self.toggle_view_btn,
+                        Row::new()
+                            .push(down_icon())
+                            .push(Text::new(&self.title).font(CQ_MONO)),
+                    )
+                    .padding(10)
+                    .width(Length::Fill)
+                    .on_press(LogMessage::ToggleView),
+                )
+                .push(
+                    Row::new()
+                        .push(Text::new(&self.content).width(Length::Fill).font(CQ_MONO))
+                        .padding(20),
+                )
+                .into(),
+            false => Column::new()
+                .push(
+                    Button::new(
+                        &mut self.toggle_view_btn,
+                        Row::new()
+                            .push(right_icon())
+                            .push(Text::new(&self.title).font(CQ_MONO)),
+                    )
+                    .padding(10)
+                    .width(Length::Fill)
+                    .on_press(LogMessage::ToggleView),
+                )
+                .into(),
+        }
     }
 }
 
