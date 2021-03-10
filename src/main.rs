@@ -18,7 +18,7 @@ use manual::{Manual, ManualMessage};
 use nodes::{Node, NodeGrid2d, Nodes};
 use regex::Regex;
 use run::Step;
-use run::{Run, RunMessage};
+use run::{Run, RunMessage, RunState};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -53,7 +53,6 @@ struct State {
     actions: Rc<RefCell<Actions>>,
     grbl: Grbl,
     logger: Logger,
-    current_log: String,
     connected: bool,
     recipe_regex: Regex,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
@@ -64,7 +63,6 @@ impl State {
     async fn run_recipie(
         grbl: Grbl,
         logger: Logger,
-        current_log: String,
         recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
         prev_node: Arc<Mutex<Option<Node>>>,
         current_node: Arc<Mutex<Node>>,
@@ -94,7 +92,6 @@ impl State {
         let nx = Arc::clone(&next_nodes);
         let recipe_state2 = Arc::clone(&recipe_state);
         let logger2 = logger.clone();
-        let current_log2 = current_log.clone();
         thread::spawn(move || {
             while !break_and_hold(Arc::clone(&recipe_state2)) {
                 if let Some(grbl_stat) = gx.get_status() {
@@ -110,14 +107,11 @@ impl State {
                                 *pn = Some(cn.clone());
                                 *cn = nn.remove(0);
                                 logger2
-                                    .send_line(
-                                        current_log2.clone(),
-                                        format!(
-                                            "{} => Arrived @{}",
-                                            Local::now().to_rfc2822(),
-                                            &*cn
-                                        ),
-                                    )
+                                    .send_line(format!(
+                                        "{} => Arrived @{}",
+                                        Local::now().to_rfc2822(),
+                                        &*cn
+                                    ))
                                     .unwrap();
                             }
                         }
@@ -130,14 +124,11 @@ impl State {
         for step in recipie {
             let notify_user_input_recv = if step.wait {
                 logger
-                    .send_line(
-                        current_log.clone(),
-                        format!(
-                            "{} => Step {}) Waiting for user input",
-                            Local::now().to_rfc2822(),
-                            step.step_num
-                        ),
-                    )
+                    .send_line(format!(
+                        "{} => Step {}) Waiting for user input",
+                        Local::now().to_rfc2822(),
+                        step.step_num
+                    ))
                     .unwrap();
                 let (recipe_state, _) = &*recipe_state;
                 let mut recipe_state = recipe_state.lock().unwrap();
@@ -148,35 +139,26 @@ impl State {
             };
             if break_and_hold(Arc::clone(&recipe_state)) {
                 logger
-                    .send_line(
-                        current_log.clone(),
-                        format!("{} => Stopped By User", Local::now().to_rfc2822()),
-                    )
+                    .send_line(format!("{} => Stopped By User", Local::now().to_rfc2822()))
                     .unwrap();
                 break;
             }
             if notify_user_input_recv {
                 logger
-                    .send_line(
-                        current_log.clone(),
-                        format!(
-                            "{} => Step {}) User input received. Continuing.",
-                            Local::now().to_rfc2822(),
-                            step.step_num
-                        ),
-                    )
+                    .send_line(format!(
+                        "{} => Step {}) User input received. Continuing.",
+                        Local::now().to_rfc2822(),
+                        step.step_num
+                    ))
                     .unwrap();
             }
             logger
-                .send_line(
-                    current_log.clone(),
-                    format!(
-                        "{} => Step {}) Going to {}",
-                        Local::now().to_rfc2822(),
-                        step.step_num,
-                        step.selected_destination
-                    ),
-                )
+                .send_line(format!(
+                    "{} => Step {}) Going to {}",
+                    Local::now().to_rfc2822(),
+                    step.step_num,
+                    step.selected_destination
+                ))
                 .unwrap();
             // gen paths and send
             let hover = match step.hover {
@@ -194,9 +176,49 @@ impl State {
                         _ => break,
                     }
                     .clone()];
+                    logger
+                        .send_line(format!(
+                            "{} => Step {}) From {}:({},{},{}) to {}:({},{},{})",
+                            Local::now().to_rfc2822(),
+                            step.step_num,
+                            cn.name,
+                            cn.x,
+                            cn.y,
+                            cn.z,
+                            future_node.name,
+                            future_node.x,
+                            future_node.y,
+                            future_node.z,
+                        ))
+                        .unwrap();
                     let node_paths = paths::gen_node_paths(&nodes, &cn, future_node);
+                    logger
+                        .send_line(format!(
+                            "{} => Step {}) on path {}",
+                            Local::now().to_rfc2822(),
+                            step.step_num,
+                            node_paths.node.iter().enumerate().fold(
+                                String::new(),
+                                |mut s, (i, n)| {
+                                    s.push_str(&n.name[..]);
+                                    if i + 1 != node_paths.node.len() {
+                                        s.push_str(" > ");
+                                    }
+                                    s
+                                }
+                            ),
+                        ))
+                        .unwrap();
                     for node in node_paths.node {
                         nn.push(node.clone());
+                        logger
+                            .send_line(format!(
+                                "{} => Step {}) Sending pathing G-code '{}'",
+                                Local::now().to_rfc2822(),
+                                step.step_num,
+                                format!("$J=X{} Y{} Z{} F250", node.x, node.y, node.x),
+                            ))
+                            .unwrap();
                         grbl.push_command(Cmd::new(format!(
                             "$J=X{} Y{} Z{} F250",
                             node.x, node.y, node.z
@@ -226,10 +248,7 @@ impl State {
             }
             if break_and_hold(Arc::clone(&recipe_state)) {
                 logger
-                    .send_line(
-                        current_log.clone(),
-                        format!("{} => Stopped By User", Local::now().to_rfc2822()),
-                    )
+                    .send_line(format!("{} => Stopped By User", Local::now().to_rfc2822()))
                     .unwrap();
                 break;
             }
@@ -237,15 +256,12 @@ impl State {
             let step_c = step.clone();
             let recipe_state3 = Arc::clone(&recipe_state);
             logger
-                .send_line(
-                    current_log.clone(),
-                    format!(
-                        "{} => Step {}) starting {}",
-                        Local::now().to_rfc2822(),
-                        step.step_num,
-                        step.selected_action
-                    ),
-                )
+                .send_line(format!(
+                    "{} => Step {}) starting {}",
+                    Local::now().to_rfc2822(),
+                    step.step_num,
+                    step.selected_action
+                ))
                 .unwrap();
             thread::spawn(move || {
                 let mut seconds = match (step_c.hours_value.clone().parse::<u64>().unwrap_or(0)
@@ -275,10 +291,7 @@ impl State {
             }
             if break_and_hold(Arc::clone(&recipe_state)) {
                 logger
-                    .send_line(
-                        current_log.clone(),
-                        format!("{} => Stopped By User", Local::now().to_rfc2822()),
-                    )
+                    .send_line(format!("{} => Stopped By User", Local::now().to_rfc2822()))
                     .unwrap();
                 break;
             }
@@ -286,10 +299,7 @@ impl State {
             for command in action_commands {
                 if break_and_hold(Arc::clone(&recipe_state)) {
                     logger
-                        .send_line(
-                            current_log.clone(),
-                            format!("{} => Stopped By User", Local::now().to_rfc2822()),
-                        )
+                        .send_line(format!("{} => Stopped By User", Local::now().to_rfc2822()))
                         .unwrap();
                     break;
                 }
@@ -302,40 +312,53 @@ impl State {
             loop {
                 if break_and_hold(Arc::clone(&recipe_state)) {
                     logger
-                        .send_line(
-                            current_log.clone(),
-                            format!("{} => Stopped By User", Local::now().to_rfc2822()),
-                        )
+                        .send_line(format!("{} => Stopped By User", Local::now().to_rfc2822()))
                         .unwrap();
                     break;
                 }
                 if rx.try_recv() == Ok("Stop") {
                     grbl.push_command(Cmd::new("\u{85}".to_string()));
                     logger
-                        .send_line(
-                            current_log.clone(),
-                            format!(
-                                "{} => Step {}) finished {}",
-                                Local::now().to_rfc2822(),
-                                step.step_num,
-                                step.selected_action
-                            ),
-                        )
+                        .send_line(format!(
+                            "{} => Step {}) finished {}",
+                            Local::now().to_rfc2822(),
+                            step.step_num,
+                            step.selected_action
+                        ))
                         .unwrap();
                     break;
                 } else if !contains_wait {
+                    for response in grbl.clear_responses() {
+                        logger
+                            .send_line(format!(
+                                "{} => Step {}) G-code '{}' responded '{}'",
+                                response.response_time.unwrap().to_rfc2822(),
+                                step.step_num,
+                                response.command,
+                                response.result.unwrap()
+                            ))
+                            .unwrap();
+                    }
                     grbl.clear_responses();
                     if grbl.queue_len() < action_commands.len() {
                         for command in action_commands {
                             if break_and_hold(Arc::clone(&recipe_state)) {
                                 logger
-                                    .send_line(
-                                        current_log.clone(),
-                                        format!("{} => Stopped By User", Local::now().to_rfc2822()),
-                                    )
+                                    .send_line(format!(
+                                        "{} => Stopped By User",
+                                        Local::now().to_rfc2822()
+                                    ))
                                     .unwrap();
                                 break;
                             }
+                            logger
+                                .send_line(format!(
+                                    "{} => Step {}) Sending action G-code '{}'",
+                                    Local::now().to_rfc2822(),
+                                    step.step_num,
+                                    command.clone()
+                                ))
+                                .unwrap();
                             grbl.push_command(Cmd::new(command.clone()));
                         }
                     }
@@ -531,7 +554,7 @@ impl<'a> Application for Bathtub {
                             state: TabState::Manual,
                             tabs: Tabs {
                                 manual: Manual::new(state.node_grid2d),
-                                run: Run::new(Arc::clone(&recipe_state)),
+                                run: Run::new(Arc::clone(&recipe_state), logger.clone()),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
@@ -554,7 +577,6 @@ impl<'a> Application for Bathtub {
                             connected: false,
                             grbl: grbl.clone(),
                             logger: logger.clone(),
-                            current_log: String::new(),
                             grbl_status: None,
                             recipe_regex: Regex::new(r"^[^.]+").unwrap(),
                             recipe_state: Arc::clone(&recipe_state),
@@ -618,25 +640,18 @@ impl<'a> Application for Bathtub {
                             Local::now().to_rfc2822(),
                             &node
                         );
+                        state.logger.set_log_file(log_title.clone());
+                        state.logger.send_line(log_title.clone()).unwrap();
                         state
                             .logger
-                            .send_line(log_title.clone(), log_title.clone())
+                            .send_line("------------------------------".to_string())
                             .unwrap();
-                        state
-                            .logger
-                            .send_line(
-                                log_title.clone(),
-                                "------------------------------".to_string(),
-                            )
-                            .unwrap();
-                        state.current_log = log_title;
                         state.tabs.advanced.update_logs();
 
                         command = Command::perform(
                             State::run_recipie(
                                 state.grbl.clone(),
                                 state.logger.clone(),
-                                state.current_log.clone(),
                                 Arc::clone(&state.recipe_state),
                                 Arc::clone(&state.prev_node),
                                 Arc::clone(&state.current_node),
@@ -658,7 +673,7 @@ impl<'a> Application for Bathtub {
                             Message::RecipieDone,
                         )
                     }
-                    Message::Run(RunMessage::Run) => {
+                    Message::Run(RunMessage::Run(_)) => {
                         let rs: RecipeState;
                         {
                             let (recipe_state, _) = &*state.recipe_state;
@@ -672,23 +687,6 @@ impl<'a> Application for Bathtub {
                                 cvar.notify_all();
                             }
                             state.connected = true;
-                            let log_title = format!(
-                                "{} - Run - {}",
-                                Local::now().to_rfc2822(),
-                                state.tabs.run.search_value.as_ref().unwrap()
-                            );
-                            state
-                                .logger
-                                .send_line(log_title.clone(), log_title.clone())
-                                .unwrap();
-                            state
-                                .logger
-                                .send_line(
-                                    log_title.clone(),
-                                    "------------------------------".to_string(),
-                                )
-                                .unwrap();
-                            state.current_log = log_title;
                             // we only update the list of logs on load, and when we create a new
                             // log file
                             state.tabs.advanced.update_logs();
@@ -696,7 +694,6 @@ impl<'a> Application for Bathtub {
                                 State::run_recipie(
                                     state.grbl.clone(),
                                     state.logger.clone(),
-                                    state.current_log.clone(),
                                     Arc::clone(&state.recipe_state),
                                     Arc::clone(&state.prev_node),
                                     Arc::clone(&state.current_node),
@@ -711,6 +708,10 @@ impl<'a> Application for Bathtub {
                         }
                     }
                     Message::Run(RunMessage::Pause) => {
+                        state
+                            .logger
+                            .send_line(format!("{} => Paused by user", Local::now().to_rfc2822()))
+                            .unwrap();
                         let (recipe_state, cvar) = &*state.recipe_state;
                         let mut recipe_state = recipe_state.lock().unwrap();
                         *recipe_state = RecipeState::RecipePaused;
@@ -718,6 +719,10 @@ impl<'a> Application for Bathtub {
                         state.grbl.push_command(Cmd::new("\u{85}".to_string()));
                     }
                     Message::Run(RunMessage::Resume) => {
+                        state
+                            .logger
+                            .send_line(format!("{} => Resumed by user", Local::now().to_rfc2822()))
+                            .unwrap();
                         let (recipe_state, cvar) = &*state.recipe_state;
                         let mut recipe_state = recipe_state.lock().unwrap();
                         *recipe_state = RecipeState::RecipeRunning;
@@ -736,16 +741,13 @@ impl<'a> Application for Bathtub {
                             Arc::clone(&state.next_nodes),
                             state.grbl.clone(),
                         );
+                        state.tabs.run.state = RunState::AfterRequiredInput;
                     }
                     Message::RecipieDone(Ok(_)) => {
                         state
                             .logger
-                            .send_line(
-                                state.current_log.clone(),
-                                format!("{} => Done", Local::now().to_rfc2822()),
-                            )
+                            .send_line(format!("{} => Done", Local::now().to_rfc2822()))
                             .unwrap();
-                        state.current_log = "".to_string();
                         state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         {
                             let (recipe_state, cvar) = &*state.recipe_state;
@@ -753,6 +755,7 @@ impl<'a> Application for Bathtub {
                             *recipe_state = RecipeState::Stopped;
                             cvar.notify_all();
                         }
+                        state.tabs.run.state = RunState::AfterRequiredInput;
                         state.connected = true;
                     }
                     Message::RecipieDone(Err(_err)) => {
@@ -775,7 +778,9 @@ impl<'a> Application for Bathtub {
                     }
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
-                    Message::Run(msg) => state.tabs.run.update(msg),
+                    Message::Run(msg) => {
+                        command = state.tabs.run.update(msg).map(move |msg| Message::Run(msg));
+                    }
                     Message::Advanced(msg) => {
                         command = state
                             .tabs

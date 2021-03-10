@@ -11,6 +11,7 @@ use iced::{
 use super::build::{delete_icon, down_icon, okay_icon, right_icon};
 use super::grbl::{Command as Cmd, Grbl};
 use regex::Regex;
+use std::cmp::min;
 use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
@@ -1707,10 +1708,11 @@ impl LogTab {
                 );
                 let val = val.to_lowercase();
                 // Note: limit to 15 active search threads as limit on windows
+                // though limit to 10 becuase crashes if more idk.
                 Command::batch(
-                    (0..15)
+                    (0..min(10, self.unsearched_files.len()))
                         .into_iter()
-                        .fold(Vec::with_capacity(15), |mut v, i| {
+                        .fold(Vec::with_capacity(10), |mut v, i| {
                             v.push(Command::perform(
                                 Logger::search_files(val.clone(), self.unsearched_files.remove(i)),
                                 LogTabMessage::AddLog,

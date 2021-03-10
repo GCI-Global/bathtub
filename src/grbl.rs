@@ -96,6 +96,7 @@ pub fn new() -> Grbl {
             if now.elapsed().as_millis() >= 100 {
                 now = Instant::now();
                 let mut current_status = Command::new("?".to_string());
+                port.flush().unwrap();
                 send(&mut port, &mut current_status);
                 if let Some(caps) = r.captures(&current_status.result.unwrap()[..]) {
                     let loc = Status {
@@ -110,6 +111,7 @@ pub fn new() -> Grbl {
             }
             let mut cb = cb_c.lock().unwrap();
             //while cb.len() > 0 {
+            port.flush().unwrap();
             if let Some(mut cmd) = cb.pop() {
                 let mut rb = rb_c.lock().unwrap();
                 send(&mut port, &mut cmd);
