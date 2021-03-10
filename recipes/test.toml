@@ -1,63 +1,53 @@
 [required_inputs]
-before = ['test']
-after = ['test']
+before = []
+after = []
 
 [[steps]]
-step_num = 1
-selected_destination = 'Rinse 5'
-hover = true
+step_num = '1'
+selected_destination = 'MCL-16'
+selected_action = 'Rest'
+secs_value = '3'
+mins_value = ''
+hours_value = ''
+hover = false
+wait = false
+
+[[steps]]
+step_num = '2'
+selected_destination = 'Rinse 2'
 selected_action = 'Rest'
 secs_value = ''
 mins_value = ''
 hours_value = ''
+hover = true
 wait = true
 
 [[steps]]
-step_num = 2
-selected_destination = 'Rinse 5'
-hover = false
-selected_action = 'Rest'
-secs_value = ''
+step_num = '3'
+selected_destination = 'Rinse 1'
+selected_action = 'Swish'
+secs_value = '3'
 mins_value = ''
 hours_value = ''
+hover = false
+wait = true
+
+[[steps]]
+step_num = '4'
+selected_destination = 'HNO₃'
+selected_action = 'Rest'
+secs_value = '3'
+mins_value = ''
+hours_value = ''
+hover = false
 wait = false
 
 [[steps]]
-step_num = 3
-selected_destination = 'Rinse 5'
-hover = false
+step_num = '5'
+selected_destination = 'HNO₃'
 selected_action = 'Rest'
 secs_value = ''
 mins_value = ''
 hours_value = ''
-wait = false
-
-[[steps]]
-step_num = 4
-selected_destination = 'Rinse 5'
-hover = false
-selected_action = 'Rest'
-secs_value = ''
-mins_value = ''
-hours_value = ''
-wait = false
-
-[[steps]]
-step_num = 5
-selected_destination = 'Rinse 5'
-hover = false
-selected_action = 'Rest'
-secs_value = ''
-mins_value = ''
-hours_value = ''
-wait = false
-
-[[steps]]
-step_num = 6
-selected_destination = 'Rinse 5'
-hover = false
-selected_action = 'Rest'
-secs_value = ''
-mins_value = ''
-hours_value = ''
-wait = false
+hover = true
+wait = true

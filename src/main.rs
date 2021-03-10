@@ -630,6 +630,7 @@ impl<'a> Application for Bathtub {
                             )
                             .unwrap();
                         state.current_log = log_title;
+                        state.tabs.advanced.update_logs();
 
                         command = Command::perform(
                             State::run_recipie(
@@ -688,6 +689,9 @@ impl<'a> Application for Bathtub {
                                 )
                                 .unwrap();
                             state.current_log = log_title;
+                            // we only update the list of logs on load, and when we create a new
+                            // log file
+                            state.tabs.advanced.update_logs();
                             command = Command::perform(
                                 State::run_recipie(
                                     state.grbl.clone(),
@@ -772,7 +776,13 @@ impl<'a> Application for Bathtub {
                     Message::Manual(msg) => state.tabs.manual.update(msg),
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => state.tabs.run.update(msg),
-                    Message::Advanced(msg) => state.tabs.advanced.update(msg),
+                    Message::Advanced(msg) => {
+                        command = state
+                            .tabs
+                            .advanced
+                            .update(msg)
+                            .map(move |msg| Message::Advanced(msg));
+                    }
                     _ => {}
                 }
                 command

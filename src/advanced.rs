@@ -3,7 +3,7 @@ use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use crate::CQ_MONO;
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Column, Container, Element,
+    button, pick_list, scrollable, text_input, Align, Button, Column, Command, Container, Element,
     HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
     VerticalAlignment,
 };
@@ -12,10 +12,12 @@ use super::build::{delete_icon, down_icon, okay_icon, right_icon};
 use super::grbl::{Command as Cmd, Grbl};
 use regex::Regex;
 use std::cell::RefCell;
+use std::fs;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-use std::{fs, thread};
+
+pub const LOGS: &str = "./logs";
+pub const LOG_MAX: usize = 100; // max number of logs to show
 
 pub struct Advanced {
     scroll: scrollable::State,
@@ -64,7 +66,8 @@ impl Advanced {
         }
     }
 
-    pub fn update(&mut self, message: AdvancedMessage) {
+    pub fn update(&mut self, message: AdvancedMessage) -> Command<AdvancedMessage> {
+        let mut command = Command::none();
         match message {
             AdvancedMessage::TabBar(TabBarMessage::Grbl) => {
                 if !self.grbl_tab.unsaved {
@@ -110,7 +113,7 @@ impl Advanced {
                         }
                     }
                 }
-                self.state = TabState::Grbl
+                self.state = TabState::Grbl;
             }
             AdvancedMessage::GrblTab(GrblMessage::SaveMessage(SaveBarMessage::Cancel)) => {
                 self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
@@ -139,13 +142,10 @@ impl Advanced {
             }
             AdvancedMessage::TabBar(TabBarMessage::Nodes) => self.state = TabState::Nodes,
             AdvancedMessage::TabBar(TabBarMessage::Actions) => self.state = TabState::Actions,
-            AdvancedMessage::TabBar(TabBarMessage::Logs) => {
-                self.logs_tab.update_logs();
-                self.state = TabState::Logs
-            }
+            AdvancedMessage::TabBar(TabBarMessage::Logs) => self.state = TabState::Logs,
             AdvancedMessage::GrblTab(msg) => {
                 self.grbl_tab.unsaved = true;
-                self.grbl_tab.update(msg)
+                self.grbl_tab.update(msg);
             }
             AdvancedMessage::NodesTab(NodeTabMessage::AddConfigNode) => {
                 self.nodes_tab.update(NodeTabMessage::AddConfigNode);
@@ -154,10 +154,13 @@ impl Advanced {
             AdvancedMessage::NodesTab(msg) => self.nodes_tab.update(msg),
             AdvancedMessage::ActionsTab(msg) => self.actions_tab.update(msg),
             AdvancedMessage::LogsTab(msg) => {
-                self.logs_tab.update_logs();
-                self.logs_tab.update(msg);
+                command = self
+                    .logs_tab
+                    .update(msg)
+                    .map(move |msg| AdvancedMessage::LogsTab(msg))
             }
-        }
+        };
+        command
     }
 
     pub fn view(&mut self) -> Element<AdvancedMessage> {
@@ -1629,6 +1632,7 @@ impl CommandInput {
 
 struct LogTab {
     logs: Vec<Log>,
+    unsearched_files: Vec<String>,
     search_bar_state: text_input::State,
     search_bar_value: String,
 }
@@ -1637,27 +1641,29 @@ struct LogTab {
 pub enum LogTabMessage {
     SearchChanged(String),
     Log(usize, LogMessage),
+    AddLog((String, Option<Log>)),
 }
 
 impl LogTab {
     fn new() -> Self {
-        let log_folder = Path::new("./logs");
         LogTab {
-            logs: fs::read_dir(log_folder)
-                .unwrap()
-                .fold(Vec::new(), |mut v, file| {
+            logs: fs::read_dir(Path::new(LOGS)).unwrap().take(LOG_MAX).fold(
+                Vec::new(),
+                |mut v, file| {
                     v.push(Log::new(
                         file.unwrap().file_name().to_string_lossy().to_string(),
                     ));
                     v
-                }),
+                },
+            ),
+            unsearched_files: Vec::new(),
             search_bar_state: text_input::State::new(),
             search_bar_value: "".to_string(),
         }
     }
 
     pub fn update_logs(&mut self) {
-        let log_folder = Path::new("./logs");
+        let log_folder = Path::new(LOGS);
         self.logs = fs::read_dir(log_folder)
             .unwrap()
             .fold(self.logs.clone(), |mut v, file| {
@@ -1669,46 +1675,61 @@ impl LogTab {
             });
     }
 
-    fn update(&mut self, message: LogTabMessage) {
+    fn update(&mut self, message: LogTabMessage) -> Command<LogTabMessage> {
         match message {
-            LogTabMessage::SearchChanged(val) => {
-                // create threads to read all log files end test for value
-                let logs_len = self.logs.len();
-                let mut handles = Vec::with_capacity(logs_len);
-                let search_value = Arc::new(val.clone().to_lowercase());
-                let logs = Arc::new(Mutex::new(self.logs.clone()));
-                for i in 0..logs_len {
-                    let logs2 = Arc::clone(&logs);
-                    let search_value2 = Arc::clone(&search_value);
-                    handles.push(thread::spawn(move || {
-                        let title = {
-                            let logs = logs2.lock().unwrap();
-                            logs[i].title.clone()
-                        };
-                        let test_string =
-                            fs::read_to_string(Path::new(&format!("./logs/{}", title)))
-                                .unwrap()
-                                .to_lowercase();
-                        let mut logs = logs2.lock().unwrap();
-                        if test_string.contains(&search_value2[..]) {
-                            logs[i].filtered = false
-                        } else {
-                            logs[i].filtered = true
+            LogTabMessage::AddLog((val, log)) => {
+                if self.logs.len() <= LOG_MAX && self.unsearched_files.len() > 0 {
+                    if val == self.search_bar_value.to_lowercase() {
+                        if let Some(log) = log {
+                            self.logs.push(log);
                         }
-                    }))
+                        Command::perform(
+                            Logger::search_files(val, self.unsearched_files.remove(0)),
+                            LogTabMessage::AddLog,
+                        )
+                    } else {
+                        Command::none()
+                    }
+                } else {
+                    Command::none()
                 }
-                // wait for all to be tested
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-                self.logs = (**logs.lock().unwrap()).to_vec();
-                self.search_bar_value = val;
             }
-            LogTabMessage::Log(i, msg) => self.logs[i].update(msg),
+            LogTabMessage::SearchChanged(val) => {
+                // run search as multithreaded Commands to speed up search
+                self.search_bar_value = val.clone();
+                self.logs = Vec::with_capacity(LOG_MAX);
+                self.unsearched_files = fs::read_dir(Path::new(LOGS)).unwrap().fold(
+                    Vec::with_capacity(LOG_MAX),
+                    |mut v, file| {
+                        v.push(file.unwrap().file_name().to_string_lossy().to_string());
+                        v
+                    },
+                );
+                let val = val.to_lowercase();
+                // Note: limit to 15 active search threads as limit on windows
+                Command::batch(
+                    (0..15)
+                        .into_iter()
+                        .fold(Vec::with_capacity(15), |mut v, i| {
+                            v.push(Command::perform(
+                                Logger::search_files(val.clone(), self.unsearched_files.remove(i)),
+                                LogTabMessage::AddLog,
+                            ));
+                            v
+                        }),
+                )
+            }
+            LogTabMessage::Log(i, msg) => {
+                self.logs[i].update(msg);
+                Command::none()
+            }
         }
     }
 
     fn view(&mut self) -> Element<'_, LogTabMessage> {
+        self.logs.sort_by(|a, b| b.title.cmp(&a.title));
+        let logs = self.logs.iter_mut().take(LOG_MAX);
+        let logs_count = logs.len();
         Column::new()
             .push(
                 TextInput::new(
@@ -1720,20 +1741,35 @@ impl LogTab {
                 .padding(10),
             )
             .push(
-                self.logs
-                    .iter_mut()
-                    .enumerate()
+                logs.enumerate()
                     .filter(|(_, log)| !log.filtered)
                     .fold(Column::new(), |col, (i, log)| {
                         col.push(log.view().map(move |msg| LogTabMessage::Log(i, msg)))
                     }),
             )
+            .push(if logs_count == LOG_MAX {
+                Row::with_children(vec![Text::new(format!(
+                    "Showing first {}. Use search to narrow down results.",
+                    LOG_MAX
+                ))
+                .font(CQ_MONO)
+                .width(Length::Fill)
+                .horizontal_alignment(HorizontalAlignment::Center)
+                .into()])
+                .spacing(10)
+            } else {
+                Row::with_children(vec![Text::new("Showing all results.")
+                    .font(CQ_MONO)
+                    .width(Length::Fill)
+                    .horizontal_alignment(HorizontalAlignment::Center)
+                    .into()])
+            })
             .into()
     }
 }
 
-#[derive(Clone)]
-struct Log {
+#[derive(Clone, Debug)]
+pub struct Log {
     title: String,
     content: String,
     opened: bool,
@@ -1747,7 +1783,7 @@ pub enum LogMessage {
 }
 
 impl Log {
-    fn new(title: String) -> Self {
+    pub fn new(title: String) -> Self {
         Log {
             title,
             content: "".to_string(), // leave empty until opened
