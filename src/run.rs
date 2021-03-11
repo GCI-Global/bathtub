@@ -154,7 +154,7 @@ impl Run {
                         .any(|input| input.input_value != "".to_string())
                 {
                     let log_title = format!(
-                        "{} - Run - {}",
+                        "{}| Run - {}",
                         Local::now().to_rfc2822(),
                         self.search_value.as_ref().unwrap()
                     );

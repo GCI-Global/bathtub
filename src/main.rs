@@ -636,11 +636,8 @@ impl<'a> Application for Bathtub {
                         let mut recipe_state = recipe_state.lock().unwrap();
                         *recipe_state = RecipeState::ManualRunning;
                         state.connected = true;
-                        let log_title = format!(
-                            "{} - Manual - Going to {}",
-                            Local::now().to_rfc2822(),
-                            &node
-                        );
+                        let log_title =
+                            format!("{}| Manual - Going to {}", Local::now().to_rfc2822(), &node);
                         state.logger.set_log_file(log_title.clone());
                         state.logger.send_line(log_title.clone()).unwrap();
                         state

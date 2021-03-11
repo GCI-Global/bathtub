@@ -10,6 +10,7 @@ use iced::{
 
 use super::build::{delete_icon, down_icon, okay_icon, right_icon};
 use super::grbl::{Command as Cmd, Grbl};
+use chrono::DateTime;
 use regex::Regex;
 use std::cell::RefCell;
 use std::cmp::min;
@@ -1636,6 +1637,7 @@ struct LogTab {
     unsearched_files: Vec<String>,
     search_bar_state: text_input::State,
     search_bar_value: String,
+    date_regex: Regex,
 }
 
 #[derive(Debug, Clone)]
@@ -1647,17 +1649,31 @@ pub enum LogTabMessage {
 
 impl LogTab {
     fn new() -> Self {
+        let date_regex = Regex::new(r"[^|]+").unwrap();
         let mut log_files: Vec<_> = fs::read_dir(Path::new(LOGS))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
             .collect();
-        log_files.sort();
+        log_files.sort_by(|a, b| {
+            // convert from title to sort by seconds, just sorting by name sorts by day
+            let b_caps = date_regex.captures(&b[..]).unwrap();
+            let a_caps = date_regex.captures(&a[..]).unwrap();
+            DateTime::parse_from_rfc2822(&b_caps[0])
+                .unwrap()
+                .timestamp()
+                .cmp(
+                    &DateTime::parse_from_rfc2822(&a_caps[0])
+                        .unwrap()
+                        .timestamp(),
+                )
+        });
         log_files.truncate(LOG_MAX);
         LogTab {
             logs: log_files.into_iter().map(|f| Log::new(f)).collect(),
             unsearched_files: Vec::new(),
             search_bar_state: text_input::State::new(),
             search_bar_value: "".to_string(),
+            date_regex,
         }
     }
 
@@ -1667,7 +1683,19 @@ impl LogTab {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
             .collect();
-        log_files.sort();
+        log_files.sort_by(|a, b| {
+            // convert from title to sort by seconds, just sorting by name sorts by day
+            let b_caps = self.date_regex.captures(&b[..]).unwrap();
+            let a_caps = self.date_regex.captures(&a[..]).unwrap();
+            DateTime::parse_from_rfc2822(&b_caps[0])
+                .unwrap()
+                .timestamp()
+                .cmp(
+                    &DateTime::parse_from_rfc2822(&a_caps[0])
+                        .unwrap()
+                        .timestamp(),
+                )
+        });
         log_files.truncate(LOG_MAX);
         self.logs = log_files.into_iter().map(|f| Log::new(f)).collect();
     }
@@ -1694,17 +1722,20 @@ impl LogTab {
             LogTabMessage::SearchChanged(val) => {
                 // run search as multithreaded Commands to speed up search
                 self.search_bar_value = val.clone();
-                self.logs = Vec::with_capacity(LOG_MAX);
-                self.unsearched_files = fs::read_dir(Path::new(LOGS)).unwrap().fold(
-                    Vec::with_capacity(LOG_MAX),
-                    |mut v, file| {
-                        v.push(file.unwrap().file_name().to_string_lossy().to_string());
-                        v
-                    },
-                );
-                let val = val.to_lowercase();
-                // Note: limit to 15 active search threads as limit on windows
-                let command =
+                if val == "".to_string() {
+                    self.update_logs();
+                    Command::none()
+                } else {
+                    self.logs = Vec::with_capacity(LOG_MAX);
+                    self.unsearched_files = fs::read_dir(Path::new(LOGS)).unwrap().fold(
+                        Vec::with_capacity(LOG_MAX),
+                        |mut v, file| {
+                            v.push(file.unwrap().file_name().to_string_lossy().to_string());
+                            v
+                        },
+                    );
+                    let val = val.to_lowercase();
+                    // Note: limit to 15 active search threads as limit on windows
                     Command::batch((0..min(15, self.unsearched_files.len())).into_iter().fold(
                         Vec::with_capacity(15),
                         |mut v, _i| {
@@ -1714,8 +1745,8 @@ impl LogTab {
                             ));
                             v
                         },
-                    ));
-                command
+                    ))
+                }
             }
             LogTabMessage::Log(i, msg) => {
                 self.logs[i].update(msg);
@@ -1725,7 +1756,20 @@ impl LogTab {
     }
 
     fn view(&mut self) -> Element<'_, LogTabMessage> {
-        self.logs.sort_by(|a, b| b.title.cmp(&a.title));
+        let date_regex = self.date_regex.clone();
+        self.logs.sort_by(|a, b| {
+            // convert from title to sort by seconds, just sorting by name sorts by day
+            let b_caps = date_regex.captures(&b.title[..]).unwrap();
+            let a_caps = date_regex.captures(&a.title[..]).unwrap();
+            DateTime::parse_from_rfc2822(&b_caps[0])
+                .unwrap()
+                .timestamp()
+                .cmp(
+                    &DateTime::parse_from_rfc2822(&a_caps[0])
+                        .unwrap()
+                        .timestamp(),
+                )
+        });
         let logs = self.logs.iter_mut().take(LOG_MAX);
         let logs_count = logs.len();
         Column::new()
