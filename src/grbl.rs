@@ -108,14 +108,14 @@ pub fn new() -> Grbl {
                     let mut lctn = status.lock().unwrap();
                     *lctn = Some(loc);
                 }
-            }
-            let mut cb = cb_c.lock().unwrap();
-            //while cb.len() > 0 {
-            port.flush().unwrap();
-            if let Some(mut cmd) = cb.pop() {
-                let mut rb = rb_c.lock().unwrap();
-                send(&mut port, &mut cmd);
-                rb.push(cmd);
+            } else {
+                let mut cb = cb_c.lock().unwrap();
+                //while cb.len() > 0 {
+                if let Some(mut cmd) = cb.pop() {
+                    let mut rb = rb_c.lock().unwrap();
+                    send(&mut port, &mut cmd);
+                    rb.push(cmd);
+                }
             }
         }
     });
@@ -157,6 +157,7 @@ fn get_port() -> SystemPort {
 
 // used by the new() thread to send to grbl and parse response
 pub fn send(port: &mut SystemPort, command: &mut Command) {
+    port.flush().unwrap();
     let mut buf = format!("{}\n", command.command).as_bytes().to_owned();
     port.write(&buf[..]).unwrap();
     let mut reader = BufReader::new(port);
@@ -199,7 +200,7 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
                         break;
                     }
                     if line.contains("\r") {
-                        output.push(line.replace("\r", ""));
+                        output.push(line.replace("\r", "").replace("\n", ""));
                         command.response_time = Some(Local::now());
                         command.result =
                             Some(output.into_iter().fold(String::new(), |mut string, part| {
@@ -208,7 +209,11 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
                             }));
                         break;
                     }
-                    output.push(line);
+                    if command.command == "?".to_string() && line.contains("<") {
+                        output.push(line);
+                    } else if command.command != "?".to_string() && !line.contains("<") {
+                        output.push(line);
+                    }
                 }
                 Err(err) => println!("{:?}", err),
             }

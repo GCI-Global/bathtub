@@ -122,6 +122,7 @@ impl State {
             }
         });
         for step in recipie {
+            grbl.clear_responses();
             let notify_user_input_recv = if step.wait {
                 logger
                     .send_line(format!(
@@ -597,7 +598,6 @@ impl<'a> Application for Bathtub {
                     Message::TabBar(TabBarMessage::Manual) => state.state = TabState::Manual,
                     Message::TabBar(TabBarMessage::Build) => state.state = TabState::Build,
                     Message::TabBar(TabBarMessage::Advanced) => {
-                        state.tabs.advanced.update_logs();
                         state.state = TabState::Advanced;
                     }
                     Message::TabBar(TabBarMessage::Run) => {

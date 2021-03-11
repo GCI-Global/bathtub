@@ -1662,6 +1662,7 @@ impl LogTab {
     }
 
     pub fn update_logs(&mut self) {
+        self.search_bar_value = "".to_string();
         let mut log_files: Vec<_> = fs::read_dir(Path::new(LOGS))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
