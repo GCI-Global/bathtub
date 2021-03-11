@@ -481,7 +481,7 @@ struct LoadState {
 
 #[derive(Debug, Clone)]
 enum LoadError {
-    _Placeholder,
+    Nodes,
 }
 
 #[derive(Debug, Clone)]
@@ -584,6 +584,7 @@ impl<'a> Application for Bathtub {
                     }
                     Message::Loaded(Err(_)) => {
                         panic!("somehow loaded had an error")
+                        // need to figure out how to notify user of errors
                         // need to add correct fail state, following is from the Todos example
                         //*self = Bathtub::Loaded(State::default());
                     }
@@ -797,7 +798,7 @@ impl<'a> Application for Bathtub {
 
     fn view(&mut self) -> Element<Message> {
         match self {
-            Bathtub::Loading => loading_message(),
+            Bathtub::Loading => loading_message("Loading . . ."),
             Bathtub::Loaded(State {
                 state,
                 tabs,
@@ -905,7 +906,15 @@ impl LoadState {
 
     // This is just a placeholder. Will eventually read data from server
     async fn load() -> Result<LoadState, LoadError> {
-        let nodes = nodes::gen_nodes();
+        // try to read file 3 times before returning error
+        let mut nodes = Nodes { node: Vec::new() };
+        for i in 0..3 {
+            match nodes::gen_nodes() {
+                Ok(n) => nodes = n,
+                Err(_err) if i == 2 => return Err(LoadError::Nodes),
+                Err(_) => thread::sleep(Duration::from_millis(50)),
+            };
+        }
         Ok(LoadState::new(
             nodes.clone(),
             nodes::get_nodemap(nodes.clone()),
@@ -915,15 +924,16 @@ impl LoadState {
     }
 }
 
-fn loading_message<'a>() -> Element<'a, Message> {
+fn loading_message<'a>(msg: &str) -> Element<'a, Message> {
     Container::new(
-        Text::new("Loading...\n\nThis should be very quick.")
+        Text::new(msg)
             .horizontal_alignment(HorizontalAlignment::Center)
             .size(50),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .center_y()
+    .center_x()
     .into()
 }
 

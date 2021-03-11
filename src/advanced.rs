@@ -13,9 +13,9 @@ use super::grbl::{Command as Cmd, Grbl};
 use regex::Regex;
 use std::cell::RefCell;
 use std::cmp::min;
-use std::fs;
 use std::path::Path;
 use std::rc::Rc;
+use std::{fs, fs::DirEntry, io};
 
 pub const LOGS: &str = "./logs";
 pub const LOG_MAX: usize = 100; // max number of logs to show
@@ -1647,16 +1647,14 @@ pub enum LogTabMessage {
 
 impl LogTab {
     fn new() -> Self {
+        let mut log_files: Vec<_> = fs::read_dir(Path::new(LOGS))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        log_files.sort();
+        log_files.truncate(LOG_MAX);
         LogTab {
-            logs: fs::read_dir(Path::new(LOGS)).unwrap().take(LOG_MAX).fold(
-                Vec::new(),
-                |mut v, file| {
-                    v.push(Log::new(
-                        file.unwrap().file_name().to_string_lossy().to_string(),
-                    ));
-                    v
-                },
-            ),
+            logs: log_files.into_iter().map(|f| Log::new(f)).collect(),
             unsearched_files: Vec::new(),
             search_bar_state: text_input::State::new(),
             search_bar_value: "".to_string(),
@@ -1664,16 +1662,13 @@ impl LogTab {
     }
 
     pub fn update_logs(&mut self) {
-        let log_folder = Path::new(LOGS);
-        self.logs = fs::read_dir(log_folder)
+        let mut log_files: Vec<_> = fs::read_dir(Path::new(LOGS))
             .unwrap()
-            .fold(self.logs.clone(), |mut v, file| {
-                let file_name = file.unwrap().file_name().to_string_lossy().to_string();
-                if !self.logs.iter().any(|log| log.title == file_name) {
-                    v.push(Log::new(file_name));
-                }
-                v
-            });
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        log_files.sort();
+        log_files.truncate(LOG_MAX);
+        self.logs = log_files.into_iter().map(|f| Log::new(f)).collect();
     }
 
     fn update(&mut self, message: LogTabMessage) -> Command<LogTabMessage> {

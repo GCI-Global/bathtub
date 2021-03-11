@@ -142,8 +142,8 @@ impl NodeGrid2d {
     }
 }
 
-pub fn gen_nodes() -> Nodes {
-    Nodes::to_nodes(get_baths_config())
+pub fn gen_nodes() -> Result<Nodes, ()> {
+    Ok(Nodes::to_nodes(get_baths_config()?))
 }
 
 pub fn get_nodemap(nodes: Nodes) -> HashMap<String, usize> {
@@ -157,8 +157,9 @@ pub fn get_nodemap(nodes: Nodes) -> HashMap<String, usize> {
         })
 }
 
-fn get_baths_config() -> Nodes {
-    let baths_toml =
-        &fs::read_to_string("config/baths.toml").expect("Unable to open config/baths.toml");
-    toml::from_str::<Nodes>(baths_toml).unwrap()
+fn get_baths_config() -> Result<Nodes, ()> {
+    match &fs::read_to_string("config/baths.toml") {
+        Ok(file) => Ok(toml::from_str::<Nodes>(file).unwrap()),
+        Err(_) => Err(()),
+    }
 }

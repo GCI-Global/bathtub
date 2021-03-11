@@ -378,61 +378,89 @@ impl Run {
                     .push(Container::new(content).width(Length::Fill).center_x())
                     .into()
             }
-            RunState::BeforeRequiredInput => self
-                .required_before_inputs
-                .iter_mut()
-                .enumerate()
-                .fold(Column::new(), |col, (i, input)| {
-                    col.push(
-                        input
-                            .view()
-                            .map(move |msg| RunMessage::RequiredBeforeInput(i, msg)),
-                    )
-                })
-                .push(Row::with_children(vec![
-                    Button::new(
-                        &mut self.start_btn,
-                        Text::new("Start")
-                            .font(CQ_MONO)
-                            .horizontal_alignment(HorizontalAlignment::Center),
-                    )
-                    .on_press(RunMessage::Start)
-                    .padding(10)
-                    .width(Length::Units(200))
-                    .into(),
-                    Space::with_width(Length::Units(100)).into(),
-                    Button::new(
-                        &mut self.cancel_btn,
-                        Text::new("Cancel")
-                            .font(CQ_MONO)
-                            .horizontal_alignment(HorizontalAlignment::Center),
-                    )
-                    .on_press(RunMessage::Cancel)
-                    .width(Length::Units(200))
-                    .padding(10)
-                    .into(),
-                ]))
-                .into(),
-            RunState::AfterRequiredInput => self
-                .required_after_inputs
-                .iter_mut()
-                .enumerate()
-                .fold(Column::new(), |col, (i, input)| {
-                    col.push(
-                        input
-                            .view()
-                            .map(move |msg| RunMessage::RequiredAfterInput(i, msg)),
-                    )
-                })
-                .push(Row::with_children(vec![Button::new(
-                    &mut self.finish_btn,
-                    Text::new("Finish").font(CQ_MONO),
-                )
-                .on_press(RunMessage::Finish)
-                .padding(10)
-                .width(Length::Units(500))
-                .into()]))
-                .into(),
+            RunState::BeforeRequiredInput => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(
+                        self.required_before_inputs
+                            .iter_mut()
+                            .enumerate()
+                            .fold(Column::new().spacing(10), |col, (i, input)| {
+                                col.push(
+                                    input
+                                        .view()
+                                        .map(move |msg| RunMessage::RequiredBeforeInput(i, msg)),
+                                )
+                            })
+                            .push(Row::with_children(vec![
+                                Space::with_width(Length::Fill).into(),
+                                Button::new(
+                                    &mut self.start_btn,
+                                    Text::new("Start")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .on_press(RunMessage::Start)
+                                .padding(10)
+                                .width(Length::Units(200))
+                                .into(),
+                                Space::with_width(Length::Units(100)).into(),
+                                Button::new(
+                                    &mut self.cancel_btn,
+                                    Text::new("Cancel")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .on_press(RunMessage::Cancel)
+                                .width(Length::Units(200))
+                                .padding(10)
+                                .into(),
+                                Space::with_width(Length::Fill).into(),
+                            ])),
+                    );
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            RunState::AfterRequiredInput => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(
+                        self.required_after_inputs
+                            .iter_mut()
+                            .enumerate()
+                            .fold(Column::new().spacing(10), |col, (i, input)| {
+                                col.push(
+                                    input
+                                        .view()
+                                        .map(move |msg| RunMessage::RequiredAfterInput(i, msg)),
+                                )
+                            })
+                            .push(Row::with_children(vec![
+                                Space::with_width(Length::Fill).into(),
+                                Button::new(
+                                    &mut self.finish_btn,
+                                    Text::new("Finish")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .on_press(RunMessage::Finish)
+                                .padding(10)
+                                .width(Length::Units(500))
+                                .into(),
+                                Space::with_width(Length::Fill).into(),
+                            ])),
+                    );
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
         }
     }
 }
@@ -465,14 +493,22 @@ impl RequiredInput {
 
     fn view(&mut self) -> Element<'_, RequiredInputMessage> {
         Row::with_children(vec![
-            Text::new(&self.title).into(),
-            Space::with_width(Length::Units(25)).into(),
+            Column::new()
+                .push(Space::with_height(Length::Units(10)))
+                .push(
+                    Text::new(format!("{}:", &self.title))
+                        .font(CQ_MONO)
+                        .size(20)
+                        .width(Length::Units(200)),
+                )
+                .into(),
             TextInput::new(
                 &mut self.input_state,
                 "",
                 &self.input_value,
                 RequiredInputMessage::InputChanged,
             )
+            .padding(10)
             .into(),
         ])
         .into()
