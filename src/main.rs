@@ -554,7 +554,7 @@ impl<'a> Application for Bathtub {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
                             tabs: Tabs {
-                                manual: Manual::new(state.node_grid2d),
+                                manual: Manual::new(state.node_grid2d, grbl.clone()),
                                 run: Run::new(Arc::clone(&recipe_state), logger.clone()),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
@@ -774,7 +774,13 @@ impl<'a> Application for Bathtub {
                             )
                         }
                     }
-                    Message::Manual(msg) => state.tabs.manual.update(msg),
+                    Message::Manual(msg) => {
+                        command = state
+                            .tabs
+                            .manual
+                            .update(msg)
+                            .map(move |msg| Message::Manual(msg))
+                    }
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => {
                         command = state.tabs.run.update(msg).map(move |msg| Message::Run(msg));
