@@ -11,7 +11,7 @@ pub struct Manual {
     pub bath_btns: Vec<Vec<Option<(Node, button::State)>>>,
     pub stop_btn: button::State,
     pub status: String,
-    pub in_bath: bool,
+    pub hover: bool,
     pub status_regex: Regex,
 }
 
@@ -32,7 +32,9 @@ impl Manual {
                 .fold(Vec::new(), |mut vec, axis| {
                     vec.push(axis.into_iter().fold(Vec::new(), |mut axis_vec, node| {
                         if let Some(n) = node {
-                            axis_vec.push(Some((n, button::State::new())));
+                            if !n.hide {
+                                axis_vec.push(Some((n, button::State::new())));
+                            }
                         } else {
                             axis_vec.push(None);
                         }
@@ -42,7 +44,7 @@ impl Manual {
                 }),
             status: "Click any button\nto start homing cycle".to_string(),
             stop_btn: button::State::new(),
-            in_bath: false,
+            hover: true,
             status_regex: Regex::new(
                 r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)",
             )
@@ -52,7 +54,7 @@ impl Manual {
 
     pub fn update(&mut self, message: ManualMessage) {
         match message {
-            ManualMessage::ToggleBath(boolean) => self.in_bath = boolean,
+            ManualMessage::ToggleBath(boolean) => self.hover = boolean,
             _ => (),
         }
     }
@@ -97,8 +99,8 @@ impl Manual {
                 Column::new()
                     .push(Space::with_height(Length::Units(10)))
                     .push(Checkbox::new(
-                        self.in_bath,
-                        "Enter Bath",
+                        self.hover,
+                        "Hover Above",
                         ManualMessage::ToggleBath,
                     )),
             )
@@ -115,6 +117,7 @@ impl Manual {
                 .width(Length::Fill)
                 .on_press(ManualMessage::Stop),
             );
+
         let content = Column::new()
             .max_width(800)
             .spacing(20)

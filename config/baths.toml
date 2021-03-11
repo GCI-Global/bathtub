@@ -15,7 +15,7 @@ name = "MCL-16"
 x = -1.1
 y = -0.3
 z = -10.1
-is_rinse = false
+hide = false
 neighbors = ["Rinse 1"]
 
 [[node]]
@@ -23,7 +23,7 @@ name = "HNO₃"
 x = -11.2
 y = -0.3
 z = -10.4
-is_rinse = false
+hide = false
 neighbors = ["Rinse 2"]
 
 [[node]]
@@ -31,7 +31,7 @@ name = "Zn"
 x = -21.2
 y = -0.3
 z = -10.3
-is_rinse = false
+hide = false
 neighbors = ["Rinse 3"]
 
 [[node]]
@@ -39,7 +39,7 @@ name = "HF"
 x = -31.3
 y = -0.3
 z = -10.6
-is_rinse = false
+hide = false
 neighbors = ["Rinse 4"]
 
 [[node]]
@@ -47,7 +47,7 @@ name = "Ni"
 x = -41.3
 y = -0.3
 z = -10.5
-is_rinse = false
+hide = false
 neighbors = ["Rinse 5"]
 
 [[node]]
@@ -55,7 +55,7 @@ name = "Pd"
 x = -51.4
 y = -0.3
 z = -10.4
-is_rinse = false
+hide = false
 neighbors = ["Rinse 6"]
 
 [[node]]
@@ -63,15 +63,23 @@ name = "Au"
 x = -61.5
 y = -0.3
 z = -10.2
-is_rinse = false
+hide = false
 neighbors = ["Rinse 7"]
+
+[[node]]
+name = "HOME"
+x = -1.0
+y = -14.5
+z = -1.0
+hide = true
+neighbors = ["Rinse 1_hover"]
 
 [[node]]
 name = "Rinse 1"
 x = -1.0
 y = -13.1
 z = -10.0
-is_rinse = true
+hide = false
 neighbors = ["MCL-16", "Rinse 2"]
 
 [[node]]
@@ -79,7 +87,7 @@ name = "Rinse 2"
 x = -11.1
 y = -13.1
 z = -10.0
-is_rinse = true
+hide = false
 neighbors = ["HNO₃", "Rinse 1", "Rinse 3"]
 
 [[node]]
@@ -87,7 +95,7 @@ name = "Rinse 3"
 x = -21.1
 y = -13.1
 z = -10.0
-is_rinse = true
+hide = false
 neighbors = ["Zn", "Rinse 2", "Rinse 4"]
 
 [[node]]
@@ -95,7 +103,7 @@ name = "Rinse 4"
 x = -31.2
 y = -13.1
 z = -10.0
-is_rinse = true
+hide = false
 neighbors = ["HF", "Rinse 3", "Rinse 5"]
 
 [[node]]
@@ -103,7 +111,7 @@ name = "Rinse 5"
 x = -41.3
 y = -13.1
 z = -10.0
-is_rinse = true
+hide = false
 neighbors = ["Ni", "Rinse 4", "Rinse 6"]
 
 [[node]]
@@ -111,7 +119,7 @@ name = "Rinse 6"
 x = -51.4
 y = -13.1
 z = -10.0
-is_rinse = true
+hide = false
 neighbors = ["Pd", "Rinse 5", "Rinse 7"]
 
 [[node]]
@@ -119,5 +127,5 @@ name = "Rinse 7"
 x = -61.5
 y = -13.1
 z = -10.0
-is_rinse = true
+hide = false
 neighbors = ["Au", "Rinse 6"]

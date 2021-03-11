@@ -1,4 +1,5 @@
 extern crate serial;
+use itertools::Itertools;
 use regex::Regex;
 use serial::prelude::*;
 use serial::SystemPort;
@@ -52,11 +53,11 @@ impl Grbl {
         }
         cb.insert(0, command)
     }
-    /*
     pub fn pop_command(&self) -> Option<Command> {
         let mut rb = self.response_buffer.lock().unwrap();
         rb.pop()
     }
+    /*
     pub fn clear_queue(&self) {
         let mut cb = self.command_buffer.lock().unwrap();
         *cb = Vec::new();
@@ -95,6 +96,7 @@ pub fn new() -> Grbl {
             if now.elapsed().as_millis() >= 100 {
                 now = Instant::now();
                 let mut current_status = Command::new("?".to_string());
+                port.flush().unwrap();
                 send(&mut port, &mut current_status);
                 if let Some(caps) = r.captures(&current_status.result.unwrap()[..]) {
                     let loc = Status {
@@ -106,14 +108,14 @@ pub fn new() -> Grbl {
                     let mut lctn = status.lock().unwrap();
                     *lctn = Some(loc);
                 }
-            }
-            let mut cb = cb_c.lock().unwrap();
-            //while cb.len() > 0 {
-            if let Some(mut cmd) = cb.pop() {
-                let mut rb = rb_c.lock().unwrap();
-                //let mut cmd = cb.pop().unwrap();
-                send(&mut port, &mut cmd);
-                rb.push(cmd);
+            } else {
+                let mut cb = cb_c.lock().unwrap();
+                //while cb.len() > 0 {
+                if let Some(mut cmd) = cb.pop() {
+                    let mut rb = rb_c.lock().unwrap();
+                    send(&mut port, &mut cmd);
+                    rb.push(cmd);
+                }
             }
         }
     });
@@ -155,6 +157,7 @@ fn get_port() -> SystemPort {
 
 // used by the new() thread to send to grbl and parse response
 pub fn send(port: &mut SystemPort, command: &mut Command) {
+    port.flush().unwrap();
     let mut buf = format!("{}\n", command.command).as_bytes().to_owned();
     port.write(&buf[..]).unwrap();
     let mut reader = BufReader::new(port);
@@ -168,10 +171,16 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
             if line.contains("$132=") {
                 output.push(line);
                 command.response_time = Some(Local::now());
-                command.result = Some(output.into_iter().fold(String::new(), |mut s, part| {
-                    s.push_str(&part[..]);
-                    s
-                }));
+                // update result, requires filtering because I can't figure out how to read the
+                // serial output correctly
+                command.result = Some(
+                    output
+                        .into_iter()
+                        .fold(String::new(), |s, part| format!("{}{}{}", s, part, "\n\r"))
+                        .split("\r")
+                        .unique()
+                        .collect::<String>(),
+                );
                 break;
             }
             output.push(line);
@@ -191,7 +200,7 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
                         break;
                     }
                     if line.contains("\r") {
-                        output.push(line.replace("\r", ""));
+                        output.push(line.replace("\r", "").replace("\n", ""));
                         command.response_time = Some(Local::now());
                         command.result =
                             Some(output.into_iter().fold(String::new(), |mut string, part| {
@@ -200,7 +209,11 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
                             }));
                         break;
                     }
-                    output.push(line);
+                    if command.command == "?".to_string() && line.contains("<") {
+                        output.push(line);
+                    } else if command.command != "?".to_string() && !line.contains("<") {
+                        output.push(line);
+                    }
                 }
                 Err(err) => println!("{:?}", err),
             }

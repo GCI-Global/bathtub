@@ -1,63 +1,94 @@
-use crate::{RecipieState, CQ_MONO};
+use crate::{RecipeState, CQ_MONO};
 use iced::{
-    button, pick_list, scrollable, Align, Button, Column, Container, Element, HorizontalAlignment,
-    Length, PickList, Row, Scrollable, Space, Text, VerticalAlignment,
+    button, pick_list, scrollable, text_input, Align, Button, Column, Command, Container, Element,
+    HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
+    VerticalAlignment,
 };
 
-use super::build::ns;
-use serde::Deserialize;
+use super::build::{attention_icon, ns, pause_icon, play_icon, Recipe};
+use super::logger::Logger;
+use chrono::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar, Mutex};
-use std::{fs::File, mem::discriminant};
+use std::{fs, mem::discriminant};
 
 pub struct Run {
     scroll: scrollable::State,
-    run_btn: button::State,
+    large_start_btn: button::State,
+    start_btn: button::State,
+    cancel_btn: button::State,
+    finish_btn: button::State,
     stop_btn: button::State,
     pause_btn: button::State,
     resume_btn: button::State,
     pub search: Vec<String>,
     search_state: pick_list::State<String>,
-    search_value: Option<String>,
-    recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
-    pub steps: Vec<Step>,
+    pub search_value: Option<String>,
+    recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
+    pub recipe: Option<Recipe>,
     continue_btns: Vec<Option<ContinueButton>>,
     pub active_recipie: Option<Vec<Step>>,
+    pub state: RunState,
+    required_before_inputs: Vec<RequiredInput>,
+    required_after_inputs: Vec<RequiredInput>,
+    logger: Logger,
+}
+
+#[derive(Debug, Clone)]
+pub enum RunState {
+    Standard,
+    BeforeRequiredInput,
+    AfterRequiredInput,
 }
 
 #[derive(Debug, Clone)]
 pub enum RunMessage {
-    Run,
+    LargeStart,
+    Start,
+    Cancel,
+    Run(()),
+    Finish,
     Stop,
     Pause,
     Resume,
     TabActive,
     RecipieChanged(String),
+    RequiredBeforeInput(usize, RequiredInputMessage),
+    RequiredAfterInput(usize, RequiredInputMessage),
     Step,
 }
 
 impl Run {
-    pub fn new(recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> Self {
+    pub fn new(recipe_state: Arc<(Mutex<RecipeState>, Condvar)>, logger: Logger) -> Self {
         Run {
             scroll: scrollable::State::new(),
-            run_btn: button::State::new(),
+            large_start_btn: button::State::new(),
+            start_btn: button::State::new(),
+            cancel_btn: button::State::new(),
+            finish_btn: button::State::new(),
             stop_btn: button::State::new(),
             pause_btn: button::State::new(),
             resume_btn: button::State::new(),
             search: Vec::new(),
             search_state: pick_list::State::default(),
             search_value: None,
-            steps: Vec::new(),
             continue_btns: Vec::new(),
+            recipe: None,
             active_recipie: None,
-            recipie_state,
+            recipe_state,
+            state: RunState::Standard,
+            required_before_inputs: Vec::new(),
+            required_after_inputs: Vec::new(),
+            logger,
         }
     }
 
-    pub fn update(&mut self, message: RunMessage) {
+    pub fn update(&mut self, message: RunMessage) -> Command<RunMessage> {
+        let mut command = Command::none();
         match message {
             RunMessage::TabActive => {
                 if let Some(sv) = self.search_value.clone() {
-                    self.update(RunMessage::RecipieChanged(sv))
+                    self.update(RunMessage::RecipieChanged(sv));
                 }
             }
             RunMessage::Step => {
@@ -69,196 +100,422 @@ impl Run {
                         }
                     }
                 }
-                let (recipie_state, cvar) = &*self.recipie_state;
-                let mut recipie_state = recipie_state.lock().unwrap();
-                *recipie_state = RecipieState::RecipieRunning;
+                let (recipe_state, cvar) = &*self.recipe_state;
+                let mut recipe_state = recipe_state.lock().unwrap();
+                *recipe_state = RecipeState::RecipeRunning;
                 cvar.notify_all();
             }
-            RunMessage::RecipieChanged(recipie) => {
-                match File::open(format!("./recipies/{}.recipie", recipie)) {
-                    Ok(file) => {
-                        self.steps = Vec::new();
-                        self.continue_btns = Vec::new();
-                        let mut rdr = csv::Reader::from_reader(file);
-                        let mut count = 1; // display vlue tracker
-                        for step in rdr.deserialize() {
-                            let step: Step = step.unwrap();
-                            if step.require_input {
+            RunMessage::RecipieChanged(recipe) => {
+                match &fs::read_to_string(format!("./recipes/{}.toml", recipe)) {
+                    Ok(toml_str) => {
+                        let rec: Recipe = toml::from_str(toml_str).unwrap();
+                        self.continue_btns = Vec::with_capacity(rec.steps.len());
+                        let mut count = 1;
+                        for step in &rec.steps {
+                            if step.wait {
                                 self.continue_btns.push(Some(ContinueButton::new(
                                     count,
-                                    Arc::clone(&self.recipie_state),
+                                    Arc::clone(&self.recipe_state),
                                 )));
                                 count += 1;
                             } else {
-                                self.continue_btns.push(None)
+                                self.continue_btns.push(None);
                             }
-                            self.steps.push(step);
                         }
+                        self.required_before_inputs = rec.required_inputs.before.iter().fold(
+                            Vec::with_capacity(rec.required_inputs.before.len()),
+                            |mut v, input| {
+                                v.push(RequiredInput::new(input.clone()));
+                                v
+                            },
+                        );
+                        self.required_after_inputs = rec.required_inputs.after.iter().fold(
+                            Vec::with_capacity(rec.required_inputs.after.len()),
+                            |mut v, input| {
+                                v.push(RequiredInput::new(input.clone()));
+                                v
+                            },
+                        );
+                        self.recipe = Some(rec);
                     }
-                    Err(_err) => self.steps = Vec::new(),
+                    // TODO: Display Error when unable to read file
+                    Err(_err) => {
+                        self.recipe = None;
+                    }
                 }
-                self.search_value = Some(recipie);
+                self.search_value = Some(recipe);
             }
-            _ => {}
-        }
+            RunMessage::LargeStart => self.state = RunState::BeforeRequiredInput,
+            RunMessage::Start => {
+                if self.required_before_inputs.len() == 0
+                    || self
+                        .required_before_inputs
+                        .iter()
+                        .any(|input| input.input_value != "".to_string())
+                {
+                    let log_title = format!(
+                        "{}| Run - {}",
+                        Local::now().to_rfc2822(),
+                        self.search_value.as_ref().unwrap()
+                    );
+                    self.logger.set_log_file(log_title.clone());
+                    self.logger.send_line(log_title.clone()).unwrap();
+                    self.logger
+                        .send_line("------------------------------".to_string())
+                        .unwrap();
+                    for input in &self.required_before_inputs {
+                        self.logger
+                            .send_line(format!(
+                                "{} => {}: {}",
+                                Local::now().to_rfc2822(),
+                                input.title,
+                                input.input_value
+                            ))
+                            .unwrap();
+                    }
+                    self.logger
+                        .send_line("--------------------".to_string())
+                        .unwrap();
+                    self.state = RunState::Standard;
+                    command = Command::perform(do_nothing(), RunMessage::Run);
+                }
+            }
+            RunMessage::Finish => {
+                if self.required_after_inputs.len() == 0
+                    || self
+                        .required_after_inputs
+                        .iter()
+                        .any(|input| input.input_value != "".to_string())
+                {
+                    self.logger
+                        .send_line("--------------------".to_string())
+                        .unwrap();
+                    for input in &self.required_after_inputs {
+                        self.logger
+                            .send_line(format!(
+                                "{} => {}: {}",
+                                Local::now().to_rfc2822(),
+                                input.title,
+                                input.input_value
+                            ))
+                            .unwrap();
+                    }
+                    self.logger.set_log_file("".to_string());
+                    self.state = RunState::Standard;
+                }
+            }
+            RunMessage::Cancel => {
+                for input in &mut self.required_before_inputs {
+                    input.input_value = "".to_string();
+                }
+                self.state = RunState::Standard;
+            }
+            RunMessage::RequiredBeforeInput(i, msg) => self.required_before_inputs[i].update(msg),
+            RunMessage::RequiredAfterInput(i, msg) => self.required_after_inputs[i].update(msg),
+            // handled in main.rs
+            RunMessage::Run(_) => {}
+            RunMessage::Stop => {}
+            RunMessage::Pause => {}
+            RunMessage::Resume => {}
+        };
+        command
     }
 
     pub fn view(&mut self) -> Element<RunMessage> {
-        let search: Element<_>;
-        {
-            let (recipie_state, _) = &*self.recipie_state;
-            search = match *recipie_state.lock().unwrap() {
-                RecipieState::Stopped => Row::new()
+        match self.state {
+            RunState::Standard => {
+                let search: Element<_>;
+                {
+                    let (recipie_state, _) = &*self.recipe_state;
+                    search = match *recipie_state.lock().unwrap() {
+                        RecipeState::Stopped => Row::new()
+                            .push(
+                                PickList::new(
+                                    &mut self.search_state,
+                                    &self.search[..],
+                                    self.search_value.clone(),
+                                    RunMessage::RecipieChanged,
+                                )
+                                .padding(10)
+                                .width(Length::Units(500)),
+                            )
+                            .into(),
+                        _ => Row::new()
+                            .push(
+                                Text::new(self.search_value.clone().unwrap_or("".to_string()))
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .size(30)
+                                    .font(CQ_MONO),
+                            )
+                            .padding(6)
+                            .into(),
+                    }
+                }
+                let run = match self.search_value {
+                    Some(_) => {
+                        let (recipe_state, _) = &*self.recipe_state;
+                        match *recipe_state.lock().unwrap() {
+                            RecipeState::Stopped => Row::new().push(
+                                Button::new(
+                                    &mut self.large_start_btn,
+                                    Text::new("Start")
+                                        .size(30)
+                                        .horizontal_alignment(HorizontalAlignment::Center)
+                                        .font(CQ_MONO),
+                                )
+                                .on_press(RunMessage::LargeStart)
+                                .padding(10)
+                                .width(Length::Units(500)),
+                            ),
+                            RecipeState::RecipeRunning => Row::new()
+                                .push(
+                                    Button::new(
+                                        &mut self.stop_btn,
+                                        Text::new("Stop")
+                                            .size(30)
+                                            .horizontal_alignment(HorizontalAlignment::Center)
+                                            .font(CQ_MONO),
+                                    )
+                                    .on_press(RunMessage::Stop)
+                                    .padding(10)
+                                    .width(Length::Units(200)),
+                                )
+                                .push(Space::with_width(Length::Units(100)))
+                                .push(
+                                    Button::new(
+                                        &mut self.pause_btn,
+                                        pause_icon()
+                                            .size(30)
+                                            .horizontal_alignment(HorizontalAlignment::Center),
+                                    )
+                                    .on_press(RunMessage::Pause)
+                                    .padding(10)
+                                    .width(Length::Units(200)),
+                                ),
+                            RecipeState::RecipePaused => Row::new()
+                                .push(
+                                    Button::new(
+                                        &mut self.stop_btn,
+                                        Text::new("Stop")
+                                            .size(30)
+                                            .horizontal_alignment(HorizontalAlignment::Center)
+                                            .font(CQ_MONO),
+                                    )
+                                    .on_press(RunMessage::Stop)
+                                    .padding(10)
+                                    .width(Length::Units(200)),
+                                )
+                                .push(Space::with_width(Length::Units(100)))
+                                .push(
+                                    Button::new(
+                                        &mut self.resume_btn,
+                                        play_icon()
+                                            .size(30)
+                                            .horizontal_alignment(HorizontalAlignment::Center),
+                                    )
+                                    .on_press(RunMessage::Resume)
+                                    .padding(10)
+                                    .width(Length::Units(200)),
+                                ),
+                            RecipeState::RequireInput => Row::new()
+                                .push(
+                                    Button::new(
+                                        &mut self.stop_btn,
+                                        Text::new("Stop")
+                                            .size(30)
+                                            .horizontal_alignment(HorizontalAlignment::Center)
+                                            .font(CQ_MONO),
+                                    )
+                                    .on_press(RunMessage::Stop)
+                                    .padding(10)
+                                    .width(Length::Units(200)),
+                                )
+                                .push(Space::with_width(Length::Units(100)))
+                                .push(
+                                    Text::new("Waiting for user input")
+                                        .font(CQ_MONO)
+                                        .size(20)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                ),
+                            _ => Row::new(),
+                        }
+                    }
+                    None => Row::new(),
+                };
+
+                let recipie: Element<_> = match self.recipe.as_mut() {
+                    Some(recipe) => recipe
+                        .steps
+                        .iter_mut()
+                        .zip(self.continue_btns.iter_mut())
+                        .fold(Column::new().spacing(15), |col, (step, btn)| {
+                            if let Some(b) = btn {
+                                col.push(
+                                    Row::new()
+                                        .push(step.view().map(move |_msg| RunMessage::Step))
+                                        .push(b.view().map(move |_msg| RunMessage::Step)),
+                                )
+                            } else {
+                                col.push(
+                                    Row::new().push(step.view().map(move |_msg| RunMessage::Step)),
+                                )
+                            }
+                        })
+                        .into(),
+                    None => Column::new().into(),
+                };
+
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .push(search)
+                    .push(run)
+                    .push(recipie)
+                    .align_items(Align::Center);
+
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            RunState::BeforeRequiredInput => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
                     .push(
-                        PickList::new(
-                            &mut self.search_state,
-                            &self.search[..],
-                            self.search_value.clone(),
-                            RunMessage::RecipieChanged,
-                        )
-                        .padding(10)
-                        .width(Length::Units(500)),
-                    )
-                    .into(),
-                _ => Row::new()
+                        self.required_before_inputs
+                            .iter_mut()
+                            .enumerate()
+                            .fold(Column::new().spacing(10), |col, (i, input)| {
+                                col.push(
+                                    input
+                                        .view()
+                                        .map(move |msg| RunMessage::RequiredBeforeInput(i, msg)),
+                                )
+                            })
+                            .push(Row::with_children(vec![
+                                Space::with_width(Length::Fill).into(),
+                                Button::new(
+                                    &mut self.start_btn,
+                                    Text::new("Start")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .on_press(RunMessage::Start)
+                                .padding(10)
+                                .width(Length::Units(200))
+                                .into(),
+                                Space::with_width(Length::Units(100)).into(),
+                                Button::new(
+                                    &mut self.cancel_btn,
+                                    Text::new("Cancel")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .on_press(RunMessage::Cancel)
+                                .width(Length::Units(200))
+                                .padding(10)
+                                .into(),
+                                Space::with_width(Length::Fill).into(),
+                            ])),
+                    );
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            RunState::AfterRequiredInput => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
                     .push(
-                        Text::new(self.search_value.clone().unwrap_or("".to_string()))
-                            .horizontal_alignment(HorizontalAlignment::Center)
-                            .size(30)
-                            .font(CQ_MONO),
-                    )
-                    .padding(6)
-                    .into(),
+                        self.required_after_inputs
+                            .iter_mut()
+                            .enumerate()
+                            .fold(Column::new().spacing(10), |col, (i, input)| {
+                                col.push(
+                                    input
+                                        .view()
+                                        .map(move |msg| RunMessage::RequiredAfterInput(i, msg)),
+                                )
+                            })
+                            .push(Row::with_children(vec![
+                                Space::with_width(Length::Fill).into(),
+                                Button::new(
+                                    &mut self.finish_btn,
+                                    Text::new("Finish")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .on_press(RunMessage::Finish)
+                                .padding(10)
+                                .width(Length::Units(500))
+                                .into(),
+                                Space::with_width(Length::Fill).into(),
+                            ])),
+                    );
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
             }
         }
-        let run = match self.search_value {
-            Some(_) => {
-                let (recipie_state, _) = &*self.recipie_state;
-                match *recipie_state.lock().unwrap() {
-                    RecipieState::Stopped => Row::new().push(
-                        Button::new(
-                            &mut self.run_btn,
-                            Text::new("Run")
-                                .size(30)
-                                .horizontal_alignment(HorizontalAlignment::Center)
-                                .font(CQ_MONO),
-                        )
-                        .on_press(RunMessage::Run)
-                        .padding(10)
-                        .width(Length::Units(500)),
-                    ),
-                    RecipieState::RecipieRunning => Row::new()
-                        .push(
-                            Button::new(
-                                &mut self.stop_btn,
-                                Text::new("Stop")
-                                    .size(30)
-                                    .horizontal_alignment(HorizontalAlignment::Center)
-                                    .font(CQ_MONO),
-                            )
-                            .on_press(RunMessage::Stop)
-                            .padding(10)
-                            .width(Length::Units(200)),
-                        )
-                        .push(Space::with_width(Length::Units(100)))
-                        .push(
-                            Button::new(
-                                &mut self.pause_btn,
-                                Text::new("Pause")
-                                    .size(30)
-                                    .horizontal_alignment(HorizontalAlignment::Center)
-                                    .font(CQ_MONO),
-                            )
-                            .on_press(RunMessage::Pause)
-                            .padding(10)
-                            .width(Length::Units(200)),
-                        ),
-                    RecipieState::RecipiePaused => Row::new()
-                        .push(
-                            Button::new(
-                                &mut self.stop_btn,
-                                Text::new("Stop")
-                                    .size(30)
-                                    .horizontal_alignment(HorizontalAlignment::Center)
-                                    .font(CQ_MONO),
-                            )
-                            .on_press(RunMessage::Stop)
-                            .padding(10)
-                            .width(Length::Units(200)),
-                        )
-                        .push(Space::with_width(Length::Units(100)))
-                        .push(
-                            Button::new(
-                                &mut self.resume_btn,
-                                Text::new("Resume")
-                                    .size(30)
-                                    .horizontal_alignment(HorizontalAlignment::Center)
-                                    .font(CQ_MONO),
-                            )
-                            .on_press(RunMessage::Resume)
-                            .padding(10)
-                            .width(Length::Units(200)),
-                        ),
-                    RecipieState::RequireInput => Row::new()
-                        .push(
-                            Button::new(
-                                &mut self.stop_btn,
-                                Text::new("Stop")
-                                    .size(30)
-                                    .horizontal_alignment(HorizontalAlignment::Center)
-                                    .font(CQ_MONO),
-                            )
-                            .on_press(RunMessage::Stop)
-                            .padding(10)
-                            .width(Length::Units(200)),
-                        )
-                        .push(Space::with_width(Length::Units(100)))
-                        .push(
-                            Text::new("Waiting for user input")
-                                .font(CQ_MONO)
-                                .size(20)
-                                .horizontal_alignment(HorizontalAlignment::Center),
-                        ),
-                    _ => Row::new(),
-                }
-            }
-            None => Row::new(),
-        };
-
-        let recipie: Element<_> = self
-            .steps
-            .iter_mut()
-            .zip(self.continue_btns.iter_mut())
-            .fold(Column::new().spacing(15), |col, (step, btn)| {
-                if let Some(b) = btn {
-                    //println!("adding btn {} next to {}",b.display_value, step.selected_destination);
-                    col.push(
-                        Row::new()
-                            .push(step.view().map(move |_msg| RunMessage::Step))
-                            .push(b.view().map(move |_msg| RunMessage::Step)),
-                    )
-                } else {
-                    col.push(Row::new().push(step.view().map(move |_msg| RunMessage::Step)))
-                }
-            })
-            .into();
-
-        let content = Column::new()
-            .max_width(800)
-            .spacing(20)
-            .push(search)
-            .push(run)
-            .push(recipie)
-            .align_items(Align::Center);
-
-        Scrollable::new(&mut self.scroll)
-            .padding(40)
-            .push(Container::new(content).width(Length::Fill).center_x())
-            .into()
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+struct RequiredInput {
+    input_state: text_input::State,
+    input_value: String,
+    title: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum RequiredInputMessage {
+    InputChanged(String),
+}
+
+impl RequiredInput {
+    fn new(title: String) -> Self {
+        RequiredInput {
+            title,
+            input_value: "".to_string(),
+            input_state: text_input::State::new(),
+        }
+    }
+
+    fn update(&mut self, message: RequiredInputMessage) {
+        match message {
+            RequiredInputMessage::InputChanged(input) => self.input_value = input,
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, RequiredInputMessage> {
+        Row::with_children(vec![
+            Column::new()
+                .push(Space::with_height(Length::Units(10)))
+                .push(
+                    Text::new(format!("{}:", &self.title))
+                        .font(CQ_MONO)
+                        .size(20)
+                        .width(Length::Units(200)),
+                )
+                .into(),
+            TextInput::new(
+                &mut self.input_state,
+                "",
+                &self.input_value,
+                RequiredInputMessage::InputChanged,
+            )
+            .padding(10)
+            .into(),
+        ])
+        .into()
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Step {
     pub step_num: String,
     pub selected_destination: String,
@@ -266,8 +523,8 @@ pub struct Step {
     pub secs_value: String,
     pub mins_value: String,
     pub hours_value: String,
-    pub in_bath: bool,
-    pub require_input: bool,
+    pub hover: bool,
+    pub wait: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -276,11 +533,11 @@ pub enum StepMessage {}
 impl Step {
     fn view(&mut self) -> Element<StepMessage> {
         let e = "".to_string(); //empty
-        let eb = match self.in_bath {
-            true => "\n in bath",
+        let eb = match self.hover {
+            true => "\n Hover Above",
             false => "",
         };
-        let ri = match self.require_input {
+        let ri = match self.wait {
             true => "Wait for user input then\n ",
             false => "",
         };
@@ -380,12 +637,12 @@ pub enum ContinueButtonMessage {
 
 struct ContinueButton {
     display_value: usize, // keep track of what buttons have been shown and what order they are in such that only one is shown when paused.
-    recipie_state: Arc<(Mutex<RecipieState>, Condvar)>,
+    recipie_state: Arc<(Mutex<RecipeState>, Condvar)>,
     continue_btn: button::State,
 }
 
 impl ContinueButton {
-    fn new(display_value: usize, recipie_state: Arc<(Mutex<RecipieState>, Condvar)>) -> Self {
+    fn new(display_value: usize, recipie_state: Arc<(Mutex<RecipeState>, Condvar)>) -> Self {
         ContinueButton {
             display_value,
             recipie_state,
@@ -397,18 +654,15 @@ impl ContinueButton {
         if self.display_value == 1 {
             let (recipie_state, _) = &*self.recipie_state;
             if discriminant(&*recipie_state.lock().unwrap())
-                == discriminant(&RecipieState::RequireInput)
+                == discriminant(&RecipeState::RequireInput)
             {
                 Column::new()
                     .push(
                         Row::new().push(Space::with_width(Length::Units(25))).push(
-                            Button::new(
-                                &mut self.continue_btn,
-                                Text::new("Continue").font(CQ_MONO).size(30),
-                            )
-                            .width(Length::Shrink)
-                            .padding(10)
-                            .on_press(ContinueButtonMessage::Continue),
+                            Button::new(&mut self.continue_btn, attention_icon().size(30))
+                                .width(Length::Units(50))
+                                .padding(10)
+                                .on_press(ContinueButtonMessage::Continue),
                         ),
                     )
                     .into()
@@ -419,4 +673,8 @@ impl ContinueButton {
             Column::new().into()
         }
     }
+}
+
+async fn do_nothing() {
+    ()
 }

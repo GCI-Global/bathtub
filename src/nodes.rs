@@ -16,7 +16,7 @@ pub struct Node {
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    pub is_rinse: bool,
+    pub hide: bool,
     pub neighbors: Vec<String>,
 }
 
@@ -42,30 +42,39 @@ impl Nodes {
     }
     fn to_nodes(nodes: Nodes) -> Nodes {
         let mut new_nodes: Vec<Node> = vec![];
-        let mut new_neighbors: Vec<String>;
         //let bath_iter = baths.bath.into_iter();
         for node in nodes.node {
-            // create node for head in bath
+            // create node for hovering
+            if !node.hide {
+                // if hidden then we do not want to auto-generate realted nodes
+                new_nodes.push(Node {
+                    name: format!("{}_hover", node.name),
+                    x: node.x,
+                    y: node.y,
+                    z: -1.0,
+                    hide: false,
+                    neighbors: node
+                        .neighbors
+                        .iter()
+                        .fold(vec![node.name.clone()], |mut v, n| {
+                            v.push(format!("{}_hover", n));
+                            v
+                        }),
+                });
+            }
 
+            // create node for head in bath
             new_nodes.push(Node {
-                name: format!("{}_inBath", node.name),
+                name: node.name.clone(),
                 x: node.x,
                 y: node.y,
                 z: node.z,
-                is_rinse: node.is_rinse,
-                neighbors: vec![node.name.clone()],
-            });
-
-            // create node for head above bath
-            new_neighbors = node.neighbors;
-            new_neighbors.push(format!("{}_inBath", &node.name));
-            new_nodes.push(Node {
-                name: node.name,
-                x: node.x,
-                y: node.y,
-                z: -1.0,
-                is_rinse: node.is_rinse,
-                neighbors: new_neighbors,
+                hide: node.hide,
+                neighbors: if node.hide {
+                    node.neighbors
+                } else {
+                    vec![format!("{}_hover", node.name)]
+                },
             })
         }
         Nodes { node: new_nodes }
@@ -82,14 +91,14 @@ impl NodeGrid2d {
     pub fn from_nodes(nodes: Nodes) -> NodeGrid2d {
         let mut node_vec = nodes.node.clone();
         // sort by y
-        node_vec.retain(|n| n.z == -1.0);
+        node_vec.retain(|n| !n.name.contains("_hover"));
         node_vec.sort_by(|a, b| (b.y).total_cmp(&a.y));
         // split into many y vecs
         let mut test_value: f32 = node_vec[0].y;
         let mut push_vec: usize = 0;
         let mut build_grid: Vec<Vec<Node>> = vec![Vec::new()];
         for node in node_vec {
-            if (node.y - test_value).abs() < 2.0 {
+            if (node.y - test_value).abs() < 1.0 {
                 build_grid[push_vec].push(node);
             } else {
                 push_vec += 1;
@@ -123,7 +132,7 @@ impl NodeGrid2d {
         for i in 0..build_grid.len() {
             for j in 0..longest_axis.len() {
                 if j == relative_grid[i].len()
-                    || longest_axis[j].x - relative_grid[i][j].clone().unwrap().x > 2.0
+                    || longest_axis[j].x - relative_grid[i][j].clone().unwrap().x > 1.0
                 {
                     relative_grid[i].insert(j, None)
                 }
@@ -133,8 +142,8 @@ impl NodeGrid2d {
     }
 }
 
-pub fn gen_nodes() -> Nodes {
-    Nodes::to_nodes(get_baths_config())
+pub fn gen_nodes() -> Result<Nodes, ()> {
+    Ok(Nodes::to_nodes(get_baths_config()?))
 }
 
 pub fn get_nodemap(nodes: Nodes) -> HashMap<String, usize> {
@@ -148,8 +157,9 @@ pub fn get_nodemap(nodes: Nodes) -> HashMap<String, usize> {
         })
 }
 
-fn get_baths_config() -> Nodes {
-    let baths_toml =
-        &fs::read_to_string("config/baths.toml").expect("Unable to open config/baths.toml");
-    toml::from_str::<Nodes>(baths_toml).unwrap()
+fn get_baths_config() -> Result<Nodes, ()> {
+    match &fs::read_to_string("config/baths.toml") {
+        Ok(file) => Ok(toml::from_str::<Nodes>(file).unwrap()),
+        Err(_) => Err(()),
+    }
 }

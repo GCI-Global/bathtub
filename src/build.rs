@@ -1,83 +1,136 @@
 use super::actions::Actions;
+use super::advanced::{SaveBar, SaveBarMessage};
+use super::logger::Logger;
 use super::nodes::Nodes;
+use super::run::Step;
 use crate::CQ_MONO;
 use iced::{
     button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Container, Element,
     Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
     VerticalAlignment,
 };
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::fs::File;
+use std::fs;
 use std::rc::Rc;
 
 pub struct Build {
+    unsaved: bool,
+    save_bar: SaveBar,
     scroll: scrollable::State,
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
-    steps: Vec<Step>,
+    steps: Vec<BuildStep>,
+    before_inputs: Vec<RequiredInput>,
+    after_inputs: Vec<RequiredInput>,
+    modified_steps: Vec<BuildStep>,
+    modified_before_inputs: Vec<RequiredInput>,
+    modified_after_inputs: Vec<RequiredInput>,
     add_step: AddStep,
-    recipie_name: text_input::State,
-    recipie_name_value: String,
-    save_button: button::State,
+    recipe_name: text_input::State,
+    recipe_name_value: String,
+    required_input_tab_btn: button::State,
+    steps_tab_btn: button::State,
+    add_input_before_btn: button::State,
+    add_input_after_btn: button::State,
+    state: BuildState,
+    logger: Logger,
+}
+
+enum BuildState {
+    Steps,
+    RequiredInput,
 }
 
 #[derive(Debug, Clone)]
 pub enum BuildMessage {
     StepMessage(usize, StepMessage),
+    BeforeRequiredInputMessage(usize, RequiredInputMessage),
+    AfterRequiredInputMessage(usize, RequiredInputMessage),
     AddStepMessage(AddStepMessage),
     UserChangedName(String),
-    Save,
+    SaveMessage(SaveBarMessage),
+    StepsTab,
+    RequiredInputTab,
+    AddInputBefore,
+    AddInputAfter,
 }
 
 impl Build {
-    pub fn new(nodes_ref: Rc<RefCell<Nodes>>, actions_ref: Rc<RefCell<Actions>>) -> Self {
+    pub fn new(
+        nodes_ref: Rc<RefCell<Nodes>>,
+        actions_ref: Rc<RefCell<Actions>>,
+        logger: Logger,
+    ) -> Self {
         Build {
+            unsaved: false,
+            save_bar: SaveBar::new(),
             scroll: scrollable::State::new(),
             add_step: AddStep::new(1, 0, Rc::clone(&nodes_ref), Rc::clone(&actions_ref)),
             nodes_ref,
             actions_ref,
-            recipie_name: text_input::State::new(),
-            recipie_name_value: "".to_string(),
-            save_button: button::State::new(),
+            recipe_name: text_input::State::new(),
+            recipe_name_value: "".to_string(),
+            required_input_tab_btn: button::State::new(),
+            steps_tab_btn: button::State::new(),
+            add_input_before_btn: button::State::new(),
+            add_input_after_btn: button::State::new(),
             steps: Vec::new(),
+            before_inputs: Vec::new(),
+            after_inputs: Vec::new(),
+            modified_steps: Vec::new(),
+            modified_before_inputs: Vec::new(),
+            modified_after_inputs: Vec::new(),
+            state: BuildState::Steps,
+            logger,
         }
     }
 
     pub fn update(&mut self, message: BuildMessage) {
         match message {
             BuildMessage::StepMessage(i, StepMessage::Delete) => {
-                self.steps.remove(i);
-                for i in 0..self.steps.len() {
-                    self.steps[i].step_num = Some(i + 1);
+                self.modified_steps.remove(i);
+                for i in 0..self.modified_steps.len() {
+                    self.modified_steps[i].step_num = Some(i + 1);
                 }
-                for i in 0..self.steps.len() {
-                    self.steps[i].steps_len = self.steps.len();
+                for i in 0..self.modified_steps.len() {
+                    self.modified_steps[i].steps_len = self.modified_steps.len();
                 }
-                self.add_step.step_num = Some(self.steps.len() + 1);
-                self.add_step.steps_len = self.steps.len();
+                self.add_step.step_num = Some(self.modified_steps.len() + 1);
+                self.add_step.steps_len = self.modified_steps.len();
             }
             BuildMessage::StepMessage(i, StepMessage::NewNum(num)) => {
-                self.steps[i].step_num = Some(num);
+                self.modified_steps[i].step_num = Some(num);
                 if num <= i {
                     for j in num - 1..i {
-                        self.steps[j].step_num = Some(self.steps[j].step_num.unwrap() + 1);
+                        self.modified_steps[j].step_num =
+                            Some(self.modified_steps[j].step_num.unwrap() + 1);
                     }
                 } else {
                     for j in i + 1..num {
-                        self.steps[j].step_num = Some(self.steps[j].step_num.unwrap() - 1);
+                        self.modified_steps[j].step_num =
+                            Some(self.modified_steps[j].step_num.unwrap() - 1);
                     }
                 }
-                self.steps
+                self.modified_steps
                     .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
             }
+            BuildMessage::StepMessage(i, StepMessage::Edit) => {
+                self.unsaved = true;
+                // reset all to idle so ony one can be edited at a time
+                for step in &mut self.modified_steps {
+                    step.update(StepMessage::Okay)
+                }
+                self.modified_steps[i].update(StepMessage::Edit)
+            }
             BuildMessage::StepMessage(i, msg) => {
-                if let Some(step) = self.steps.get_mut(i) {
+                if let Some(step) = self.modified_steps.get_mut(i) {
                     step.update(msg)
                 }
             }
             BuildMessage::AddStepMessage(AddStepMessage::Add(
                 dest,
-                inbath,
+                hover,
                 action,
                 nodes,
                 hours,
@@ -86,16 +139,18 @@ impl Build {
                 req_input,
             )) => {
                 if let Some(d) = dest {
-                    for i in nodes.unwrap() - 1..self.steps.len() {
-                        self.steps[i].step_num = Some(self.steps[i].step_num.unwrap() + 1);
+                    self.unsaved = true;
+                    for i in nodes.unwrap() - 1..self.modified_steps.len() {
+                        self.modified_steps[i].step_num =
+                            Some(self.modified_steps[i].step_num.unwrap() + 1);
                     }
-                    self.steps.push(Step::new(
+                    self.modified_steps.push(BuildStep::new(
                         nodes,
                         self.steps.len(),
                         Rc::clone(&self.nodes_ref),
                         Rc::clone(&self.actions_ref),
                         Some(d),
-                        inbath,
+                        hover,
                         action,
                         hours,
                         mins,
@@ -103,135 +158,370 @@ impl Build {
                         req_input,
                     ));
 
-                    self.steps
+                    self.modified_steps
                         .sort_by(|a, b| a.step_num.partial_cmp(&b.step_num).unwrap());
-                    for i in 0..self.steps.len() {
-                        self.steps[i].steps_len = self.steps.len();
+                    for i in 0..self.modified_steps.len() {
+                        self.modified_steps[i].steps_len = self.modified_steps.len();
                     }
                     self.scroll.scroll_to_bottom();
-                    self.add_step.step_num = Some(self.steps.len() + 1);
-                    self.add_step.steps_len = self.steps.len();
+                    self.add_step.step_num = Some(self.modified_steps.len() + 1);
+                    self.add_step.steps_len = self.modified_steps.len();
                     self.add_step.hours_value = "".to_string();
                     self.add_step.mins_value = "".to_string();
                     self.add_step.secs_value = "".to_string();
+                    self.add_step.hover = false;
+                    self.add_step.wait = false;
                 }
             }
             BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
-            BuildMessage::UserChangedName(new_name) => self.recipie_name_value = new_name,
-            BuildMessage::Save => {
-                if self.recipie_name_value != "".to_string() {
-                    let mut recipie = csv::Writer::from_writer(
-                        File::create(format!("./recipies/{}.recipie", &self.recipie_name_value))
-                            .expect("unable to create file"),
-                    );
-                    recipie
-                        .write_record(&[
-                            "step_num",
-                            "selected_destination",
-                            "selected_action",
-                            "hours_value",
-                            "mins_value",
-                            "secs_value",
-                            "in_bath",
-                            "require_input",
-                        ])
-                        .unwrap();
-                    for step in self.steps.iter() {
-                        recipie
-                            .write_record(&[
-                                step.step_num.unwrap().to_string(),
-                                format!("{}", step.selected_destination.as_ref().unwrap()),
-                                format!("{}", step.selected_action.as_ref().unwrap()),
-                                (*step.hours_value).to_string(),
-                                (*step.mins_value).to_string(),
-                                (*step.secs_value).to_string(),
-                                step.in_bath.to_string(),
-                                step.require_input.to_string(),
-                            ])
-                            .unwrap();
-                    }
+            BuildMessage::RequiredInputTab => self.state = BuildState::RequiredInput,
+            BuildMessage::StepsTab => self.state = BuildState::Steps,
+            BuildMessage::BeforeRequiredInputMessage(i, RequiredInputMessage::Delete) => {
+                self.unsaved = true;
+                self.modified_before_inputs.remove(i);
+            }
+            BuildMessage::BeforeRequiredInputMessage(i, msg) => {
+                self.modified_before_inputs[i].update(msg)
+            }
+            BuildMessage::AddInputBefore => {
+                self.unsaved = true;
+                self.modified_before_inputs
+                    .push(RequiredInput::new("".to_string()));
+            }
+            BuildMessage::AfterRequiredInputMessage(i, RequiredInputMessage::Delete) => {
+                self.unsaved = true;
+                self.modified_after_inputs.remove(i);
+            }
+            BuildMessage::AfterRequiredInputMessage(i, msg) => {
+                self.modified_after_inputs[i].update(msg)
+            }
+            BuildMessage::AddInputAfter => {
+                self.unsaved = true;
+                self.modified_after_inputs
+                    .push(RequiredInput::new("".to_string()));
+            }
+            BuildMessage::UserChangedName(new_name) => self.recipe_name_value = new_name,
+            BuildMessage::SaveMessage(SaveBarMessage::Cancel) => {
+                self.modified_steps = self.steps.clone();
+                self.modified_before_inputs = self.before_inputs.clone();
+                self.modified_after_inputs = self.after_inputs.clone();
+                self.unsaved = false;
+            }
+            BuildMessage::SaveMessage(SaveBarMessage::Save) => {
+                if self.recipe_name_value != "".to_string() {
+                    self.modified_before_inputs
+                        .retain(|input| input.value != "".to_string());
+                    self.modified_after_inputs
+                        .retain(|input| input.value != "".to_string());
+                    let save_data = Recipe {
+                        required_inputs: Input {
+                            before: self.modified_before_inputs.iter().fold(
+                                Vec::with_capacity(self.modified_before_inputs.len()),
+                                |mut v, input| {
+                                    v.push(input.value.clone());
+                                    v
+                                },
+                            ),
+                            after: self.modified_after_inputs.iter().fold(
+                                Vec::with_capacity(self.modified_after_inputs.len()),
+                                |mut v, input| {
+                                    v.push(input.value.clone());
+                                    v
+                                },
+                            ),
+                        },
+                        steps: self.modified_steps.iter().fold(
+                            Vec::with_capacity(self.modified_steps.len()),
+                            |mut v, step| {
+                                v.push(Step {
+                                    step_num: step.step_num.unwrap().to_string(),
+                                    selected_destination: step
+                                        .selected_destination
+                                        .clone()
+                                        .unwrap(),
+                                    hover: step.hover,
+                                    selected_action: step.selected_action.clone().unwrap(),
+                                    secs_value: step.secs_value.clone(),
+                                    mins_value: step.mins_value.clone(),
+                                    hours_value: step.hours_value.clone(),
+                                    wait: step.wait,
+                                });
+                                v
+                            },
+                        ),
+                    };
+                    // TODO: add error is unable to build toml
+                    let save_toml = toml::to_string_pretty(&save_data).unwrap();
+                    fs::write(
+                        format!("./recipes/{}.toml", &self.recipe_name_value),
+                        save_toml,
+                    )
+                    .expect("unable to save file");
+                    self.steps = self.modified_steps.clone();
+                    self.before_inputs = self.modified_before_inputs.clone();
+                    self.after_inputs = self.modified_after_inputs.clone();
+                    self.unsaved = false;
+                    // TODO: Have errors show to user if unable to save
                 }
             }
         }
     }
     pub fn view(&mut self) -> Element<BuildMessage> {
-        let name_and_save = Row::new()
-            .push(Space::with_width(Length::Fill))
+        let save_bar = match self.unsaved {
+            true => Column::new().align_items(Align::Center).push(
+                self.save_bar
+                    .view()
+                    .map(move |msg| BuildMessage::SaveMessage(msg)),
+            ),
+            false => Column::new()
+                .align_items(Align::Center)
+                .push(Space::with_height(Length::Units(50))),
+        };
+        let tab_btns = Column::new().align_items(Align::Center).push(
+            Row::new()
+                .push(Space::with_width(Length::Fill))
+                .push(
+                    Button::new(
+                        &mut self.steps_tab_btn,
+                        Text::new("Steps")
+                            .font(CQ_MONO)
+                            .horizontal_alignment(HorizontalAlignment::Center),
+                    )
+                    .padding(10)
+                    .on_press(BuildMessage::StepsTab)
+                    .width(Length::Units(200)),
+                )
+                .push(
+                    Button::new(
+                        &mut self.required_input_tab_btn,
+                        Text::new("Required Input")
+                            .font(CQ_MONO)
+                            .horizontal_alignment(HorizontalAlignment::Center),
+                    )
+                    .padding(10)
+                    .on_press(BuildMessage::RequiredInputTab)
+                    .width(Length::Units(200)),
+                )
+                .push(Space::with_width(Length::Fill)),
+        );
+        let search = Row::new().height(Length::Units(40)).push(
+            TextInput::new(
+                &mut self.recipe_name,
+                "Recipie Name",
+                &self.recipe_name_value,
+                BuildMessage::UserChangedName,
+            )
+            .padding(10)
+            .width(Length::Fill),
+        );
+        match self.state {
+            BuildState::Steps => {
+                let column_text = Row::new()
+                    .push(Space::with_width(Length::Units(70)))
+                    .push(
+                        Text::new("Destination")
+                            .width(Length::Units(125))
+                            .font(CQ_MONO),
+                    )
+                    .push(Text::new("Action").width(Length::Units(120)).font(CQ_MONO));
+
+                let add_step = Row::new().push(
+                    self.add_step
+                        .view()
+                        .map(move |msg| BuildMessage::AddStepMessage(msg)),
+                );
+
+                let steps: Element<_> = self
+                    .modified_steps
+                    .iter_mut()
+                    .enumerate()
+                    .fold(Column::new().spacing(15), |column, (i, step)| {
+                        column.push(
+                            step.view()
+                                .map(move |msg| BuildMessage::StepMessage(i, msg)),
+                        )
+                    })
+                    .into();
+
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(10)
+                    .push(save_bar)
+                    .push(search)
+                    .push(tab_btns)
+                    .push(column_text)
+                    .push(steps)
+                    .push(Space::with_height(Length::Units(25)))
+                    .push(add_step);
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            BuildState::RequiredInput => {
+                let before_title = Text::new("Before Run")
+                    .font(CQ_MONO)
+                    .size(40)
+                    .width(Length::Fill);
+                let before_required_inputs = self
+                    .modified_before_inputs
+                    .iter_mut()
+                    .enumerate()
+                    .fold(Column::new().spacing(5), |col, (i, input)| {
+                        col.push(
+                            input
+                                .view()
+                                .map(move |msg| BuildMessage::BeforeRequiredInputMessage(i, msg)),
+                        )
+                    });
+                let add_input_before_btn = Row::new()
+                    .push(Space::with_width(Length::Fill))
+                    .push(
+                        Button::new(
+                            &mut self.add_input_before_btn,
+                            Text::new("Add Input")
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .on_press(BuildMessage::AddInputBefore)
+                        .padding(10)
+                        .width(Length::Units(400)),
+                    )
+                    .push(Space::with_width(Length::Fill));
+                let after_title = Text::new("After Run")
+                    .font(CQ_MONO)
+                    .size(40)
+                    .width(Length::Fill);
+                let after_required_inputs = self.modified_after_inputs.iter_mut().enumerate().fold(
+                    Column::new().spacing(5),
+                    |col, (i, input)| {
+                        col.push(
+                            input
+                                .view()
+                                .map(move |msg| BuildMessage::AfterRequiredInputMessage(i, msg)),
+                        )
+                    },
+                );
+                let add_input_after_btn = Row::new()
+                    .push(Space::with_width(Length::Fill))
+                    .push(
+                        Button::new(
+                            &mut self.add_input_after_btn,
+                            Text::new("Add Input")
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .on_press(BuildMessage::AddInputAfter)
+                        .padding(10)
+                        .width(Length::Units(400)),
+                    )
+                    .push(Space::with_width(Length::Fill));
+                let width_limit = Column::new()
+                    .width(Length::Units(500))
+                    .push(before_title)
+                    .push(before_required_inputs)
+                    .push(Space::with_height(Length::Units(5)))
+                    .push(add_input_before_btn)
+                    .push(after_title)
+                    .push(after_required_inputs)
+                    .push(Space::with_height(Length::Units(5)))
+                    .push(add_input_after_btn);
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(10)
+                    .push(save_bar)
+                    .push(search)
+                    .push(tab_btns)
+                    .push(
+                        Row::new()
+                            .push(Space::with_width(Length::Fill))
+                            .push(width_limit)
+                            .push(Space::with_width(Length::Fill)),
+                    );
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+        }
+    }
+}
+#[derive(Serialize, Deserialize)]
+// Step found in ./run.rs
+pub struct Recipe {
+    pub required_inputs: Input,
+    pub steps: Vec<Step>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Input {
+    pub before: Vec<String>,
+    pub after: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RequiredInput {
+    state: text_input::State,
+    delete_btn: button::State,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum RequiredInputMessage {
+    InputChanged(String),
+    Delete,
+}
+
+impl RequiredInput {
+    fn new(value: String) -> Self {
+        RequiredInput {
+            state: text_input::State::new(),
+            value,
+            delete_btn: button::State::new(),
+        }
+    }
+
+    fn update(&mut self, message: RequiredInputMessage) {
+        match message {
+            RequiredInputMessage::InputChanged(input) => self.value = input,
+            _ => {}
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, RequiredInputMessage> {
+        Row::new()
             .push(
                 TextInput::new(
-                    &mut self.recipie_name,
-                    "Recipie Name",
-                    &self.recipie_name_value,
-                    BuildMessage::UserChangedName,
+                    &mut self.state,
+                    "Required Input",
+                    &self.value[..],
+                    RequiredInputMessage::InputChanged,
                 )
-                .padding(10)
-                .width(Length::Units(300)),
+                .padding(10),
             )
             .push(
-                Button::new(
-                    &mut self.save_button,
-                    Text::new("Save").horizontal_alignment(HorizontalAlignment::Center),
-                )
-                .padding(10)
-                .width(Length::Units(100))
-                .on_press(BuildMessage::Save),
+                Button::new(&mut self.delete_btn, delete_icon())
+                    .width(Length::Units(50))
+                    .padding(10)
+                    .on_press(RequiredInputMessage::Delete),
             )
-            .push(Space::with_width(Length::Fill));
-
-        let column_text = Row::new()
-            .push(Space::with_width(Length::Units(70)))
-            .push(
-                Text::new("Destination")
-                    .width(Length::Units(125))
-                    .font(CQ_MONO),
-            )
-            .push(Text::new("Action").width(Length::Units(120)).font(CQ_MONO));
-
-        let add_step = Row::new().push(
-            self.add_step
-                .view()
-                .map(move |msg| BuildMessage::AddStepMessage(msg)),
-        );
-
-        let steps: Element<_> = self
-            .steps
-            .iter_mut()
-            .enumerate()
-            .fold(Column::new().spacing(15), |column, (i, step)| {
-                column.push(
-                    step.view()
-                        .map(move |msg| BuildMessage::StepMessage(i, msg)),
-                )
-            })
-            .into();
-
-        let content = Column::new()
-            .max_width(800)
-            .spacing(20)
-            .push(name_and_save)
-            .push(column_text)
-            .push(steps)
-            .push(add_step);
-        Scrollable::new(&mut self.scroll)
-            .padding(40)
-            .push(Container::new(content).width(Length::Fill).center_x())
             .into()
     }
 }
 
-#[derive(Debug)]
-pub struct Step {
+#[derive(Debug, Clone)]
+pub struct BuildStep {
     step_num: Option<usize>,
     steps_len: usize,
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
     selected_destination: Option<String>,
-    in_bath: bool,
+    hover: bool,
     selected_action: Option<String>,
     secs_value: String,
     mins_value: String,
     hours_value: String,
-    require_input: bool,
+    wait: bool,
     state: StepState,
 }
 
@@ -268,8 +558,8 @@ pub enum StepMessage {
     MinsChanged(String),
     HoursChanged(String),
     NewNum(usize),
-    ToggleBath(bool),
-    ToggleInput(bool),
+    ToggleHover(bool),
+    ToggleWait(bool),
     HoursIncrement,
     HoursDecrement,
     MinsIncrement,
@@ -281,32 +571,32 @@ pub enum StepMessage {
     Okay,
 }
 
-impl Step {
+impl BuildStep {
     fn new(
         step_num: Option<usize>,
         steps_len: usize,
         nodes_ref: Rc<RefCell<Nodes>>,
         actions_ref: Rc<RefCell<Actions>>,
         selected_destination: Option<String>,
-        in_bath: bool,
+        hover: bool,
         selected_action: Option<String>,
         hours_value: String,
         mins_value: String,
         secs_value: String,
-        require_input: bool,
+        wait: bool,
     ) -> Self {
-        Step {
+        BuildStep {
             step_num,
             steps_len,
             nodes_ref,
             actions_ref,
             selected_destination,
-            in_bath,
+            hover,
             selected_action,
             secs_value,
             mins_value,
             hours_value,
-            require_input,
+            wait,
             state: StepState::Idle {
                 edit_btn: button::State::new(),
             },
@@ -319,8 +609,8 @@ impl Step {
                 self.selected_destination = Some(destination)
             }
             StepMessage::NewAction(action) => self.selected_action = Some(action),
-            StepMessage::ToggleBath(b) => self.in_bath = b,
-            StepMessage::ToggleInput(b) => self.require_input = b,
+            StepMessage::ToggleHover(b) => self.hover = b,
+            StepMessage::ToggleWait(b) => self.wait = b,
             StepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
                 if hours == "".to_string() {
@@ -435,7 +725,7 @@ impl Step {
                                 Column::new().push(
                                     PickList::new(
                                         step_num_state,
-                                        (1..self.steps_len + 2).collect::<Vec<usize>>(),
+                                        (1..self.steps_len + 1).collect::<Vec<usize>>(),
                                         self.step_num,
                                         StepMessage::NewNum,
                                     )
@@ -452,7 +742,7 @@ impl Step {
                                             .borrow()
                                             .node
                                             .iter()
-                                            .filter(|n| !n.name.contains("_inBath"))
+                                            .filter(|n| !n.name.contains("_hover") && !n.hide)
                                             .fold(Vec::new(), |mut v, n| {
                                                 v.push(n.name.clone());
                                                 v
@@ -544,9 +834,9 @@ impl Step {
                             .push(
                                 Column::new()
                                     .push(Checkbox::new(
-                                        self.in_bath,
-                                        "Enter Bath",
-                                        StepMessage::ToggleBath,
+                                        self.hover,
+                                        "Hover Above",
+                                        StepMessage::ToggleHover,
                                     ))
                                     .padding(4)
                                     .width(Length::Shrink),
@@ -555,9 +845,9 @@ impl Step {
                             .push(
                                 Column::new()
                                     .push(Checkbox::new(
-                                        self.require_input,
+                                        self.wait,
                                         "Require Input",
-                                        StepMessage::ToggleInput,
+                                        StepMessage::ToggleWait,
                                     ))
                                     .padding(4)
                                     .width(Length::Shrink),
@@ -568,11 +858,11 @@ impl Step {
             }
             StepState::Idle { edit_btn } => {
                 let e = "".to_string(); //empty
-                let eb = match self.in_bath {
-                    true => "\n in bath",
+                let hover = match self.hover {
+                    true => "Hover above\n",
                     false => "",
                 };
-                let ri = match self.require_input {
+                let ri = match self.wait {
                     true => "Wait for user input then\n ",
                     false => "",
                 };
@@ -679,10 +969,10 @@ impl Step {
                         Column::new().push(
                             Text::new(format!(
                                 "{}{}",
+                                hover,
                                 self.selected_destination
                                     .as_ref()
                                     .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
-                                eb
                             ))
                             .font(CQ_MONO)
                             .width(Length::Units(120))
@@ -727,7 +1017,7 @@ pub struct AddStep {
     nodes_ref: Rc<RefCell<Nodes>>,
     actions_ref: Rc<RefCell<Actions>>,
     destination_state: pick_list::State<String>,
-    in_bath: bool,
+    hover: bool,
     selected_destination: Option<String>,
     actions_state: pick_list::State<String>,
     step_num_state: pick_list::State<usize>,
@@ -738,7 +1028,7 @@ pub struct AddStep {
     mins_value: String,
     hours_input: text_input::State,
     hours_value: String,
-    require_input: bool,
+    wait: bool,
     add_btn: button::State,
 }
 
@@ -760,8 +1050,8 @@ pub enum AddStepMessage {
     MinsChanged(String),
     HoursChanged(String),
     NewNum(usize),
-    ToggleBath(bool),
-    ToggleInput(bool),
+    ToggleHover(bool),
+    ToggleWait(bool),
     HoursIncrement,
     HoursDecrement,
     MinsIncrement,
@@ -784,7 +1074,7 @@ impl AddStep {
             actions_ref: Rc::clone(&actions_ref),
             destination_state: pick_list::State::default(),
             selected_destination: None,
-            in_bath: true,
+            hover: false,
             actions_state: pick_list::State::default(),
             step_num_state: pick_list::State::default(),
             selected_action: actions_ref
@@ -798,7 +1088,7 @@ impl AddStep {
             mins_value: "".to_string(),
             hours_input: text_input::State::new(),
             hours_value: "".to_string(),
-            require_input: false,
+            wait: false,
             add_btn: button::State::new(),
         }
     }
@@ -809,8 +1099,8 @@ impl AddStep {
                 self.selected_destination = Some(destination)
             }
             AddStepMessage::NewAction(action) => self.selected_action = Some(action),
-            AddStepMessage::ToggleBath(b) => self.in_bath = b,
-            AddStepMessage::ToggleInput(b) => self.require_input = b,
+            AddStepMessage::ToggleHover(b) => self.hover = b,
+            AddStepMessage::ToggleWait(b) => self.wait = b,
             AddStepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
                 if hours == "".to_string() {
@@ -920,7 +1210,7 @@ impl AddStep {
                                     .borrow()
                                     .node
                                     .iter()
-                                    .filter(|n| !n.name.contains("_inBath"))
+                                    .filter(|n| !n.name.contains("_hover") && !n.hide)
                                     .fold(Vec::new(), |mut v, n| {
                                         v.push(n.name.clone());
                                         v
@@ -1000,13 +1290,13 @@ impl AddStep {
                                     )
                                     .on_press(AddStepMessage::Add(
                                         self.selected_destination.clone(),
-                                        self.in_bath,
+                                        self.hover,
                                         self.selected_action.clone(),
                                         self.step_num,
                                         self.hours_value.clone(),
                                         self.mins_value.clone(),
                                         self.secs_value.clone(),
-                                        self.require_input,
+                                        self.wait,
                                     ))
                                     .padding(10)
                                     .width(Length::Units(100)),
@@ -1020,9 +1310,9 @@ impl AddStep {
                     .push(
                         Column::new()
                             .push(Checkbox::new(
-                                self.in_bath,
-                                "Enter Bath",
-                                AddStepMessage::ToggleBath,
+                                self.hover,
+                                "Hover Above",
+                                AddStepMessage::ToggleHover,
                             ))
                             .padding(4)
                             .width(Length::Shrink),
@@ -1031,9 +1321,9 @@ impl AddStep {
                     .push(
                         Column::new()
                             .push(Checkbox::new(
-                                self.require_input,
-                                "Require Input",
-                                AddStepMessage::ToggleInput,
+                                self.wait,
+                                "Wait for User",
+                                AddStepMessage::ToggleWait,
                             ))
                             .padding(4)
                             .width(Length::Shrink),
@@ -1056,7 +1346,7 @@ pub fn ns(string: &String) -> String {
 // Fonts
 const ICONS_FONT: Font = Font::External {
     name: "Icons",
-    bytes: include_bytes!("../fonts/icons.ttf"),
+    bytes: include_bytes!("../fonts/Icons.ttf"),
 };
 
 fn icon(unicode: char) -> Text {
@@ -1067,10 +1357,38 @@ fn icon(unicode: char) -> Text {
         .size(20)
 }
 
-fn okay_icon() -> Text {
-    icon('\u{F00C}')
+pub fn okay_icon() -> Text {
+    icon('\u{E801}')
 }
 
-fn delete_icon() -> Text {
-    icon('\u{F1F8}')
+pub fn delete_icon() -> Text {
+    icon('\u{E800}')
+}
+
+pub fn play_icon() -> Text {
+    icon('\u{E804}')
+}
+
+pub fn pause_icon() -> Text {
+    icon('\u{E805}')
+}
+
+pub fn attention_icon() -> Text {
+    icon('\u{E806}')
+}
+
+pub fn close_icon() -> Text {
+    icon('\u{E807}')
+}
+
+pub fn edit_icon() -> Text {
+    icon('\u{E808}')
+}
+
+pub fn down_icon() -> Text {
+    icon('\u{E802}')
+}
+
+pub fn right_icon() -> Text {
+    icon('\u{E803}')
 }
