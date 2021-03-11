@@ -11,8 +11,8 @@ use iced::{
 use super::build::{delete_icon, down_icon, okay_icon, right_icon};
 use super::grbl::{Command as Cmd, Grbl};
 use regex::Regex;
-use std::cmp::min;
 use std::cell::RefCell;
+use std::cmp::min;
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
@@ -1679,11 +1679,11 @@ impl LogTab {
     fn update(&mut self, message: LogTabMessage) -> Command<LogTabMessage> {
         match message {
             LogTabMessage::AddLog((val, log)) => {
-                if self.logs.len() <= LOG_MAX && self.unsearched_files.len() > 0 {
-                    if val == self.search_bar_value.to_lowercase() {
-                        if let Some(log) = log {
-                            self.logs.push(log);
-                        }
+                if self.logs.len() <= LOG_MAX && val == self.search_bar_value.to_lowercase() {
+                    if let Some(log) = log {
+                        self.logs.push(log);
+                    }
+                    if self.unsearched_files.len() > 0 {
                         Command::perform(
                             Logger::search_files(val, self.unsearched_files.remove(0)),
                             LogTabMessage::AddLog,
@@ -1708,18 +1708,18 @@ impl LogTab {
                 );
                 let val = val.to_lowercase();
                 // Note: limit to 15 active search threads as limit on windows
-                // though limit to 10 becuase crashes if more idk.
-                Command::batch(
-                    (0..min(10, self.unsearched_files.len()))
-                        .into_iter()
-                        .fold(Vec::with_capacity(10), |mut v, i| {
+                let command =
+                    Command::batch((0..min(15, self.unsearched_files.len())).into_iter().fold(
+                        Vec::with_capacity(15),
+                        |mut v, _i| {
                             v.push(Command::perform(
-                                Logger::search_files(val.clone(), self.unsearched_files.remove(i)),
+                                Logger::search_files(val.clone(), self.unsearched_files.remove(0)),
                                 LogTabMessage::AddLog,
                             ));
                             v
-                        }),
-                )
+                        },
+                    ));
+                command
             }
             LogTabMessage::Log(i, msg) => {
                 self.logs[i].update(msg);
@@ -1760,11 +1760,15 @@ impl LogTab {
                 .into()])
                 .spacing(10)
             } else {
-                Row::with_children(vec![Text::new("Showing all results.")
-                    .font(CQ_MONO)
-                    .width(Length::Fill)
-                    .horizontal_alignment(HorizontalAlignment::Center)
-                    .into()])
+                Row::with_children(vec![Text::new(if self.unsearched_files.len() > 0 {
+                    "Searching . . ."
+                } else {
+                    "Showing all results."
+                })
+                .font(CQ_MONO)
+                .width(Length::Fill)
+                .horizontal_alignment(HorizontalAlignment::Center)
+                .into()])
             })
             .into()
     }
