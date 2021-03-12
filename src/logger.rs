@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::{fs, thread};
 
 use super::advanced::{Log, LOGS};
-use users::{get_user_by_uid, get_current_uid};
+use users::{get_current_uid, get_user_by_uid};
 
 #[derive(Debug, Clone)]
 pub struct Logger {
@@ -27,15 +27,29 @@ impl Logger {
                 } else {
                     match OpenOptions::new()
                         .append(true)
-                        .open(Path::new(&format!("./logs/{}", *file_name))) {
+                        .open(Path::new(&format!("./logs/{}", *file_name)))
+                    {
                         Ok(mut log) => writeln!(log, "{}", line).unwrap(),
                         Err(_) => {
-                            let mut log = OpenOptions::new().create(true).append(true).open(Path::new(&format!("{}/{}", LOGS, *file_name))).unwrap();
+                            let mut log = OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(Path::new(&format!("{}/{}", LOGS, *file_name)))
+                                .unwrap();
                             writeln!(log, "{}", *file_name).unwrap();
                             if cfg!(windows) {
                                 // add windows user detection
                             } else if cfg!(unix) {
-                                writeln!(log, "Current system user: {}", get_user_by_uid(get_current_uid()).unwrap().name().to_str().unwrap()).unwrap();
+                                writeln!(
+                                    log,
+                                    "Current system user: {}",
+                                    get_user_by_uid(get_current_uid())
+                                        .unwrap()
+                                        .name()
+                                        .to_str()
+                                        .unwrap()
+                                )
+                                .unwrap();
                             }
                             writeln!(log, "--------------------").unwrap();
                         }

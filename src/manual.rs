@@ -7,8 +7,6 @@ use iced::{
     HorizontalAlignment, Length, Row, Scrollable, Space, Text, TextInput,
 };
 use regex::Regex;
-use std::thread;
-use std::time::Duration;
 
 pub struct Manual {
     pub scroll: scrollable::State,
@@ -41,7 +39,7 @@ pub enum ManualMessage {
     GridTab,
     TerminalInputChanged(String),
     TerminalInputSubmitted,
-    PopResponse(()),
+    ThankYou(Option<Cmd>),
 }
 
 impl Manual {
@@ -87,23 +85,55 @@ impl Manual {
             ManualMessage::TerminalTab => self.state = ManualState::Terminal,
             ManualMessage::GridTab => self.state = ManualState::Grid,
             ManualMessage::TerminalInputChanged(val) => self.terminal_input_value = val,
-            ManualMessage::PopResponse(_) => match self.grbl.pop_command() {
-                Some(cmd) => self.terminal_responses.insert(0,format!(
-                    "{}| '{}' => {}",
-                    cmd.response_time.unwrap().to_rfc2822(),
-                    cmd.command,
-                    cmd.result.unwrap()
-                )),
-                None => {println!("no cmd");}
+            ManualMessage::ThankYou(cmd) => match cmd {
+                Some(cmd) => self.terminal_responses.insert(
+                    0,
+                    format!(
+                        "{}| '{}' => {}",
+                        cmd.response_time.unwrap().to_rfc2822(),
+                        cmd.command,
+                        cmd.result.unwrap()
+                    ),
+                ),
+                None => {}
             },
             ManualMessage::TerminalInputSubmitted => {
-                let val = self.terminal_input_value.replace("\n", "").replace(" ", "");
+                let val = self
+                    .terminal_input_value
+                    .replace("\n", "")
+                    .replace(" ", "")
+                    .to_uppercase();
                 self.terminal_input_value = "".to_string();
-                if &val[..] == "$$" {
-                    self.terminal_responses.insert(0,format!("{}| '$$' => View and edit settings withing Bathtub! Advanced Tab => Grbl ;)", Local::now().to_rfc2822()))
+                if val.contains("?") {
+                    self.terminal_responses.insert(
+                        0,
+                        format!(
+                            "{}| => '?' Status command not available. Look at GUI above ;)",
+                            Local::now().to_rfc2822()
+                        ),
+                    )
+                } else if val.contains("M")
+                    || val.contains("P")
+                    || val.contains("C")
+                    || val.contains("N")
+                    || val == "$G".to_string()
+                {
+                    self.terminal_responses.insert(
+                        0,
+                        format!(
+                            "{}| '{}' => Command not supported by Bathtub.",
+                            Local::now().to_rfc2822(),
+                            val
+                        ),
+                    )
+                } else if &val[..] == "$$" || &val[..] == "$I" {
+                    self.terminal_responses.insert(0,format!("{}| '{}' => View and edit settings withing Bathtub! Advanced Tab => Grbl ;)", Local::now().to_rfc2822(), val))
                 } else {
-                    self.grbl.push_command(Cmd::new(val.to_uppercase()));
-                    return Command::perform(gimme_a_second(), ManualMessage::PopResponse);
+                    self.grbl.push_command(Cmd::new(val));
+                    return Command::perform(
+                        command_please(self.grbl.clone()),
+                        ManualMessage::ThankYou,
+                    );
                 }
             }
             _ => {}
@@ -249,6 +279,6 @@ impl Manual {
     }
 }
 
-async fn gimme_a_second() {
-    thread::sleep(Duration::from_secs(1));
+async fn command_please(grbl: Grbl) -> Option<Cmd> {
+    grbl.pop_command()
 }
