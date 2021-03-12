@@ -554,7 +554,7 @@ impl<'a> Application for Bathtub {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
                             tabs: Tabs {
-                                manual: Manual::new(state.node_grid2d),
+                                manual: Manual::new(state.node_grid2d, grbl.clone()),
                                 run: Run::new(Arc::clone(&recipe_state), logger.clone()),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
@@ -639,11 +639,6 @@ impl<'a> Application for Bathtub {
                         let log_title =
                             format!("{}| Manual - Going to {}", Local::now().to_rfc2822(), &node);
                         state.logger.set_log_file(log_title.clone());
-                        state.logger.send_line(log_title.clone()).unwrap();
-                        state
-                            .logger
-                            .send_line("------------------------------".to_string())
-                            .unwrap();
                         state.tabs.advanced.update_logs();
 
                         command = Command::perform(
@@ -774,7 +769,13 @@ impl<'a> Application for Bathtub {
                             )
                         }
                     }
-                    Message::Manual(msg) => state.tabs.manual.update(msg),
+                    Message::Manual(msg) => {
+                        command = state
+                            .tabs
+                            .manual
+                            .update(msg)
+                            .map(move |msg| Message::Manual(msg))
+                    }
                     Message::Build(msg) => state.tabs.build.update(msg),
                     Message::Run(msg) => {
                         command = state.tabs.run.update(msg).map(move |msg| Message::Run(msg));

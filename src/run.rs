@@ -159,10 +159,6 @@ impl Run {
                         self.search_value.as_ref().unwrap()
                     );
                     self.logger.set_log_file(log_title.clone());
-                    self.logger.send_line(log_title.clone()).unwrap();
-                    self.logger
-                        .send_line("------------------------------".to_string())
-                        .unwrap();
                     for input in &self.required_before_inputs {
                         self.logger
                             .send_line(format!(

@@ -92,19 +92,22 @@ pub fn new() -> Grbl {
         let r =
             Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)")
                 .unwrap();
+        let mut current_status = Command::new("?".to_string());
         loop {
-            if now.elapsed().as_millis() >= 100 {
+            if now.elapsed().as_millis() >= 100 && cb_c.lock().unwrap().len() == 0 {
                 now = Instant::now();
-                let mut current_status = Command::new("?".to_string());
                 port.flush().unwrap();
                 send(&mut port, &mut current_status);
-                if let Some(caps) = r.captures(&current_status.result.unwrap()[..]) {
+                if let Some(caps) = r.captures(&current_status.result.as_ref().unwrap()[..]) {
                     let loc = Status {
                         status: caps["status"].to_string(),
                         x: caps["X"].parse::<f32>().unwrap(),
                         y: caps["Y"].parse::<f32>().unwrap(),
                         z: caps["Z"].parse::<f32>().unwrap(),
                     };
+                    current_status.response_time = None;
+                    current_status.result = None;
+                    port.flush().unwrap();
                     let mut lctn = status.lock().unwrap();
                     *lctn = Some(loc);
                 }
@@ -189,7 +192,7 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
         loop {
             // read until caridge return kek from grbl
             match reader.read_until(0xD, &mut buf) {
-                Ok(_reader) => {
+                Ok(_num_of_chars_read) => {
                     line = str::from_utf8(&buf).unwrap().to_string();
                     // the first reponse from grbl initializing the connection is a bit weird, it has multiple
                     // caridge returns, lockily it is the only one with a unicode 'null' char. GRBL doesnt do
@@ -199,6 +202,19 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
                         command.result = Some("init".to_string());
                         break;
                     }
+                    // filter errors explicitly
+                    if line.contains("error") {
+                        line = line.split("\n").last().unwrap().to_string();
+                    }
+                    // my code does not perfectly 1 to 1 grab location from '?', so filter out
+                    // occasional extras
+                    if line.ends_with("\r\nok\r\nok\r") {
+                        line = "ok\r".to_string()
+                    }
+                    if command.command != "?".to_string() && line.contains("<") {
+                        line = "".to_string();
+                    }
+                    // we now have a full command,
                     if line.contains("\r") {
                         output.push(line.replace("\r", "").replace("\n", ""));
                         command.response_time = Some(Local::now());
