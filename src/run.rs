@@ -159,13 +159,16 @@ impl Run {
                         self.search_value.as_ref().unwrap()
                     );
                     self.logger.set_log_file(log_title.clone());
+                    self.logger
+                        .send_line("--------------------".to_string())
+                        .unwrap();
                     for input in &self.required_before_inputs {
                         self.logger
                             .send_line(format!(
                                 "{} => {}: {}",
                                 Local::now().to_rfc2822(),
-                                input.title,
-                                input.input_value
+                                &input.title,
+                                &input.input_value
                             ))
                             .unwrap();
                     }

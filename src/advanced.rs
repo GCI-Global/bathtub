@@ -3,9 +3,9 @@ use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use crate::CQ_MONO;
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Column, Command, Container, Element,
-    HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
-    VerticalAlignment,
+    button, checkbox, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command,
+    Container, Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text,
+    TextInput, VerticalAlignment,
 };
 
 use super::build::{delete_icon, down_icon, okay_icon, right_icon};
@@ -1782,13 +1782,9 @@ impl LogTab {
                 )
                 .padding(10),
             )
-            .push(
-                logs.enumerate()
-                    .filter(|(_, log)| !log.filtered)
-                    .fold(Column::new(), |col, (i, log)| {
-                        col.push(log.view().map(move |msg| LogTabMessage::Log(i, msg)))
-                    }),
-            )
+            .push(logs.enumerate().fold(Column::new(), |col, (i, log)| {
+                col.push(log.view().map(move |msg| LogTabMessage::Log(i, msg)))
+            }))
             .push(if logs_count == LOG_MAX {
                 Row::with_children(vec![Text::new(format!(
                     "Showing first {}. Use search to narrow down results.",
@@ -1820,12 +1816,13 @@ pub struct Log {
     content: String,
     opened: bool,
     toggle_view_btn: button::State,
-    filtered: bool,
+    hide_gcode: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum LogMessage {
     ToggleView,
+    ToggleGcode(bool),
 }
 
 impl Log {
@@ -1835,7 +1832,7 @@ impl Log {
             content: "".to_string(), // leave empty until opened
             opened: false,
             toggle_view_btn: button::State::new(),
-            filtered: false,
+            hide_gcode: true,
         }
     }
 
@@ -1845,11 +1842,56 @@ impl Log {
                 if self.opened {
                     self.opened = false;
                 } else {
-                    self.content =
-                        fs::read_to_string(Path::new(&format!("./logs/{}", &self.title)))
-                            .unwrap_or(format!("Error: Unable to read file {}!", &self.title));
+                    match self.hide_gcode {
+                        true => {
+                            self.content =
+                                fs::read_to_string(Path::new(&format!("{}/{}", LOGS, &self.title)))
+                                    .unwrap_or(format!(
+                                        "Error: Unable tp read file {}!",
+                                        &self.title
+                                    ))
+                                    .lines()
+                                    .filter(|l| !l.contains("G-code"))
+                                    .fold(String::new(), |mut s, line| {
+                                        s.push_str(line);
+                                        s.push_str("\n");
+                                        s
+                                    })
+                        }
+                        false => {
+                            self.content =
+                                fs::read_to_string(Path::new(&format!("{}/{}", LOGS, &self.title)))
+                                    .unwrap_or(format!(
+                                        "Error: Unable to read file {}!",
+                                        &self.title
+                                    ))
+                        }
+                    };
+
                     self.opened = true;
                 }
+            }
+            LogMessage::ToggleGcode(b) => {
+                match self.hide_gcode {
+                    false => {
+                        self.content =
+                            fs::read_to_string(Path::new(&format!("{}/{}", LOGS, &self.title)))
+                                .unwrap_or(format!("Error: Unable tp read file {}!", &self.title))
+                                .lines()
+                                .filter(|l| !l.contains("G-code"))
+                                .fold(String::new(), |mut s, line| {
+                                    s.push_str(line);
+                                    s.push_str("\n");
+                                    s
+                                })
+                    }
+                    true => {
+                        self.content =
+                            fs::read_to_string(Path::new(&format!("{}/{}", LOGS, &self.title)))
+                                .unwrap_or(format!("Error: Unable to read file {}!", &self.title))
+                    }
+                };
+                self.hide_gcode = b;
             }
         }
     }
@@ -1867,6 +1909,17 @@ impl Log {
                     .padding(10)
                     .width(Length::Fill)
                     .on_press(LogMessage::ToggleView),
+                )
+                .push(
+                    Row::new()
+                        .push(Space::with_width(Length::Fill))
+                        .push(Checkbox::new(
+                            self.hide_gcode,
+                            "Hide G-code lines",
+                            LogMessage::ToggleGcode,
+                        ))
+                        .padding(10)
+                        .push(Space::with_width(Length::Fill)),
                 )
                 .push(
                     Row::new()

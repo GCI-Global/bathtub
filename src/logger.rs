@@ -37,20 +37,15 @@ impl Logger {
                                 .open(Path::new(&format!("{}/{}", LOGS, *file_name)))
                                 .unwrap();
                             writeln!(log, "{}", *file_name).unwrap();
-                            if cfg!(windows) {
-                                // add windows user detection
-                            } else if cfg!(unix) {
-                                writeln!(
-                                    log,
-                                    "Current system user: {}",
-                                    get_user_by_uid(get_current_uid())
-                                        .unwrap()
-                                        .name()
-                                        .to_str()
-                                        .unwrap()
-                                )
-                                .unwrap();
-                            }
+                            writeln!(
+                                log,
+                                "Current Operating System User: {}",
+                                match get_username() {
+                                    Some(username) => username,
+                                    None => "**Unavailable**".to_string(),
+                                }
+                            )
+                            .unwrap();
                             writeln!(log, "--------------------").unwrap();
                         }
                     }
@@ -87,4 +82,43 @@ impl Logger {
             (val, None)
         }
     }
+}
+
+// TODO: Test if this actially works on windows, currently linux compiler just ignores windows
+// function
+cfg_if::cfg_if! {
+    if #[cfg(windows)] {
+fn get_username() -> windows::Result<String> {
+mod bindings {
+    ::windows::include_bindings!();
+}
+use bindings::windows::{
+    foundation::IReference,
+    system::{KnownUserProperties, User, UserType},
+};
+use windows::{HString, Interface};
+    windows::initialize_sta()?;
+
+    let users = User::find_all_async_by_type(UserType::LocalUser)?.get()?;
+    assert!(users.size().unwrap() >= 1);
+    let user = users.get_at(0)?;
+
+    let user_name: IReference<HString> = user
+        .get_property_async(KnownUserProperties::account_name()?)?
+        .get()?
+        .cast()?;
+    let user_name = user_name.get_string()?;
+    Ok(user_name)
+}
+} else {
+    fn get_username() -> Option<String> {
+        match get_user_by_uid(get_current_uid())
+        .unwrap()
+        .name()
+        .to_str() {
+            Some(s) => Some(s.to_string()),
+            None => None,
+        }
+    }
+}
 }
