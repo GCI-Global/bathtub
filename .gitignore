@@ -1,3 +1,4 @@
 /target
 /recipes/*
 /logs/*
+Cargo.lock

@@ -92,19 +92,21 @@ pub fn new() -> Grbl {
         let r =
             Regex::new(r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)")
                 .unwrap();
+        let mut current_status = Command::new("?".to_string());
         loop {
             if now.elapsed().as_millis() >= 100 {
                 now = Instant::now();
-                let mut current_status = Command::new("?".to_string());
                 port.flush().unwrap();
                 send(&mut port, &mut current_status);
-                if let Some(caps) = r.captures(&current_status.result.unwrap()[..]) {
+                if let Some(caps) = r.captures(&current_status.result.as_ref().unwrap()[..]) {
                     let loc = Status {
                         status: caps["status"].to_string(),
                         x: caps["X"].parse::<f32>().unwrap(),
                         y: caps["Y"].parse::<f32>().unwrap(),
                         z: caps["Z"].parse::<f32>().unwrap(),
                     };
+                    current_status.response_time = None;
+                    current_status.result = None;
                     let mut lctn = status.lock().unwrap();
                     *lctn = Some(loc);
                 }
@@ -198,6 +200,10 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
                         command.response_time = Some(Local::now());
                         command.result = Some("init".to_string());
                         break;
+                    }
+                    if line.contains("ok") {println!("{}", line);line = "ok\r".to_string()}
+                    if command.command != "?".to_string() && line.contains("<") {
+                        line = "".to_string();
                     }
                     if line.contains("\r") {
                         output.push(line.replace("\r", "").replace("\n", ""));

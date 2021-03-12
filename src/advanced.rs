@@ -525,7 +525,7 @@ impl NodeTab {
                 .clone()
                 .node
                 .iter_mut()
-                .filter(|n| n.name.contains("_hover"))
+                .filter(|n| !n.name.contains("_hover"))
                 .map(|n| Node {
                     name: n.name.replace("_hover", ""),
                     neighbors: n
@@ -640,7 +640,7 @@ impl NodeTab {
                         .clone()
                         .node
                         .iter_mut()
-                        .filter(|n| n.name.contains("_hover"))
+                        .filter(|n| !n.name.contains("_hover"))
                         .map(|n| Node {
                             name: n.name.replace("_hover", ""),
                             neighbors: n

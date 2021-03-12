@@ -88,21 +88,21 @@ impl Manual {
             ManualMessage::GridTab => self.state = ManualState::Grid,
             ManualMessage::TerminalInputChanged(val) => self.terminal_input_value = val,
             ManualMessage::PopResponse(_) => match self.grbl.pop_command() {
-                Some(cmd) => self.terminal_responses.push(format!(
+                Some(cmd) => self.terminal_responses.insert(0,format!(
                     "{}| '{}' => {}",
                     cmd.response_time.unwrap().to_rfc2822(),
                     cmd.command,
                     cmd.result.unwrap()
                 )),
-                None => {}
+                None => {println!("no cmd");}
             },
             ManualMessage::TerminalInputSubmitted => {
                 let val = self.terminal_input_value.replace("\n", "").replace(" ", "");
                 self.terminal_input_value = "".to_string();
                 if &val[..] == "$$" {
-                    self.terminal_responses.push(format!("{}| '$$' => View and edit settings withing Bathtub! Advanced Tab => Grbl ;)", Local::now().to_rfc2822()))
+                    self.terminal_responses.insert(0,format!("{}| '$$' => View and edit settings withing Bathtub! Advanced Tab => Grbl ;)", Local::now().to_rfc2822()))
                 } else {
-                    self.grbl.push_command(Cmd::new(val));
+                    self.grbl.push_command(Cmd::new(val.to_uppercase()));
                     return Command::perform(gimme_a_second(), ManualMessage::PopResponse);
                 }
             }
