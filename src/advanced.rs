@@ -1,6 +1,7 @@
 use super::actions::{Action, Actions};
 use super::logger::Logger;
 use super::nodes::{Node, Nodes};
+use super::run::do_nothing;
 use crate::CQ_MONO;
 use iced::{
     button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command, Container,
@@ -10,14 +11,14 @@ use iced::{
 
 use super::build::{delete_icon, down_icon, okay_icon, right_icon};
 use super::grbl::{Command as Cmd, Grbl};
+use chrono::prelude::*;
 use chrono::DateTime;
-use itertools::Itertools;
 use regex::Regex;
 use std::cell::RefCell;
 use std::cmp::min;
+use std::fs;
 use std::path::Path;
 use std::rc::Rc;
-use std::{fs, fs::DirEntry, io};
 
 pub const LOGS: &str = "./logs";
 pub const LOG_MAX: usize = 100; // max number of logs to show
@@ -155,7 +156,13 @@ impl Advanced {
                 self.scroll.scroll_to_bottom();
             }
             AdvancedMessage::NodesTab(msg) => self.nodes_tab.update(msg),
-            AdvancedMessage::ActionsTab(msg) => self.actions_tab.update(msg),
+            AdvancedMessage::ActionsTab(ActionTabMessage::Saved(_)) => self.update_logs(),
+            AdvancedMessage::ActionsTab(msg) => {
+                command = self
+                    .actions_tab
+                    .update(msg)
+                    .map(move |msg| AdvancedMessage::ActionsTab(msg))
+            }
             AdvancedMessage::LogsTab(msg) => {
                 command = self
                     .logs_tab
@@ -1300,6 +1307,7 @@ pub enum ActionTabMessage {
     AddConfigAction,
     ConfigAction(usize, ConfigActionMessage),
     SaveMessage(SaveBarMessage),
+    Saved(()),
 }
 
 impl ActionTab {
@@ -1322,7 +1330,8 @@ impl ActionTab {
         }
     }
 
-    fn update(&mut self, message: ActionTabMessage) {
+    fn update(&mut self, message: ActionTabMessage) -> Command<ActionTabMessage> {
+        let mut command = Command::none();
         match message {
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::Delete) => {
                 self.config_actions.remove(i);
@@ -1381,6 +1390,28 @@ impl ActionTab {
                 self.config_actions
                     .push(ConfigAction::new(name, Vec::new()));
             }
+            ActionTabMessage::SaveMessage(SaveBarMessage::Save) => {
+                let old_toml = toml::to_string_pretty(&*self.ref_actions.borrow()).unwrap();
+                let new_toml = toml::to_string_pretty(&*self.modified_actions.borrow()).unwrap();
+                fs::write("./config/actions.toml", &new_toml).expect("Unable to save Actions");
+
+                *self.ref_actions.borrow_mut() = self.modified_actions.borrow().clone();
+                self.logger.set_log_file(format!(
+                    "{}| Advanced (Actions) - Save",
+                    Local::now().to_rfc2822()
+                ));
+                self.logger.send_line(String::new()).unwrap();
+                self.logger
+                    .send_line("Updated 'Actions' from:".to_string())
+                    .unwrap();
+                self.logger.send_line(old_toml).unwrap();
+                self.logger
+                    .send_line("\n\nUpdated 'Actions' to:".to_string())
+                    .unwrap();
+                self.logger.send_line(new_toml).unwrap();
+                command = Command::perform(do_nothing(), ActionTabMessage::Saved);
+                self.unsaved = false;
+            }
             ActionTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
                 self.modified_actions = Rc::new(RefCell::new(self.ref_actions.borrow().clone()));
                 self.config_actions = Rc::clone(&self.modified_actions)
@@ -1396,6 +1427,7 @@ impl ActionTab {
             }
             _ => {}
         }
+        command
     }
 
     fn view(&mut self) -> Element<'_, ActionTabMessage> {

@@ -11,32 +11,29 @@ use users::{get_current_uid, get_user_by_uid};
 #[derive(Debug, Clone)]
 pub struct Logger {
     sender: Sender<String>,
-    current_log: Arc<Mutex<String>>,
 }
 
 impl Logger {
     pub fn new() -> Logger {
         let (tx, rx): (Sender<String>, Receiver<String>) = channel();
-        let current_log = Arc::new(Mutex::new(String::new()));
-        let current_log2 = Arc::clone(&current_log);
+        let mut file_name = String::new();
         thread::spawn(move || loop {
             if let Ok(line) = rx.recv() {
-                let mut file_name = current_log2.lock().unwrap();
                 if line.ends_with("\n\rset_log_file") {
-                    *file_name = line.replace("\n\rset_log_file", "");
+                    file_name = line.replace("\n\rset_log_file", "");
                 } else {
                     match OpenOptions::new()
                         .append(true)
-                        .open(Path::new(&format!("./logs/{}", *file_name)))
+                        .open(Path::new(&format!("./logs/{}", file_name)))
                     {
                         Ok(mut log) => writeln!(log, "{}", line).unwrap(),
                         Err(_) => {
                             let mut log = OpenOptions::new()
                                 .create(true)
                                 .append(true)
-                                .open(Path::new(&format!("{}/{}", LOGS, *file_name)))
+                                .open(Path::new(&format!("{}/{}", LOGS, file_name)))
                                 .unwrap();
-                            writeln!(log, "{}", *file_name).unwrap();
+                            writeln!(log, "{}", file_name).unwrap();
                             writeln!(
                                 log,
                                 "Current Operating System User: {}",
@@ -54,10 +51,7 @@ impl Logger {
                 break;
             }
         });
-        Logger {
-            sender: tx,
-            current_log,
-        }
+        Logger { sender: tx }
     }
 
     pub fn set_log_file(&mut self, mut file_name: String) {

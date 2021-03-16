@@ -721,6 +721,6 @@ impl ContinueButton {
     }
 }
 
-async fn do_nothing() {
+pub async fn do_nothing() {
     ()
 }
