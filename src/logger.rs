@@ -72,14 +72,17 @@ impl Logger {
     pub fn send_line(&self, line: String) -> Result<(), SendError<String>> {
         self.sender.send(line)
     }
-    pub async fn search_files<'a>(val: String, file_name: String) -> (String, Option<Log>) {
+    pub async fn search_files<'a>(
+        vals: Vec<String>,
+        file_name: String,
+    ) -> (Vec<String>, Option<Log>) {
         let test_string = fs::read_to_string(Path::new(&format!("{}/{}", LOGS, file_name)))
             .unwrap()
             .to_lowercase();
-        if test_string.contains(&val) {
-            (val, Some(Log::new(file_name)))
+        if vals.iter().all(|val| test_string.contains(val)) {
+            (vals, Some(Log::new(file_name)))
         } else {
-            (val, None)
+            (vals, None)
         }
     }
 }

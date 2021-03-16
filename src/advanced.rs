@@ -3,9 +3,9 @@ use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use crate::CQ_MONO;
 use iced::{
-    button, checkbox, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command,
-    Container, Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text,
-    TextInput, VerticalAlignment,
+    button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command, Container,
+    Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
+    VerticalAlignment,
 };
 
 use super::build::{delete_icon, down_icon, okay_icon, right_icon};
@@ -1635,16 +1635,15 @@ impl CommandInput {
 struct LogTab {
     logs: Vec<Log>,
     unsearched_files: Vec<String>,
-    search_bar_state: text_input::State,
-    search_bar_value: String,
+    search_bars: Vec<SearchBar>,
     date_regex: Regex,
 }
 
 #[derive(Debug, Clone)]
 pub enum LogTabMessage {
-    SearchChanged(String),
+    SearchChanged(usize, SearchBarMessage),
     Log(usize, LogMessage),
-    AddLog((String, Option<Log>)),
+    AddLog((Vec<String>, Option<Log>)),
 }
 
 impl LogTab {
@@ -1671,14 +1670,13 @@ impl LogTab {
         LogTab {
             logs: log_files.into_iter().map(|f| Log::new(f)).collect(),
             unsearched_files: Vec::new(),
-            search_bar_state: text_input::State::new(),
-            search_bar_value: "".to_string(),
+            search_bars: vec![SearchBar::new(0)],
             date_regex,
         }
     }
 
     pub fn update_logs(&mut self) {
-        self.search_bar_value = "".to_string();
+        self.search_bars = vec![SearchBar::new(0)];
         let mut log_files: Vec<_> = fs::read_dir(Path::new(LOGS))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
@@ -1702,14 +1700,25 @@ impl LogTab {
 
     fn update(&mut self, message: LogTabMessage) -> Command<LogTabMessage> {
         match message {
-            LogTabMessage::AddLog((val, log)) => {
-                if self.logs.len() <= LOG_MAX && val == self.search_bar_value.to_lowercase() {
+            LogTabMessage::AddLog((vals, log)) => {
+                if self.logs.len() <= LOG_MAX
+                    && vals
+                        .iter()
+                        .zip(self.search_bars.iter().fold(
+                            Vec::with_capacity(self.search_bars.len()),
+                            |mut v, bar| {
+                                v.push(&bar.value);
+                                v
+                            },
+                        ))
+                        .all(|(a, b)| a == b)
+                {
                     if let Some(log) = log {
                         self.logs.push(log);
                     }
                     if self.unsearched_files.len() > 0 {
                         Command::perform(
-                            Logger::search_files(val, self.unsearched_files.remove(0)),
+                            Logger::search_files(vals, self.unsearched_files.remove(0)),
                             LogTabMessage::AddLog,
                         )
                     } else {
@@ -1719,10 +1728,32 @@ impl LogTab {
                     Command::none()
                 }
             }
-            LogTabMessage::SearchChanged(val) => {
+            LogTabMessage::SearchChanged(i, SearchBarMessage::InputChanged(val)) => {
                 // run search as multithreaded Commands to speed up search
-                self.search_bar_value = val.clone();
+                // update bar and add new if necessary
+                self.search_bars[i].value = val.clone();
+                if self.search_bars.len() - 1 == i {
+                    self.search_bars.push(SearchBar::new(i + 1));
+                }
+                // remove empty search bars
                 if val == "".to_string() {
+                    if i == 0 {
+                        self.update_logs();
+                        return Command::none();
+                    } else {
+                        self.search_bars.remove(i);
+                        for i in 0..self.search_bars.len() {
+                            self.search_bars[i].num = i;
+                            self.search_bars[i].message = if i == 0 {
+                                "Search".to_string()
+                            } else {
+                                format!("Search term {} (Optional)", i + 1)
+                            };
+                        }
+                    }
+                }
+                // reset order to be chronological if nothing searched
+                if self.search_bars.len() == 1 && self.search_bars[0].value == "".to_string() {
                     self.update_logs();
                     Command::none()
                 } else {
@@ -1734,13 +1765,21 @@ impl LogTab {
                             v
                         },
                     );
-                    let val = val.to_lowercase();
                     // Note: limit to 15 active search threads as limit on windows
                     Command::batch((0..min(15, self.unsearched_files.len())).into_iter().fold(
                         Vec::with_capacity(15),
                         |mut v, _i| {
                             v.push(Command::perform(
-                                Logger::search_files(val.clone(), self.unsearched_files.remove(0)),
+                                Logger::search_files(
+                                    self.search_bars.iter().fold(
+                                        Vec::with_capacity(self.search_bars.len()),
+                                        |mut v, bar| {
+                                            v.push(bar.value.clone().to_lowercase());
+                                            v
+                                        },
+                                    ),
+                                    self.unsearched_files.remove(0),
+                                ),
                                 LogTabMessage::AddLog,
                             ));
                             v
@@ -1774,13 +1813,15 @@ impl LogTab {
         let logs_count = logs.len();
         Column::new()
             .push(
-                TextInput::new(
-                    &mut self.search_bar_state,
-                    "Search",
-                    &self.search_bar_value,
-                    LogTabMessage::SearchChanged,
-                )
-                .padding(10),
+                self.search_bars
+                    .iter_mut()
+                    .enumerate()
+                    .fold(Column::new(), |col, (i, bar)| {
+                        col.push(
+                            bar.view()
+                                .map(move |msg| LogTabMessage::SearchChanged(i, msg)),
+                        )
+                    }),
             )
             .push(logs.enumerate().fold(Column::new(), |col, (i, log)| {
                 col.push(log.view().map(move |msg| LogTabMessage::Log(i, msg)))
@@ -1806,6 +1847,67 @@ impl LogTab {
                 .horizontal_alignment(HorizontalAlignment::Center)
                 .into()])
             })
+            .into()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchBar {
+    title: String,
+    message: String,
+    num: usize,
+    value: String,
+    state: text_input::State,
+}
+
+#[derive(Clone, Debug)]
+pub enum SearchBarMessage {
+    InputChanged(String),
+}
+
+impl SearchBar {
+    fn new(num: usize) -> Self {
+        SearchBar {
+            title: if num == 0 {
+                "Contains:".to_string()
+            } else {
+                "and:".to_string()
+            },
+            message: if num == 0 {
+                "Search".to_string()
+            } else {
+                format!("Search term {} (Optional)", num + 1)
+            },
+            num,
+            value: String::new(),
+            state: text_input::State::new(),
+        }
+    }
+
+    fn view(&mut self) -> Element<'_, SearchBarMessage> {
+        Row::new()
+            .push((0..self.num).fold(Row::new(), |r, _i| {
+                r.push(Space::with_width(Length::Units(30)))
+            }))
+            .push(
+                Row::new()
+                    .push(
+                        Text::new(&self.title)
+                            .size(20)
+                            .width(Length::Units(80))
+                            .horizontal_alignment(HorizontalAlignment::Right),
+                    )
+                    .padding(10),
+            )
+            .push(
+                TextInput::new(
+                    &mut self.state,
+                    &self.message[..],
+                    &self.value,
+                    SearchBarMessage::InputChanged,
+                )
+                .padding(10),
+            )
             .into()
     }
 }

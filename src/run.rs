@@ -19,6 +19,7 @@ pub struct Run {
     cancel_btn: button::State,
     finish_btn: button::State,
     stop_btn: button::State,
+    stop_confirm_btn: button::State,
     pause_btn: button::State,
     resume_btn: button::State,
     pub search: Vec<String>,
@@ -39,6 +40,7 @@ pub enum RunState {
     Standard,
     BeforeRequiredInput,
     AfterRequiredInput,
+    StopConfirm,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +51,8 @@ pub enum RunMessage {
     Run(()),
     Finish,
     Stop,
-    Pause,
+    RequireStopConfirm,
+    Pause(()),
     Resume,
     TabActive,
     RecipieChanged(String),
@@ -67,6 +70,7 @@ impl Run {
             cancel_btn: button::State::new(),
             finish_btn: button::State::new(),
             stop_btn: button::State::new(),
+            stop_confirm_btn: button::State::new(),
             pause_btn: button::State::new(),
             resume_btn: button::State::new(),
             search: Vec::new(),
@@ -211,10 +215,14 @@ impl Run {
             }
             RunMessage::RequiredBeforeInput(i, msg) => self.required_before_inputs[i].update(msg),
             RunMessage::RequiredAfterInput(i, msg) => self.required_after_inputs[i].update(msg),
+            RunMessage::RequireStopConfirm => {
+                self.state = RunState::StopConfirm;
+                command = Command::perform(do_nothing(), RunMessage::Pause);
+            }
             // handled in main.rs
             RunMessage::Run(_) => {}
             RunMessage::Stop => {}
-            RunMessage::Pause => {}
+            RunMessage::Pause(_) => {}
             RunMessage::Resume => {}
         };
         command
@@ -275,7 +283,7 @@ impl Run {
                                             .horizontal_alignment(HorizontalAlignment::Center)
                                             .font(CQ_MONO),
                                     )
-                                    .on_press(RunMessage::Stop)
+                                    .on_press(RunMessage::RequireStopConfirm)
                                     .padding(10)
                                     .width(Length::Units(200)),
                                 )
@@ -287,7 +295,7 @@ impl Run {
                                             .size(30)
                                             .horizontal_alignment(HorizontalAlignment::Center),
                                     )
-                                    .on_press(RunMessage::Pause)
+                                    .on_press(RunMessage::Pause(()))
                                     .padding(10)
                                     .width(Length::Units(200)),
                                 ),
@@ -300,7 +308,7 @@ impl Run {
                                             .horizontal_alignment(HorizontalAlignment::Center)
                                             .font(CQ_MONO),
                                     )
-                                    .on_press(RunMessage::Stop)
+                                    .on_press(RunMessage::RequireStopConfirm)
                                     .padding(10)
                                     .width(Length::Units(200)),
                                 )
@@ -325,7 +333,7 @@ impl Run {
                                             .horizontal_alignment(HorizontalAlignment::Center)
                                             .font(CQ_MONO),
                                     )
-                                    .on_press(RunMessage::Stop)
+                                    .on_press(RunMessage::RequireStopConfirm)
                                     .padding(10)
                                     .width(Length::Units(200)),
                                 )
@@ -372,6 +380,45 @@ impl Run {
                     .push(recipie)
                     .align_items(Align::Center);
 
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            RunState::StopConfirm => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(
+                        Text::new("Paused").font(CQ_MONO).size(40)    
+                    )
+                    .push(Text::new("Are you sure you want to stop this Recipie?\nYou cannot return to this point in the recipie if you do.").horizontal_alignment(HorizontalAlignment::Center).size(30))
+                            .push(Row::with_children(vec![
+                                Space::with_width(Length::Fill).into(),
+                                Button::new(
+                                    &mut self.stop_confirm_btn,
+                                    Text::new("Yes, stop now.")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .on_press(RunMessage::Stop)
+                                .padding(10)
+                                .width(Length::Units(200))
+                                .into(),
+                                Space::with_width(Length::Units(100)).into(),
+                                Button::new(
+                                    &mut self.cancel_btn,
+                                    Text::new("No, just pause.")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .on_press(RunMessage::Cancel)
+                                .width(Length::Units(200))
+                                .padding(10)
+                                .into(),
+                                Space::with_width(Length::Fill).into(),
+                            ]));
                 Scrollable::new(&mut self.scroll)
                     .padding(40)
                     .push(Container::new(content).width(Length::Fill).center_x())

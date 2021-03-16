@@ -700,7 +700,7 @@ impl<'a> Application for Bathtub {
                             );
                         }
                     }
-                    Message::Run(RunMessage::Pause) => {
+                    Message::Run(RunMessage::Pause(_)) => {
                         state
                             .logger
                             .send_line(format!("{} => Paused by user", Local::now().to_rfc2822()))
