@@ -2,16 +2,21 @@ use super::actions::Actions;
 use super::advanced::{SaveBar, SaveBarMessage};
 use super::logger::Logger;
 use super::nodes::Nodes;
+use super::run::do_nothing;
 use super::run::Step;
 use crate::CQ_MONO;
+use chrono::prelude::*;
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Container, Element,
-    Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
+    button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command, Container,
+    Element, Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
     VerticalAlignment,
 };
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::Path;
 use std::rc::Rc;
 
 pub struct Build {
@@ -54,6 +59,7 @@ pub enum BuildMessage {
     RequiredInputTab,
     AddInputBefore,
     AddInputAfter,
+    Saved(()),
 }
 
 impl Build {
@@ -86,7 +92,8 @@ impl Build {
         }
     }
 
-    pub fn update(&mut self, message: BuildMessage) {
+    pub fn update(&mut self, message: BuildMessage) -> Command<BuildMessage> {
+        let mut command = Command::none();
         match message {
             BuildMessage::StepMessage(i, StepMessage::Delete) => {
                 self.modified_steps.remove(i);
@@ -251,20 +258,73 @@ impl Build {
                         ),
                     };
                     // TODO: add error is unable to build toml
-                    let save_toml = toml::to_string_pretty(&save_data).unwrap();
-                    fs::write(
-                        format!("./recipes/{}.toml", &self.recipe_name_value),
-                        save_toml,
-                    )
-                    .expect("unable to save file");
+                    let old_recipe = fs::read_to_string(Path::new(&format!(
+                        "./recipes/{}",
+                        &self.recipe_name_value
+                    )))
+                    .unwrap_or(String::new());
+                    let new_recipe = toml::to_string_pretty(&save_data).unwrap();
+                    match OpenOptions::new().write(true).open(Path::new(&format!(
+                        "./recipes/{}.toml",
+                        &self.recipe_name_value
+                    ))) {
+                        Ok(mut file) => {
+                            // file already exists, thus we need to log that recipe was changed
+                            write!(file, "{}", new_recipe).unwrap();
+                            self.logger.set_log_file(format!(
+                                "{}| Build - Changed '{}'",
+                                Local::now().to_rfc2822(),
+                                self.recipe_name_value
+                            ));
+                            self.logger.send_line(String::new()).unwrap();
+                            self.logger
+                                .send_line("Recipe changed from:".to_string())
+                                .unwrap();
+                            self.logger.send_line(old_recipe).unwrap();
+                            self.logger
+                                .send_line("\n\n\nRecipe changed to:".to_string())
+                                .unwrap();
+                            self.logger.send_line(new_recipe).unwrap();
+                        }
+                        Err(_) => {
+                            // new file thus new recipie, log should state created recipe
+                            println!("{:?}", self.recipe_name_value);
+                            let mut file = OpenOptions::new()
+                                .create(true)
+                                .write(true)
+                                .open(Path::new(&format!(
+                                    "./recipes/{}.toml",
+                                    &self.recipe_name_value
+                                )))
+                                .unwrap();
+                            write!(file, "{}", new_recipe).unwrap();
+                            self.logger.set_log_file(format!(
+                                "{}| Build - Created '{}'",
+                                Local::now().to_rfc2822(),
+                                self.recipe_name_value
+                            ));
+                            self.logger.send_line(String::new()).unwrap();
+                            self.logger
+                                .send_line(format!(
+                                    "Created Recipe '{}' as:",
+                                    self.recipe_name_value
+                                ))
+                                .unwrap();
+                            self.logger.send_line(new_recipe).unwrap();
+                        }
+                    }
                     self.steps = self.modified_steps.clone();
                     self.before_inputs = self.modified_before_inputs.clone();
                     self.after_inputs = self.modified_after_inputs.clone();
                     self.unsaved = false;
                     // TODO: Have errors show to user if unable to save
+                    // TODO: Have different logging if name is unique vs changed name
+                    command = Command::perform(do_nothing(), BuildMessage::Saved);
                 }
             }
+            _ => {}
         }
+        command
     }
     pub fn view(&mut self) -> Element<BuildMessage> {
         let save_bar = match self.unsaved {

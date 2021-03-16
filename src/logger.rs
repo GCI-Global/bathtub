@@ -2,7 +2,6 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::path::Path;
 use std::sync::mpsc::{channel, Receiver, SendError, Sender};
-use std::sync::{Arc, Mutex};
 use std::{fs, thread};
 
 use super::advanced::{Log, LOGS};
@@ -24,7 +23,7 @@ impl Logger {
                 } else {
                     match OpenOptions::new()
                         .append(true)
-                        .open(Path::new(&format!("./logs/{}", file_name)))
+                        .open(Path::new(&format!("{}/{}", LOGS, file_name)))
                     {
                         Ok(mut log) => writeln!(log, "{}", line).unwrap(),
                         Err(_) => {
@@ -36,7 +35,7 @@ impl Logger {
                             writeln!(log, "{}", file_name).unwrap();
                             writeln!(
                                 log,
-                                "Current Operating System User: {}",
+                                "Created by Operating System User: {}",
                                 match get_username() {
                                     Some(username) => username,
                                     None => "**Unavailable**".to_string(),

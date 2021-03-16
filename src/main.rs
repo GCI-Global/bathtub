@@ -776,7 +776,14 @@ impl<'a> Application for Bathtub {
                             .update(msg)
                             .map(move |msg| Message::Manual(msg))
                     }
-                    Message::Build(msg) => state.tabs.build.update(msg),
+                    Message::Build(BuildMessage::Saved(_)) => state.tabs.advanced.update_logs(),
+                    Message::Build(msg) => {
+                        command = state
+                            .tabs
+                            .build
+                            .update(msg)
+                            .map(move |msg| Message::Build(msg))
+                    }
                     Message::Run(msg) => {
                         command = state.tabs.run.update(msg).map(move |msg| Message::Run(msg));
                     }
