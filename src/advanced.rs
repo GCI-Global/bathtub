@@ -11,6 +11,7 @@ use iced::{
 use super::build::{delete_icon, down_icon, okay_icon, right_icon};
 use super::grbl::{Command as Cmd, Grbl};
 use chrono::DateTime;
+use itertools::Itertools;
 use regex::Regex;
 use std::cell::RefCell;
 use std::cmp::min;
@@ -519,27 +520,39 @@ impl NodeTab {
     fn new(ref_nodes: Rc<RefCell<Nodes>>, logger: Logger) -> Self {
         // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
         // nested iter if to flatten the 3d nodes
+        let node_pairs = ref_nodes
+            .borrow()
+            .clone()
+            .node
+            .into_iter()
+            .filter(|n| !n.name.contains("_hover") || n.hide)
+            .zip(
+                ref_nodes
+                    .borrow()
+                    .clone()
+                    .node
+                    .into_iter()
+                    .filter(|n| n.name.contains("_hover") || n.hide),
+            );
         let modified_nodes = Rc::new(RefCell::new(Nodes {
-            node: ref_nodes
-                .borrow()
-                .clone()
-                .node
-                .iter_mut()
-                .filter(|n| !n.name.contains("_hover"))
-                .map(|n| Node {
-                    name: n.name.replace("_hover", ""),
-                    neighbors: n
-                        .neighbors
-                        .iter()
-                        .filter(|name| n.name.replace("_hover", "") != name.replace("_hover", ""))
-                        .map(|name| name.replace("_hover", ""))
-                        .collect(),
-                    x: n.x,
-                    y: n.y,
-                    z: n.z,
-                    hide: n.hide,
-                })
-                .collect(),
+            node: node_pairs
+                .into_iter()
+                .fold(Vec::new(), |mut v, (n, n_hover)| {
+                    v.push(Node {
+                        neighbors: n_hover
+                            .neighbors
+                            .into_iter()
+                            .map(|name| name.replace("_hover", ""))
+                            .filter(|name| &n.name != name)
+                            .collect(),
+                        name: n.name,
+                        x: n.x,
+                        y: n.y,
+                        z: n.z,
+                        hide: n.hide,
+                    });
+                    v
+                }),
         }));
         NodeTab {
             unsaved: false,
@@ -633,30 +646,40 @@ impl NodeTab {
             NodeTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
                 // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
                 // nested iter if to flatten the 3d nodes
+                let node_pairs = self
+                    .ref_nodes
+                    .borrow()
+                    .clone()
+                    .node
+                    .into_iter()
+                    .filter(|n| !n.name.contains("_hover") || n.hide)
+                    .zip(
+                        self.ref_nodes
+                            .borrow()
+                            .clone()
+                            .node
+                            .into_iter()
+                            .filter(|n| n.name.contains("_hover") || n.hide),
+                    );
                 self.modified_nodes = Rc::new(RefCell::new(Nodes {
-                    node: self
-                        .ref_nodes
-                        .borrow()
-                        .clone()
-                        .node
-                        .iter_mut()
-                        .filter(|n| !n.name.contains("_hover"))
-                        .map(|n| Node {
-                            name: n.name.replace("_hover", ""),
-                            neighbors: n
-                                .neighbors
-                                .iter()
-                                .filter(|name| {
-                                    name.replace("_hover", "") != n.name.replace("_hover", "")
-                                })
-                                .map(|name| name.replace("_hover", ""))
-                                .collect(),
-                            x: n.x,
-                            y: n.y,
-                            z: n.z,
-                            hide: n.hide,
-                        })
-                        .collect(),
+                    node: node_pairs
+                        .into_iter()
+                        .fold(Vec::new(), |mut v, (n, n_hover)| {
+                            v.push(Node {
+                                neighbors: n_hover
+                                    .neighbors
+                                    .into_iter()
+                                    .map(|name| name.replace("_hover", ""))
+                                    .filter(|name| &n.name != name)
+                                    .collect(),
+                                name: n.name,
+                                x: n.x,
+                                y: n.y,
+                                z: n.z,
+                                hide: n.hide,
+                            });
+                            v
+                        }),
                 }));
                 self.config_nodes = Rc::clone(&self.modified_nodes)
                     .borrow()
