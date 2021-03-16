@@ -152,10 +152,18 @@ impl Advanced {
                 self.grbl_tab.update(msg);
             }
             AdvancedMessage::NodesTab(NodeTabMessage::AddConfigNode) => {
-                self.nodes_tab.update(NodeTabMessage::AddConfigNode);
+                command = self
+                    .nodes_tab
+                    .update(NodeTabMessage::AddConfigNode)
+                    .map(move |msg| AdvancedMessage::NodesTab(msg));
                 self.scroll.scroll_to_bottom();
             }
-            AdvancedMessage::NodesTab(msg) => self.nodes_tab.update(msg),
+            AdvancedMessage::NodesTab(msg) => {
+                command = self
+                    .nodes_tab
+                    .update(msg)
+                    .map(move |msg| AdvancedMessage::NodesTab(msg))
+            }
             AdvancedMessage::ActionsTab(ActionTabMessage::Saved(_)) => self.update_logs(),
             AdvancedMessage::ActionsTab(msg) => {
                 command = self
@@ -521,6 +529,7 @@ pub enum NodeTabMessage {
     AddConfigNode,
     ConfigNode((usize, ConfigNodeMessage)),
     SaveMessage(SaveBarMessage),
+    Saved(()),
 }
 
 impl NodeTab {
@@ -588,7 +597,8 @@ impl NodeTab {
         }
     }
 
-    fn update(&mut self, message: NodeTabMessage) {
+    fn update(&mut self, message: NodeTabMessage) -> Command<NodeTabMessage> {
+        let mut command = Command::none();
         match message {
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::NameChanged(name))) => {
                 self.unsaved = true;
@@ -708,25 +718,38 @@ impl NodeTab {
                 self.unsaved = false;
             }
             NodeTabMessage::SaveMessage(SaveBarMessage::Save) => {
-                let mut rn = self.ref_nodes.borrow_mut();
-                let node = self
-                    .config_nodes
-                    .iter()
-                    .fold(Vec::new(), |mut v, config_node| {
-                        v.push(Node {
-                            name: config_node.name.clone(),
-                            hide: match config_node.hide {
-                                Boolean::False => false,
-                                Boolean::True => true,
-                            },
-                            x: config_node.x.parse().unwrap(),
-                            y: config_node.y.parse().unwrap(),
-                            z: config_node.z.parse().unwrap(),
-                            neighbors: Vec::new(),
-                        });
-                        v
-                    });
-                *rn = Nodes { node }
+                let mut nodes = self.modified_nodes.borrow().clone();
+                nodes.add_height_nodes();
+                let old_toml = toml::to_string_pretty(&Nodes {
+                    node: self
+                        .ref_nodes
+                        .borrow()
+                        .clone()
+                        .node
+                        .into_iter()
+                        .filter(|n| !n.name.contains("_hover"))
+                        .collect(),
+                })
+                .unwrap_or(String::new());
+                let new_toml = toml::to_string_pretty(&*self.modified_nodes.borrow()).unwrap();
+                fs::write("./config/baths.toml", &new_toml).expect("Unable to save baths");
+
+                *self.ref_nodes.borrow_mut() = nodes;
+                self.logger.set_log_file(format!(
+                    "{}| Advanced (Nodes) - Save",
+                    Local::now().to_rfc2822()
+                ));
+                self.logger.send_line(String::new()).unwrap();
+                self.logger
+                    .send_line("Updated 'Nodes' from:".to_string())
+                    .unwrap();
+                self.logger.send_line(old_toml).unwrap();
+                self.logger
+                    .send_line("\n\nUpdated 'Nodes' to:".to_string())
+                    .unwrap();
+                self.logger.send_line(new_toml).unwrap();
+                command = Command::perform(do_nothing(), NodeTabMessage::Saved);
+                self.unsaved = false;
             }
             NodeTabMessage::AddConfigNode => {
                 self.unsaved = true;
@@ -772,7 +795,9 @@ impl NodeTab {
                     Rc::clone(&self.modified_nodes),
                 ));
             }
-        }
+            _ => {}
+        };
+        command
     }
 
     fn view(&mut self) -> Element<'_, NodeTabMessage> {
