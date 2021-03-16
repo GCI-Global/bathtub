@@ -1,131 +1,145 @@
-# Node data
-# The positioning of the baths relative to the home ($H) can be adjusted by changing the x, y and z values below (in cm).
-# Negative y is towards the front, negative x is towards the right, and negative z is down
-# The specified coord needs to be the position lowered into the bath
-# The application assumes that z = 0 is a safe position to move above the bath
-#
-# The neighbors are the safe paths to move to. The application tells grbl to move to z = 0 before moving between baths.
-# Imagine a chess board above the baths, the neighbors are all of the moves that the chess peice (the robot head) can move to from that position. An unlimited number of neighbors can be given, and the application will determine the best path at runtime.
-# It is recommended to had as few neighbors as possible, imagine a line of baths. While it would make sense to have the first bath link to the last one as a neighbor, it complicates the run-time prosess. Each bath should only have is neighbors be the one directly next to it. i.e. the first and last baths have 1 neighbor, and all of the intermediate baths have 2 neighbors.
-#
-# Ordering baths sequentialy in the config is recommended, but not needed. The UI buttons and logic are built from the give x,y coords
-
 [[node]]
-name = "MCL-16"
+name = 'MCL-16'
 x = -1.1
 y = -0.3
 z = -10.1
 hide = false
-neighbors = ["Rinse 1"]
+neighbors = ['Rinse 1']
 
 [[node]]
-name = "HNO₃"
+name = 'HNO₃'
 x = -11.2
 y = -0.3
 z = -10.4
 hide = false
-neighbors = ["Rinse 2"]
+neighbors = ['Rinse 2']
 
 [[node]]
-name = "Zn"
+name = 'Zn'
 x = -21.2
 y = -0.3
 z = -10.3
 hide = false
-neighbors = ["Rinse 3"]
+neighbors = ['Rinse 3']
 
 [[node]]
-name = "HF"
+name = 'HF'
 x = -31.3
 y = -0.3
 z = -10.6
 hide = false
-neighbors = ["Rinse 4"]
+neighbors = ['Rinse 4']
 
 [[node]]
-name = "Ni"
+name = 'Ni'
 x = -41.3
 y = -0.3
 z = -10.5
 hide = false
-neighbors = ["Rinse 5"]
+neighbors = ['Rinse 5']
 
 [[node]]
-name = "Pd"
+name = 'Pd'
 x = -51.4
 y = -0.3
 z = -10.4
 hide = false
-neighbors = ["Rinse 6"]
+neighbors = ['Rinse 6']
 
 [[node]]
-name = "Au"
+name = 'Au'
 x = -61.5
 y = -0.3
 z = -10.2
 hide = false
-neighbors = ["Rinse 7"]
+neighbors = ['Rinse 7']
 
 [[node]]
-name = "HOME"
+name = 'HOME'
 x = -1.0
 y = -14.5
 z = -1.0
 hide = true
-neighbors = ["Rinse 1_hover"]
+neighbors = ['Rinse 1']
 
 [[node]]
-name = "Rinse 1"
+name = 'Rinse 1'
 x = -1.0
 y = -13.1
 z = -10.0
 hide = false
-neighbors = ["MCL-16", "Rinse 2"]
+neighbors = [
+    'MCL-16',
+    'Rinse 2',
+]
 
 [[node]]
-name = "Rinse 2"
+name = 'Rinse 2'
 x = -11.1
 y = -13.1
 z = -10.0
 hide = false
-neighbors = ["HNO₃", "Rinse 1", "Rinse 3"]
+neighbors = [
+    'HNO₃',
+    'Rinse 1',
+    'Rinse 3',
+]
 
 [[node]]
-name = "Rinse 3"
+name = 'Rinse 3'
 x = -21.1
 y = -13.1
 z = -10.0
 hide = false
-neighbors = ["Zn", "Rinse 2", "Rinse 4"]
+neighbors = [
+    'Zn',
+    'Rinse 2',
+    'Rinse 4',
+]
 
 [[node]]
-name = "Rinse 4"
+name = 'Rinse 4'
 x = -31.2
 y = -13.1
 z = -10.0
 hide = false
-neighbors = ["HF", "Rinse 3", "Rinse 5"]
+neighbors = [
+    'HF',
+    'Rinse 3',
+    'Rinse 5',
+]
 
 [[node]]
-name = "Rinse 5"
+name = 'Rinse 5'
 x = -41.3
 y = -13.1
 z = -10.0
 hide = false
-neighbors = ["Ni", "Rinse 4", "Rinse 6"]
+neighbors = [
+    'Ni',
+    'Rinse 4',
+    'Rinse 6',
+]
 
 [[node]]
-name = "Rinse 6"
+name = 'Rinse 6'
 x = -51.4
 y = -13.1
 z = -10.0
 hide = false
-neighbors = ["Pd", "Rinse 5", "Rinse 7"]
+neighbors = [
+    'Pd',
+    'Rinse 5',
+    'Rinse 7',
+]
 
 [[node]]
-name = "Rinse 7"
+name = 'Rinse 7'
 x = -61.5
 y = -13.1
 z = -10.0
 hide = false
-neighbors = ["Au", "Rinse 6"]
+neighbors = [
+    'Au',
+    'Rinse 6',
+]

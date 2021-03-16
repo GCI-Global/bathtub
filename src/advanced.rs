@@ -158,6 +158,7 @@ impl Advanced {
                     .map(move |msg| AdvancedMessage::NodesTab(msg));
                 self.scroll.scroll_to_bottom();
             }
+            AdvancedMessage::NodesTab(NodeTabMessage::Saved(_)) => self.update_logs(),
             AdvancedMessage::NodesTab(msg) => {
                 command = self
                     .nodes_tab
@@ -570,28 +571,29 @@ impl NodeTab {
                     v
                 }),
         }));
+        let config_nodes = Rc::clone(&modified_nodes)
+            .borrow()
+            .node
+            .iter()
+            .filter(|n| !n.name.contains("_hover"))
+            .fold(Vec::new(), |mut v, n| {
+                v.push(ConfigNode::new(
+                    n.name.clone(),
+                    n.hide,
+                    n.x,
+                    n.y,
+                    n.z,
+                    n.neighbors.clone(),
+                    Rc::clone(&modified_nodes),
+                ));
+                v
+            });
         NodeTab {
             unsaved: false,
             save_bar: SaveBar::new(),
             ref_nodes: Rc::clone(&ref_nodes),
             modified_nodes: Rc::clone(&modified_nodes),
-            config_nodes: Rc::clone(&modified_nodes)
-                .borrow()
-                .node
-                .iter()
-                .filter(|n| !n.name.contains("_hover"))
-                .fold(Vec::new(), |mut v, n| {
-                    v.push(ConfigNode::new(
-                        n.name.clone(),
-                        n.hide,
-                        n.x,
-                        n.y,
-                        n.z,
-                        n.neighbors.clone(),
-                        Rc::clone(&modified_nodes),
-                    ));
-                    v
-                }),
+            config_nodes,
             add_config_node_btn: button::State::new(),
             logger,
         }

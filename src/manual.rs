@@ -1,5 +1,5 @@
 use super::grbl::{Command as Cmd, Grbl};
-use super::nodes::{Node, NodeGrid2d};
+use super::nodes::{Node, Nodes};
 use crate::CQ_MONO;
 use chrono::prelude::*;
 use iced::{
@@ -7,10 +7,13 @@ use iced::{
     HorizontalAlignment, Length, Row, Scrollable, Space, Text, TextInput,
 };
 use regex::Regex;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 pub struct Manual {
     pub scroll: scrollable::State,
-    pub bath_btns: Vec<Vec<Option<(Node, button::State)>>>,
+    pub bath_btns: Vec<Vec<Option<(usize, button::State)>>>,
     pub stop_btn: button::State,
     pub status: String,
     pub hover: bool,
@@ -21,6 +24,7 @@ pub struct Manual {
     terminal_responses: Vec<String>,
     terminal_input_state: text_input::State,
     terminal_input_value: String,
+    ref_nodes: Rc<RefCell<Nodes>>,
     grbl: Grbl,
 }
 
@@ -43,18 +47,17 @@ pub enum ManualMessage {
 }
 
 impl Manual {
-    pub fn new(node_grid2d: NodeGrid2d, grbl: Grbl) -> Self {
+    pub fn new(ref_nodes: Rc<RefCell<Nodes>>, grbl: Grbl) -> Self {
+        let grid_red = grid(Rc::clone(&ref_nodes));
+        println!("{}", grid_red.len());
         Manual {
             scroll: scrollable::State::new(),
-            bath_btns: node_grid2d
-                .grid
+            bath_btns: grid(Rc::clone(&ref_nodes))
                 .into_iter()
                 .fold(Vec::new(), |mut vec, axis| {
                     vec.push(axis.into_iter().fold(Vec::new(), |mut axis_vec, node| {
                         if let Some(n) = node {
-                            if !n.hide {
-                                axis_vec.push(Some((n, button::State::new())));
-                            }
+                            axis_vec.push(Some((n, button::State::new())));
                         } else {
                             axis_vec.push(None);
                         }
@@ -65,6 +68,7 @@ impl Manual {
             status: "Click any button\nto start homing cycle".to_string(),
             stop_btn: button::State::new(),
             hover: true,
+            ref_nodes,
             status_regex: Regex::new(
                 r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)",
             )
@@ -142,6 +146,7 @@ impl Manual {
     }
 
     pub fn view(&mut self) -> Element<ManualMessage> {
+        let ref_nodes = self.ref_nodes.borrow();
         let title = Text::new(self.status.clone())
             .width(Length::Fill)
             .size(40)
@@ -179,36 +184,36 @@ impl Manual {
 
         match self.state {
             ManualState::Grid => {
-                let button_grid = self
-                    .bath_btns
-                    .iter_mut()
-                    .fold(Column::new(), |column, grid| {
-                        column.push(
-                            grid.into_iter()
-                                .fold(Row::new(), |row, node_tup| {
-                                    if let Some(nt) = node_tup {
-                                        row.push(
-                                            Button::new(
-                                                &mut nt.1,
-                                                Text::new(&nt.0.name)
-                                                    .horizontal_alignment(
-                                                        HorizontalAlignment::Center,
-                                                    )
-                                                    .font(CQ_MONO),
+                let button_grid =
+                    self.bath_btns
+                        .iter_mut()
+                        .fold(Column::new(), |column, grid| {
+                            column.push(
+                                grid.into_iter()
+                                    .fold(Row::new(), |row, node_tup| {
+                                        if let Some(nt) = node_tup {
+                                            row.push(
+                                                Button::new(
+                                                    &mut nt.1,
+                                                    Text::new(ref_nodes.node[nt.0].name.clone())
+                                                        .horizontal_alignment(
+                                                            HorizontalAlignment::Center,
+                                                        )
+                                                        .font(CQ_MONO),
+                                                )
+                                                .padding(15)
+                                                .width(Length::Fill)
+                                                .on_press(ManualMessage::ButtonPressed(
+                                                    ref_nodes.node[nt.0].name.clone(),
+                                                )),
                                             )
-                                            .padding(15)
-                                            .width(Length::Fill)
-                                            .on_press(
-                                                ManualMessage::ButtonPressed(nt.0.name.clone()),
-                                            ),
-                                        )
-                                    } else {
-                                        row.push(Column::new().width(Length::Fill))
-                                    }
-                                })
-                                .padding(3),
-                        )
-                    });
+                                        } else {
+                                            row.push(Space::with_width(Length::Fill))
+                                        }
+                                    })
+                                    .padding(3),
+                            )
+                        });
 
                 let modifiers = Row::new()
                     .push(
@@ -281,4 +286,52 @@ impl Manual {
 
 async fn command_please(grbl: Grbl) -> Option<Cmd> {
     grbl.pop_command()
+}
+
+// given (x, y) coord get name or none
+fn grid(ref_nodes: Rc<RefCell<Nodes>>) -> Vec<Vec<Option<usize>>> {
+    let rn = ref_nodes.borrow();
+    let mut nodes = rn.node.iter().enumerate().fold(Vec::new(), |mut v, n| {
+        v.push(n);
+        v
+    });
+    nodes.retain(|n| !n.1.name.contains("_hover") && !n.1.hide);
+    nodes.sort_by(|a, b| (b.1.y).total_cmp(&a.1.y));
+    let mut test_value = nodes[0].1.y;
+    let mut push_vec: usize = 0;
+    // break into separate row on significant change in x values
+    let mut build_grid = nodes.into_iter().fold(
+        vec![Vec::new()],
+        |mut v: Vec<Vec<Option<(usize, &Node)>>>, n| {
+            if (n.1.y - test_value).abs() < 1.0 {
+                v[push_vec].push(Some(n));
+            } else {
+                push_vec += 1;
+                test_value = n.1.y;
+                v.push(vec![Some(n)])
+            };
+            v
+        },
+    );
+    for row in &mut build_grid {
+        row.sort_by(|a, b| (b.as_ref().unwrap().1.x).total_cmp(&a.as_ref().unwrap().1.x));
+    }
+    // normalize row lengths with 'None' values
+    let longest_axis = build_grid
+        .iter()
+        .max_by(|a, b| a.len().cmp(&b.len()))
+        .unwrap()
+        .clone();
+    build_grid.into_iter().fold(Vec::new(), |mut grid, row| {
+        let mut new_row = Vec::with_capacity(row.len());
+        for i in 0..longest_axis.len() {
+            if longest_axis[i].as_ref().unwrap().1.x - row[i].as_ref().unwrap().1.x > 1.0 {
+                new_row.push(None);
+            } else {
+                new_row.push(Some(row[i].unwrap().0));
+            }
+        }
+        grid.push(new_row);
+        grid
+    })
 }

@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use toml;
@@ -10,7 +10,7 @@ pub struct Actions {
 }
 
 // Baths are Deserialized from config file, nodes are a generated 3d graph on nodes from the 2d
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Node {
     pub name: String,
     pub x: f32,
@@ -26,7 +26,7 @@ impl std::fmt::Display for Node {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Nodes {
     pub node: Vec<Node>,
 }
@@ -40,10 +40,10 @@ impl Nodes {
     pub fn new() -> Nodes {
         Nodes { node: vec![] }
     }
-    fn to_nodes(nodes: Nodes) -> Nodes {
+    pub fn add_height_nodes(&mut self) {
         let mut new_nodes: Vec<Node> = vec![];
         //let bath_iter = baths.bath.into_iter();
-        for node in nodes.node {
+        for node in &mut self.node {
             // create node for hovering
             if !node.hide {
                 // if hidden then we do not want to auto-generate realted nodes
@@ -71,13 +71,13 @@ impl Nodes {
                 z: node.z,
                 hide: node.hide,
                 neighbors: if node.hide {
-                    node.neighbors
+                    node.neighbors.clone()
                 } else {
                     vec![format!("{}_hover", node.name)]
                 },
             })
         }
-        Nodes { node: new_nodes }
+        self.node = new_nodes;
     }
 }
 
@@ -143,7 +143,9 @@ impl NodeGrid2d {
 }
 
 pub fn gen_nodes() -> Result<Nodes, ()> {
-    Ok(Nodes::to_nodes(get_baths_config()?))
+    let mut nodes = get_baths_config()?;
+    nodes.add_height_nodes();
+    Ok(nodes)
 }
 
 pub fn get_nodemap(nodes: Nodes) -> HashMap<String, usize> {

@@ -476,7 +476,6 @@ enum TabState {
 struct LoadState {
     nodes: Nodes,
     node_map: HashMap<String, usize>,
-    node_grid2d: NodeGrid2d,
     actions: Actions,
 }
 
@@ -554,7 +553,7 @@ impl<'a> Application for Bathtub {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
                             tabs: Tabs {
-                                manual: Manual::new(state.node_grid2d, grbl.clone()),
+                                manual: Manual::new(Rc::clone(&ref_node), grbl.clone()),
                                 run: Run::new(Arc::clone(&recipe_state), logger.clone()),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
@@ -895,16 +894,10 @@ impl<'a> Application for Bathtub {
 }
 
 impl LoadState {
-    fn new(
-        nodes: Nodes,
-        node_map: HashMap<String, usize>,
-        node_grid2d: NodeGrid2d,
-        actions: Actions,
-    ) -> LoadState {
+    fn new(nodes: Nodes, node_map: HashMap<String, usize>, actions: Actions) -> LoadState {
         LoadState {
             nodes,
             node_map,
-            node_grid2d,
             actions,
         }
     }
@@ -915,7 +908,10 @@ impl LoadState {
         let mut nodes = Nodes { node: Vec::new() };
         for i in 0..3 {
             match nodes::gen_nodes() {
-                Ok(n) => nodes = n,
+                Ok(n) => {
+                    nodes = n;
+                    break;
+                }
                 Err(_err) if i == 2 => return Err(LoadError::Nodes),
                 Err(_) => thread::sleep(Duration::from_millis(50)),
             };
@@ -923,7 +919,6 @@ impl LoadState {
         Ok(LoadState::new(
             nodes.clone(),
             nodes::get_nodemap(nodes.clone()),
-            NodeGrid2d::from_nodes(nodes),
             actions::gen_actions(),
         ))
     }
