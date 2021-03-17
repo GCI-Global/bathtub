@@ -1,4 +1,5 @@
 use super::grbl::{Command as Cmd, Grbl};
+use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use crate::CQ_MONO;
 use chrono::prelude::*;
@@ -25,6 +26,7 @@ pub struct Manual {
     terminal_input_value: String,
     ref_nodes: Rc<RefCell<Nodes>>,
     grbl: Grbl,
+    logger: Logger,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +48,7 @@ pub enum ManualMessage {
 }
 
 impl Manual {
-    pub fn new(ref_nodes: Rc<RefCell<Nodes>>, grbl: Grbl) -> Self {
+    pub fn new(ref_nodes: Rc<RefCell<Nodes>>, grbl: Grbl, logger: Logger) -> Self {
         //let grid_red = grid(Rc::clone(&ref_nodes));
         Manual {
             scroll: scrollable::State::new(),
@@ -66,6 +68,7 @@ impl Manual {
             terminal_input_state: text_input::State::new(),
             terminal_input_value: String::new(),
             grbl,
+            logger,
         }
     }
 
@@ -119,6 +122,20 @@ impl Manual {
                 } else if &val[..] == "$$" || &val[..] == "$I" {
                     self.terminal_responses.insert(0,format!("{}| '{}' => View and edit settings withing Bathtub! Advanced Tab => Grbl ;)", Local::now().to_rfc2822(), val))
                 } else {
+                    self.logger.set_log_file(format!(
+                        "{}| Manual (Terminal) - {}",
+                        Local::now().to_rfc2822(),
+                        val
+                    ));
+                    self.logger.send_line(String::new()).unwrap();
+                    self.logger
+                        .send_line(format!(
+                            "{}| Manual (Terminal) - {}",
+                            Local::now().to_rfc2822(),
+                            val
+                        ))
+                        .unwrap();
+
                     self.grbl.push_command(Cmd::new(val));
                     return Command::perform(
                         command_please(self.grbl.clone()),

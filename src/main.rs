@@ -553,7 +553,11 @@ impl<'a> Application for Bathtub {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
                             tabs: Tabs {
-                                manual: Manual::new(Rc::clone(&ref_node), grbl.clone()),
+                                manual: Manual::new(
+                                    Rc::clone(&ref_node),
+                                    grbl.clone(),
+                                    logger.clone(),
+                                ),
                                 run: Run::new(Arc::clone(&recipe_state), logger.clone()),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
@@ -629,6 +633,10 @@ impl<'a> Application for Bathtub {
                             Arc::clone(&state.next_nodes),
                             state.grbl.clone(),
                         );
+                    }
+                    Message::Manual(ManualMessage::ThankYou(cmd)) => {
+                        state.tabs.advanced.update_logs();
+                        state.tabs.manual.update(ManualMessage::ThankYou(cmd));
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         let (recipe_state, _) = &*state.recipe_state;
