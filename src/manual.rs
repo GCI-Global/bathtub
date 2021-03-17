@@ -322,7 +322,8 @@ fn grid(rn: &Nodes) -> Vec<Vec<Option<usize>>> {
         let mut new_row = Vec::with_capacity(max_x as usize);
         let mut row_index = 0;
         for i in 0..max_x as usize {
-            if row_index >= row.len() || i as f32 - row[row_index].as_ref().unwrap().1.x.abs() < 1.0
+            if row_index >= row.len()
+                || i as f32 - row[row_index].as_ref().unwrap().1.x.abs() <= 1.0
             {
                 new_row.push(None);
             } else {

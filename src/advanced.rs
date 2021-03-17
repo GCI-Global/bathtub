@@ -658,6 +658,13 @@ impl NodeTab {
                 self.unsaved = true;
                 self.config_nodes[i].update(ConfigNodeMessage::Edit)
             }
+            NodeTabMessage::ConfigNode((i, ConfigNodeMessage::HideChanged(b))) => {
+                (*self.modified_nodes.borrow_mut().node)[i].hide = match b {
+                    Boolean::True => true,
+                    Boolean::False => false,
+                };
+                self.config_nodes[i].update(ConfigNodeMessage::HideChanged(b));
+            }
             NodeTabMessage::ConfigNode((i, msg)) => {
                 self.unsaved = true;
                 self.config_nodes[i].update(msg);
@@ -721,6 +728,19 @@ impl NodeTab {
             }
             NodeTabMessage::SaveMessage(SaveBarMessage::Save) => {
                 let mut nodes = self.modified_nodes.borrow().clone();
+                for i in 0..self.config_nodes.len() {
+                    nodes.node[i].neighbors = self.config_nodes[i]
+                        .neighbors_pick_lists
+                        .iter()
+                        .fold(Vec::new(), |mut v, pick_list| {
+                            v.push(pick_list.value.clone().unwrap());
+                            v
+                        });
+                    nodes.node[i].x = self.config_nodes[i].x.parse().unwrap();
+                    nodes.node[i].y = self.config_nodes[i].y.parse().unwrap();
+                    nodes.node[i].z = self.config_nodes[i].z.parse().unwrap();
+                }
+                let new_toml = toml::to_string_pretty(&nodes).unwrap();
                 nodes.add_height_nodes();
                 let old_toml = toml::to_string_pretty(&Nodes {
                     node: self
@@ -733,10 +753,9 @@ impl NodeTab {
                         .collect(),
                 })
                 .unwrap_or(String::new());
-                let new_toml = toml::to_string_pretty(&*self.modified_nodes.borrow()).unwrap();
                 fs::write("./config/baths.toml", &new_toml).expect("Unable to save baths");
 
-                *self.ref_nodes.borrow_mut() = nodes;
+                *self.ref_nodes.borrow_mut() = nodes.clone();
                 self.logger.set_log_file(format!(
                     "{}| Advanced (Nodes) - Save",
                     Local::now().to_rfc2822()
