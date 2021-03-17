@@ -1,20 +1,4 @@
 [[node]]
-name = 'MCL-16'
-x = -1.1
-y = -0.3
-z = -10.1
-hide = false
-neighbors = ['Rinse 1']
-
-[[node]]
-name = 'HNO₃'
-x = -11.2
-y = -0.3
-z = -10.4
-hide = false
-neighbors = ['Rinse 2']
-
-[[node]]
 name = 'Zn'
 x = -21.2
 y = -0.3
@@ -37,22 +21,6 @@ y = -0.3
 z = -10.5
 hide = false
 neighbors = ['Rinse 5']
-
-[[node]]
-name = 'Pd'
-x = -51.4
-y = -0.3
-z = -10.4
-hide = false
-neighbors = ['Rinse 6']
-
-[[node]]
-name = 'Au'
-x = -61.5
-y = -0.3
-z = -10.2
-hide = false
-neighbors = ['Rinse 7']
 
 [[node]]
 name = 'HOME'
@@ -95,30 +63,6 @@ neighbors = [
     'Zn',
     'Rinse 2',
     'Rinse 4',
-]
-
-[[node]]
-name = 'Rinse 4'
-x = -31.2
-y = -13.1
-z = -10.0
-hide = false
-neighbors = [
-    'HF',
-    'Rinse 3',
-    'Rinse 5',
-]
-
-[[node]]
-name = 'Rinse 5'
-x = -41.3
-y = -13.1
-z = -10.0
-hide = false
-neighbors = [
-    'Ni',
-    'Rinse 4',
-    'Rinse 6',
 ]
 
 [[node]]

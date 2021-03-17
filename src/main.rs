@@ -9,13 +9,13 @@ mod nodes;
 mod paths;
 mod run;
 use actions::Actions;
-use advanced::{Advanced, AdvancedMessage};
+use advanced::{Advanced, AdvancedMessage, NodeTabMessage};
 use build::{Build, BuildMessage};
 use chrono::prelude::*;
 use grbl::{Command as Cmd, Grbl, Status};
 use logger::Logger;
 use manual::{Manual, ManualMessage};
-use nodes::{Node, NodeGrid2d, Nodes};
+use nodes::{Node, Nodes};
 use regex::Regex;
 use run::Step;
 use run::{Run, RunMessage, RunState};
@@ -785,6 +785,14 @@ impl<'a> Application for Bathtub {
                     }
                     Message::Run(msg) => {
                         command = state.tabs.run.update(msg).map(move |msg| Message::Run(msg));
+                    }
+                    Message::Advanced(AdvancedMessage::NodesTab(NodeTabMessage::Saved(_))) => {
+                        state.tabs.manual.update_grid();
+                        command = state
+                            .tabs
+                            .advanced
+                            .update(AdvancedMessage::NodesTab(NodeTabMessage::Saved(())))
+                            .map(move |msg| Message::Advanced(msg));
                     }
                     Message::Advanced(msg) => {
                         command = state

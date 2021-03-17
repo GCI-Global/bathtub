@@ -8,7 +8,6 @@ use iced::{
 };
 use regex::Regex;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 pub struct Manual {
@@ -48,23 +47,10 @@ pub enum ManualMessage {
 
 impl Manual {
     pub fn new(ref_nodes: Rc<RefCell<Nodes>>, grbl: Grbl) -> Self {
-        let grid_red = grid(Rc::clone(&ref_nodes));
-        println!("{}", grid_red.len());
+        //let grid_red = grid(Rc::clone(&ref_nodes));
         Manual {
             scroll: scrollable::State::new(),
-            bath_btns: grid(Rc::clone(&ref_nodes))
-                .into_iter()
-                .fold(Vec::new(), |mut vec, axis| {
-                    vec.push(axis.into_iter().fold(Vec::new(), |mut axis_vec, node| {
-                        if let Some(n) = node {
-                            axis_vec.push(Some((n, button::State::new())));
-                        } else {
-                            axis_vec.push(None);
-                        }
-                        axis_vec
-                    }));
-                    vec
-                }),
+            bath_btns: get_grid_btns(Rc::clone(&ref_nodes)),
             status: "Click any button\nto start homing cycle".to_string(),
             stop_btn: button::State::new(),
             hover: true,
@@ -282,6 +268,10 @@ impl Manual {
             }
         }
     }
+
+    pub fn update_grid(&mut self) {
+        self.bath_btns = get_grid_btns(Rc::clone(&self.ref_nodes));
+    }
 }
 
 async fn command_please(grbl: Grbl) -> Option<Cmd> {
@@ -289,8 +279,8 @@ async fn command_please(grbl: Grbl) -> Option<Cmd> {
 }
 
 // given (x, y) coord get name or none
-fn grid(ref_nodes: Rc<RefCell<Nodes>>) -> Vec<Vec<Option<usize>>> {
-    let rn = ref_nodes.borrow();
+fn grid(rn: &Nodes) -> Vec<Vec<Option<usize>>> {
+    //let rn = ref_nodes.borrow();
     let mut nodes = rn.node.iter().enumerate().fold(Vec::new(), |mut v, n| {
         v.push(n);
         v
@@ -313,25 +303,62 @@ fn grid(ref_nodes: Rc<RefCell<Nodes>>) -> Vec<Vec<Option<usize>>> {
             v
         },
     );
+    // sort rows by x values
     for row in &mut build_grid {
         row.sort_by(|a, b| (b.as_ref().unwrap().1.x).total_cmp(&a.as_ref().unwrap().1.x));
     }
-    // normalize row lengths with 'None' values
-    let longest_axis = build_grid
+    // assign each node a point on x-axis
+    let max_x = build_grid
         .iter()
-        .max_by(|a, b| a.len().cmp(&b.len()))
+        .map(|row| row.last().unwrap())
+        .max_by(|a, b| b.as_ref().unwrap().1.x.total_cmp(&a.as_ref().unwrap().1.x))
         .unwrap()
-        .clone();
-    build_grid.into_iter().fold(Vec::new(), |mut grid, row| {
-        let mut new_row = Vec::with_capacity(row.len());
-        for i in 0..longest_axis.len() {
-            if longest_axis[i].as_ref().unwrap().1.x - row[i].as_ref().unwrap().1.x > 1.0 {
+        .unwrap()
+        .1
+        .x
+        .abs()
+        .ceil();
+    let mut grid = build_grid.into_iter().fold(Vec::new(), |mut v, row| {
+        let mut new_row = Vec::with_capacity(max_x as usize);
+        let mut row_index = 0;
+        for i in 0..max_x as usize {
+            if row_index >= row.len() || i as f32 - row[row_index].as_ref().unwrap().1.x.abs() < 1.0
+            {
                 new_row.push(None);
             } else {
-                new_row.push(Some(row[i].unwrap().0));
+                new_row.push(Some(row[row_index].unwrap().0));
+                row_index += 1;
             }
         }
-        grid.push(new_row);
-        grid
-    })
+        v.push(new_row);
+        v
+    });
+    // filter empty rows
+    let mut index = 0;
+    while index < grid[0].len() as usize {
+        if grid.iter().all(|row| row[index] == None) {
+            for row in &mut grid {
+                row.remove(index);
+            }
+        } else {
+            index += 1
+        }
+    }
+    grid
+}
+
+fn get_grid_btns(ref_nodes: Rc<RefCell<Nodes>>) -> Vec<Vec<Option<(usize, button::State)>>> {
+    grid(&ref_nodes.borrow())
+        .into_iter()
+        .fold(Vec::new(), |mut vec, axis| {
+            vec.push(axis.into_iter().fold(Vec::new(), |mut axis_vec, node| {
+                if let Some(n) = node {
+                    axis_vec.push(Some((n, button::State::new())));
+                } else {
+                    axis_vec.push(None);
+                }
+                axis_vec
+            }));
+            vec
+        })
 }
