@@ -171,7 +171,7 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
         loop {
             reader.read_until(0xD, &mut buf).unwrap();
             line = str::from_utf8(&buf).unwrap().to_string();
-            if line.contains("$132=") {
+            if line.contains("ok") || line.contains("$132=") {
                 output.push(line);
                 command.response_time = Some(Local::now());
                 // update result, requires filtering because I can't figure out how to read the

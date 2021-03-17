@@ -456,7 +456,7 @@ impl GrblTab {
                 .size(20)
                 .width(Length::Units(505)),
             )
-            .push(
+            .push(if self.settings.len() > 0 {
                 self.settings
                     .iter_mut()
                     .enumerate()
@@ -466,8 +466,14 @@ impl GrblTab {
                                 .view()
                                 .map(move |msg| GrblMessage::SettingChanged(i, msg)),
                         )
-                    }),
-            )
+                    })
+            } else {
+                Column::new().push(
+                    Text::new("Error loading settings.\nPlease press 'GRBL' tab button again.")
+                        .font(CQ_MONO)
+                        .size(30),
+                )
+            })
             .into()
     }
 }
