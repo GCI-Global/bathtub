@@ -14,6 +14,7 @@ use super::grbl::{Command as Cmd, Grbl};
 use chrono::prelude::*;
 use chrono::DateTime;
 use regex::Regex;
+use serde::Serialize;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::fs;
@@ -99,7 +100,7 @@ impl Advanced {
                     loop {
                         if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
                             if cmd.command == "$$".to_string() {
-                                self.grbl_tab.settings = cmd.result.unwrap().lines().fold(
+                                self.grbl_tab.modified_settings = cmd.result.unwrap().lines().fold(
                                     Vec::new(),
                                     |mut v, response| {
                                         let r: Vec<&str> = response.split("=").collect();
@@ -117,9 +118,15 @@ impl Advanced {
                         }
                     }
                 }
+                self.update_logs();
+                if self.grbl_tab.settings.len() == 0 {
+                    self.grbl_tab.settings = self.grbl_tab.modified_settings.clone()
+                }
                 self.state = TabState::Grbl;
             }
             AdvancedMessage::GrblTab(GrblMessage::SaveMessage(SaveBarMessage::Cancel)) => {
+                self.grbl_tab.modified_settings = self.grbl_tab.settings.clone();
+                /*
                 self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
                 loop {
                     if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
@@ -142,6 +149,7 @@ impl Advanced {
                         }
                     }
                 }
+                */
                 self.grbl_tab.unsaved = false;
             }
             AdvancedMessage::TabBar(TabBarMessage::Nodes) => self.state = TabState::Nodes,
@@ -364,10 +372,12 @@ struct GrblTab {
     grbl: Grbl,
     logger: Logger,
     settings: Vec<GrblSetting>,
+    modified_settings: Vec<GrblSetting>,
     version: Option<String>,
     version_release_date: Option<String>,
 }
 
+#[derive(Debug, Clone)]
 struct GrblSetting {
     text: String,
     input_value: String,
@@ -386,7 +396,8 @@ impl GrblTab {
             save_bar: SaveBar::new(),
             unsaved: false,
             grbl,
-            settings,
+            settings: settings.clone(),
+            modified_settings: settings,
             version: None,
             version_release_date: None,
             logger,
@@ -396,16 +407,45 @@ impl GrblTab {
     fn update(&mut self, message: GrblMessage) {
         match message {
             GrblMessage::SettingChanged(i, GrblSettingMessage::TextChanged(val)) => {
-                self.settings[i].input_value = val
+                self.modified_settings[i].input_value = val
             }
             GrblMessage::SaveMessage(SaveBarMessage::Save) => {
-                for setting in &self.settings {
+                for setting in &self.modified_settings {
                     self.grbl.push_command(Cmd::new(format!(
                         "{}={}",
                         &setting.text, &setting.input_value
                     )));
                 }
-                if let Some(final_cmd) = self.settings.last().clone() {
+                self.logger.set_log_file(format!(
+                    "{}| Advanced (Grbl) - Save",
+                    Local::now().to_rfc2822()
+                ));
+                self.logger.send_line(String::new()).unwrap();
+                self.logger
+                    .send_line("Updated 'Grbl' from:".to_string())
+                    .unwrap();
+                self.logger
+                    .send_line(self.settings.iter().fold(String::new(), |mut s, setting| {
+                        s.push_str(&format!("{} = {}\n", setting.text, setting.input_value)[..]);
+                        s
+                    }))
+                    .unwrap();
+                self.logger
+                    .send_line("\n\nUpdated 'Grbl' to:".to_string())
+                    .unwrap();
+                self.logger
+                    .send_line(self.modified_settings.iter().fold(
+                        String::new(),
+                        |mut s, setting| {
+                            s.push_str(
+                                &format!("{} = {}\n", setting.text, setting.input_value)[..],
+                            );
+                            s
+                        },
+                    ))
+                    .unwrap();
+                self.settings = self.modified_settings.clone();
+                if let Some(final_cmd) = self.settings.last() {
                     loop {
                         if let Some(cmd) = self.grbl.pop_command() {
                             if cmd.command
@@ -456,17 +496,17 @@ impl GrblTab {
                 .size(20)
                 .width(Length::Units(505)),
             )
-            .push(if self.settings.len() > 0 {
-                self.settings
-                    .iter_mut()
-                    .enumerate()
-                    .fold(Column::new(), |col, (i, setting)| {
+            .push(if self.modified_settings.len() > 0 {
+                self.modified_settings.iter_mut().enumerate().fold(
+                    Column::new(),
+                    |col, (i, setting)| {
                         col.push(
                             setting
                                 .view()
                                 .map(move |msg| GrblMessage::SettingChanged(i, msg)),
                         )
-                    })
+                    },
+                )
             } else {
                 Column::new().push(
                     Text::new("Error loading settings.\nPlease press 'GRBL' tab button again.")
