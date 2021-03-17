@@ -126,30 +126,6 @@ impl Advanced {
             }
             AdvancedMessage::GrblTab(GrblMessage::SaveMessage(SaveBarMessage::Cancel)) => {
                 self.grbl_tab.modified_settings = self.grbl_tab.settings.clone();
-                /*
-                self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
-                loop {
-                    if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
-                        if cmd.command == "$$".to_string() {
-                            self.grbl_tab.settings =
-                                cmd.result
-                                    .unwrap()
-                                    .lines()
-                                    .fold(Vec::new(), |mut v, response| {
-                                        let r: Vec<&str> = response.split("=").collect();
-                                        if r.len() > 1 {
-                                            v.push(GrblSetting::new(
-                                                format!("{}", r[0]),
-                                                r[1].to_string(),
-                                            ));
-                                        }
-                                        v
-                                    });
-                            break;
-                        }
-                    }
-                }
-                */
                 self.grbl_tab.unsaved = false;
             }
             AdvancedMessage::TabBar(TabBarMessage::Nodes) => self.state = TabState::Nodes,
