@@ -28,7 +28,7 @@ use std::{fs, mem::discriminant, thread};
 
 use iced::{
     button, time, Align, Application, Button, Column, Command, Container, Element, Font,
-    HorizontalAlignment, Length, Row, Settings, Space, Subscription, Text,
+    HorizontalAlignment, Length, Row, Settings, Space, Subscription, Text, Clipboard,
 };
 
 pub fn main() -> iced::Result {
@@ -530,7 +530,7 @@ impl<'a> Application for Bathtub {
         }
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    fn update(&mut self, message: Message, _clipboard: &mut Clipboard) -> Command<Message> {
         let mut command = Command::none(); // setup to allow nested match statements to return different command
         match self {
             Bathtub::Loading => {
