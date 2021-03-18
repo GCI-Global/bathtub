@@ -4,7 +4,7 @@ use regex::Regex;
 use serial::prelude::*;
 use serial::SystemPort;
 use std::io::Write;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{str, thread};
 
@@ -18,6 +18,7 @@ pub struct Grbl {
     pub command_buffer: Arc<Mutex<Vec<Command>>>,
     pub response_buffer: Arc<Mutex<Vec<Command>>>,
     pub mutex_status: Arc<Mutex<Option<Status>>>,
+    ok_tx: mpsc::Sender<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +58,25 @@ impl Grbl {
         let mut rb = self.response_buffer.lock().unwrap();
         rb.pop()
     }
+    pub fn revive(&mut self) -> Result<(), ()> {
+        if self.is_ok() {
+            return Err(());
+        }
+        let grbl = new();
+        thread::sleep(Duration::from_millis(50));
+        if grbl.is_ok() {
+            self.command_buffer = grbl.command_buffer;
+            self.response_buffer = grbl.response_buffer;
+            self.mutex_status = grbl.mutex_status;
+            self.ok_tx = grbl.ok_tx;
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+    pub fn is_ok(&self) -> bool {
+        self.ok_tx.send(()).is_ok()
+    }
     /*
     pub fn clear_queue(&self) {
         let mut cb = self.command_buffer.lock().unwrap();
@@ -86,6 +106,7 @@ pub fn new() -> Grbl {
     let rb_c = Arc::clone(&response_buffer);
     let status = Arc::new(Mutex::new(None));
     let mutex_status = Arc::clone(&status);
+    let (ok_tx, ok_rx) = mpsc::channel();
     thread::spawn(move || {
         let mut port = get_port();
         let mut now = Instant::now();
@@ -94,6 +115,10 @@ pub fn new() -> Grbl {
                 .unwrap();
         let mut current_status = Command::new("?".to_string());
         loop {
+            // does nothing in this thread used to test if died in other threads
+            match ok_rx.try_recv() {
+                _ => {}
+            };
             if now.elapsed().as_millis() >= 100 && cb_c.lock().unwrap().len() == 0 {
                 now = Instant::now();
                 port.flush().unwrap();
@@ -126,16 +151,18 @@ pub fn new() -> Grbl {
         command_buffer,
         response_buffer,
         mutex_status,
+        ok_tx,
     }
 }
 
 // used by new() to get the usb serial connection
 fn get_port() -> SystemPort {
-    let mut try_port = serial::open("/dev/ttyUSB0");
+    let port_type = if cfg!(windows) { "COM" } else { "/dev/ttyUSB" };
+    let mut try_port = serial::open(&format!("{}0", port_type));
     if try_port.is_err() {
         let mut i = 0;
         while try_port.is_err() && i < 1000 {
-            try_port = serial::open(&format!("/dev/ttyUSB{}", i));
+            try_port = serial::open(&format!("{}{}", port_type, i));
             i += 1;
         }
         if i == 1000 {

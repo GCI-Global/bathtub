@@ -25,7 +25,7 @@ pub struct Manual {
     terminal_input_state: text_input::State,
     terminal_input_value: String,
     ref_nodes: Rc<RefCell<Nodes>>,
-    grbl: Grbl,
+    pub grbl: Grbl,
     logger: Logger,
 }
 

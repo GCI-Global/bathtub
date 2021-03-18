@@ -28,7 +28,7 @@ pub struct Advanced {
     scroll: scrollable::State,
     state: TabState,
     tab_bar: TabBar,
-    grbl_tab: GrblTab,
+    pub grbl_tab: GrblTab,
     nodes_tab: NodeTab,
     actions_tab: ActionTab,
     logs_tab: LogTab,
@@ -78,6 +78,9 @@ impl Advanced {
                 if !self.grbl_tab.unsaved {
                     self.grbl_tab.grbl.push_command(Cmd::new("$I".to_string()));
                     loop {
+                        if self.grbl_tab.grbl.queue_len() == 0 {
+                            self.grbl_tab.grbl.push_command(Cmd::new("$I".to_string()));
+                        }
                         if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
                             if cmd.command == "$I".to_string() {
                                 let r = Regex::new(r"[0-9]*\.+[0-9]*[a-z]*").unwrap();
@@ -342,10 +345,10 @@ impl SaveBar {
     }
 }
 
-struct GrblTab {
+pub struct GrblTab {
     save_bar: SaveBar,
     unsaved: bool,
-    grbl: Grbl,
+    pub grbl: Grbl,
     logger: Logger,
     settings: Vec<GrblSetting>,
     modified_settings: Vec<GrblSetting>,

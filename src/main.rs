@@ -52,8 +52,8 @@ struct State {
     next_nodes: Arc<Mutex<Vec<Node>>>,
     actions: Rc<RefCell<Actions>>,
     grbl: Grbl,
-    logger: Logger,
     connected: bool,
+    logger: Logger,
     recipe_regex: Regex,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
@@ -520,11 +520,10 @@ impl<'a> Application for Bathtub {
     fn subscription(&self) -> Subscription<Message> {
         match self {
             Bathtub::Loaded(state) => {
-                if state.connected {
-                    return time::every(std::time::Duration::from_millis(50))
-                        .map(|_| Message::Tick);
+                if state.grbl.is_ok() {
+                    return time::every(Duration::from_millis(50)).map(|_| Message::Tick);
                 } else {
-                    return Subscription::none();
+                    return time::every(Duration::from_secs(3)).map(|_| Message::Tick);
                 }
             }
             _ => Subscription::none(),
@@ -537,15 +536,15 @@ impl<'a> Application for Bathtub {
             Bathtub::Loading => {
                 match message {
                     Message::Loaded(Ok(state)) => {
-                        let ref_node = Rc::new(RefCell::new(state.nodes.clone()));
-                        let ref_actions = Rc::new(RefCell::new(state.actions));
-                        let recipe_state =
-                            Arc::new((Mutex::new(RecipeState::Stopped), Condvar::new()));
                         let current_node = Arc::new(Mutex::new(
                             state.nodes.node
                                 [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
                             .clone(),
                         ));
+                        let ref_node = Rc::new(RefCell::new(state.nodes));
+                        let ref_actions = Rc::new(RefCell::new(state.actions));
+                        let recipe_state =
+                            Arc::new((Mutex::new(RecipeState::Stopped), Condvar::new()));
                         let next_nodes = Arc::new(Mutex::new(Vec::new()));
                         let grbl = grbl::new();
                         let logger = Logger::new();
@@ -578,8 +577,8 @@ impl<'a> Application for Bathtub {
                             current_node: Arc::clone(&current_node),
                             next_nodes: Arc::clone(&next_nodes),
                             actions: Rc::clone(&ref_actions),
-                            connected: false,
                             grbl: grbl.clone(),
+                            connected: true,
                             logger: logger.clone(),
                             grbl_status: None,
                             recipe_regex: Regex::new(r"^[^.]+").unwrap(),
@@ -642,7 +641,6 @@ impl<'a> Application for Bathtub {
                         let (recipe_state, _) = &*state.recipe_state;
                         let mut recipe_state = recipe_state.lock().unwrap();
                         *recipe_state = RecipeState::ManualRunning;
-                        state.connected = true;
                         let log_title =
                             format!("{}| Manual - Going to {}", Local::now().to_rfc2822(), &node);
                         state.logger.set_log_file(log_title.clone());
@@ -686,7 +684,6 @@ impl<'a> Application for Bathtub {
                                 *recipe_state = RecipeState::RecipeRunning;
                                 cvar.notify_all();
                             }
-                            state.connected = true;
                             // we only update the list of logs on load, and when we create a new
                             // log file
                             state.tabs.advanced.update_logs();
@@ -756,24 +753,35 @@ impl<'a> Application for Bathtub {
                             cvar.notify_all();
                         }
                         state.tabs.run.state = RunState::AfterRequiredInput;
-                        state.connected = true;
                     }
                     Message::RecipieDone(Err(_err)) => {
-                        {
-                            let (recipe_state, cvar) = &*state.recipe_state;
-                            let mut recipe_state = recipe_state.lock().unwrap();
-                            *recipe_state = RecipeState::Stopped;
-                            cvar.notify_all();
-                        }
-                        state.connected = false
+                        let (recipe_state, cvar) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        *recipe_state = RecipeState::Stopped;
+                        cvar.notify_all();
                     }
                     Message::Tick => {
-                        let stat = state.grbl.get_status();
-                        if let Some(s) = stat {
-                            state.tabs.manual.status = format!(
-                                "{} state at\n({:.3}, {:.3}, {:.3})",
-                                &s.status, &s.x, &s.y, &s.z
-                            )
+                        if state.grbl.is_ok() {
+                            let stat = state.grbl.get_status();
+                            if let Some(s) = stat {
+                                state.tabs.manual.status = format!(
+                                    "{} state at\n({:.3}, {:.3}, {:.3})",
+                                    &s.status, &s.x, &s.y, &s.z
+                                )
+                            }
+                        } else {
+                            state.connected = false;
+                            let grbl = grbl::new();
+                            thread::sleep(Duration::from_millis(100));
+                            if grbl.is_ok() {
+                                state.connected = true;
+                                state.grbl = grbl.clone();
+                                state.tabs.manual.grbl = grbl.clone();
+                                state.tabs.advanced.grbl_tab.grbl = grbl.clone();
+                                *state.current_node.lock().unwrap() = state.nodes.borrow().node
+                                    [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
+                                .clone();
+                            }
                         }
                     }
                     Message::Manual(msg) => {
@@ -824,8 +832,35 @@ impl<'a> Application for Bathtub {
                 tabs,
                 tab_bar,
                 recipe_state,
+                connected,
                 ..
             }) => match state {
+                _ if !*connected => Row::with_children(vec![
+                    Space::with_width(Length::Fill).into(),
+                    Column::with_children(vec![
+                        Text::new("Unable to connect to GRBL.")
+                            .font(CQ_MONO)
+                            .size(50)
+                            .into(),
+                        Text::new("Here are some things to check:").size(25).into(),
+                        Text::new("1) GRBL is powered on.").size(25).into(),
+                        Text::new("2) The USB cable is connected between this computer and GRBL.")
+                            .size(25)
+                            .into(),
+                        Text::new(
+                            "3) There are no other GRBL realted applications open on this PC.",
+                        )
+                        .size(25)
+                        .into(),
+                        Text::new("4) You have asked GRBL to please work.")
+                            .size(25)
+                            .into(),
+                    ])
+                    .into(),
+                    Space::with_width(Length::Fill).into(),
+                ])
+                .padding(30)
+                .into(),
                 TabState::Manual => {
                     let content =
                         Column::new().push(tab_bar.view().map(move |msg| Message::TabBar(msg)));

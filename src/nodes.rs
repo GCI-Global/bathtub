@@ -71,7 +71,14 @@ impl Nodes {
                 z: node.z,
                 hide: node.hide,
                 neighbors: if node.hide {
-                    node.neighbors.clone()
+                    node.neighbors
+                        .clone()
+                        .into_iter()
+                        .map(|mut n| {
+                            n.push_str("_hover");
+                            n
+                        })
+                        .collect()
                 } else {
                     vec![format!("{}_hover", node.name)]
                 },
