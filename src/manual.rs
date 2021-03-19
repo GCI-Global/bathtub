@@ -1,11 +1,12 @@
 use super::grbl::{Command as Cmd, Grbl};
 use super::logger::Logger;
 use super::nodes::{Node, Nodes};
+use super::style::style::Theme;
 use crate::CQ_MONO;
 use chrono::prelude::*;
 use iced::{
-    button, scrollable, text_input, Button, Checkbox, Column, Command, Container, Element,
-    HorizontalAlignment, Length, Row, Scrollable, Space, Text, TextInput,
+    button, scrollable, text_input, tooltip, Button, Checkbox, Column, Command, Container, Element,
+    HorizontalAlignment, Length, Row, Scrollable, Space, Text, TextInput, Tooltip,
 };
 use regex::Regex;
 use std::cell::RefCell;
@@ -25,6 +26,7 @@ pub struct Manual {
     terminal_input_state: text_input::State,
     terminal_input_value: String,
     ref_nodes: Rc<RefCell<Nodes>>,
+    homing_required: Rc<RefCell<bool>>,
     pub grbl: Grbl,
     logger: Logger,
 }
@@ -48,7 +50,12 @@ pub enum ManualMessage {
 }
 
 impl Manual {
-    pub fn new(ref_nodes: Rc<RefCell<Nodes>>, grbl: Grbl, logger: Logger) -> Self {
+    pub fn new(
+        ref_nodes: Rc<RefCell<Nodes>>,
+        grbl: Grbl,
+        logger: Logger,
+        homing_required: Rc<RefCell<bool>>,
+    ) -> Self {
         //let grid_red = grid(Rc::clone(&ref_nodes));
         Manual {
             scroll: scrollable::State::new(),
@@ -57,6 +64,7 @@ impl Manual {
             stop_btn: button::State::new(),
             hover: true,
             ref_nodes,
+            homing_required,
             status_regex: Regex::new(
                 r"(?P<status>[A-Za-z]+).{6}(?P<X>[-\d.]+),(?P<Y>[-\d.]+),(?P<Z>[-\d.]+)",
             )
@@ -150,6 +158,7 @@ impl Manual {
 
     pub fn view(&mut self) -> Element<ManualMessage> {
         let ref_nodes = self.ref_nodes.borrow();
+        let homing_required = self.homing_required.borrow();
         let title = Text::new(self.status.clone())
             .width(Length::Fill)
             .size(40)
@@ -167,6 +176,10 @@ impl Manual {
                             .font(CQ_MONO)
                             .horizontal_alignment(HorizontalAlignment::Center),
                     )
+                    .style(match self.state {
+                        ManualState::Grid => Theme::BlueBorderOnly,
+                        _ => Theme::Blue,
+                    })
                     .padding(10)
                     .on_press(ManualMessage::GridTab)
                     .width(Length::Units(200)),
@@ -178,6 +191,10 @@ impl Manual {
                             .font(CQ_MONO)
                             .horizontal_alignment(HorizontalAlignment::Center),
                     )
+                    .style(match self.state {
+                        ManualState::Terminal => Theme::BlueBorderOnly,
+                        _ => Theme::Blue,
+                    })
                     .padding(10)
                     .on_press(ManualMessage::TerminalTab)
                     .width(Length::Units(200)),
@@ -187,15 +204,16 @@ impl Manual {
 
         match self.state {
             ManualState::Grid => {
-                let button_grid =
-                    self.bath_btns
-                        .iter_mut()
-                        .fold(Column::new(), |column, grid| {
-                            column.push(
-                                grid.into_iter()
-                                    .fold(Row::new(), |row, node_tup| {
-                                        if let Some(nt) = node_tup {
-                                            row.push(
+                let button_grid = self
+                    .bath_btns
+                    .iter_mut()
+                    .fold(Column::new(), |column, grid| {
+                        column.push(
+                            grid.into_iter()
+                                .fold(Row::new(), |row, node_tup| {
+                                    if let Some(nt) = node_tup {
+                                        row.push(
+                                            Tooltip::new(
                                                 Button::new(
                                                     &mut nt.1,
                                                     Text::new(ref_nodes.node[nt.0].name.clone())
@@ -209,24 +227,39 @@ impl Manual {
                                                 .on_press(ManualMessage::ButtonPressed(
                                                     ref_nodes.node[nt.0].name.clone(),
                                                 )),
+                                                if *homing_required {
+                                                    "Will run homing cycle first!"
+                                                } else {
+                                                    ""
+                                                },
+                                                tooltip::Position::FollowCursor,
                                             )
-                                        } else {
-                                            row.push(Space::with_width(Length::Fill))
-                                        }
-                                    })
-                                    .padding(3),
-                            )
-                        });
+                                            .size(25)
+                                            .padding(5)
+                                            .style(
+                                                if *homing_required {
+                                                    Theme::Active
+                                                } else {
+                                                    Theme::Disabled
+                                                },
+                                            ),
+                                        )
+                                    } else {
+                                        row.push(Space::with_width(Length::Fill))
+                                    }
+                                })
+                                .padding(3),
+                        )
+                    });
 
                 let modifiers = Row::new()
                     .push(
                         Column::new()
                             .push(Space::with_height(Length::Units(10)))
-                            .push(Checkbox::new(
-                                self.hover,
-                                "Hover Above",
-                                ManualMessage::ToggleBath,
-                            )),
+                            .push(
+                                Checkbox::new(self.hover, "Hover Above", ManualMessage::ToggleBath)
+                                    .style(Theme::Blue),
+                            ),
                     )
                     .push(Space::with_width(Length::Units(25)))
                     .push(
@@ -237,6 +270,7 @@ impl Manual {
                                 .font(CQ_MONO)
                                 .size(30),
                         )
+                        .style(Theme::Red)
                         .padding(10)
                         .width(Length::Fill)
                         .on_press(ManualMessage::Stop),
@@ -256,12 +290,15 @@ impl Manual {
                     .into()
             }
             ManualState::Terminal => {
+                let warning = Container::new(Row::with_children(vec![Space::with_width(Length::Fill).into(), Text::new("Advanced usage only! Bathtub does not check if these commands are safe!").into(), Space::with_width(Length::Fill).into()]).padding(10)).style(Theme::Red);
+
                 let terminal_input = TextInput::new(
                     &mut self.terminal_input_state,
-                    "ADVANCED USAGE ONLY! BATHTUB DOES NOT CHECK IF THESE COMMANDS ARE SAFE",
+                    "GRBL command",
                     &self.terminal_input_value,
                     ManualMessage::TerminalInputChanged,
                 )
+                .style(Theme::Blue)
                 .on_submit(ManualMessage::TerminalInputSubmitted)
                 .padding(10);
 
@@ -270,6 +307,7 @@ impl Manual {
                     .spacing(20)
                     .push(title)
                     .push(tab_btns)
+                    .push(warning)
                     .push(terminal_input)
                     .push(
                         self.terminal_responses

@@ -4,6 +4,7 @@ use super::logger::Logger;
 use super::nodes::Nodes;
 use super::run::do_nothing;
 use super::run::Step;
+use super::style::style::Theme;
 use crate::CQ_MONO;
 use chrono::prelude::*;
 use iced::{
@@ -347,6 +348,10 @@ impl Build {
                             .font(CQ_MONO)
                             .horizontal_alignment(HorizontalAlignment::Center),
                     )
+                    .style(match self.state {
+                        BuildState::Steps => Theme::BlueBorderOnly,
+                        _ => Theme::Blue,
+                    })
                     .padding(10)
                     .on_press(BuildMessage::StepsTab)
                     .width(Length::Units(200)),
@@ -358,6 +363,10 @@ impl Build {
                             .font(CQ_MONO)
                             .horizontal_alignment(HorizontalAlignment::Center),
                     )
+                    .style(match self.state {
+                        BuildState::RequiredInput => Theme::BlueBorderOnly,
+                        _ => Theme::Blue,
+                    })
                     .padding(10)
                     .on_press(BuildMessage::RequiredInputTab)
                     .width(Length::Units(200)),
@@ -371,6 +380,7 @@ impl Build {
                 &self.recipe_name_value,
                 BuildMessage::UserChangedName,
             )
+            .style(Theme::Blue)
             .padding(10)
             .width(Length::Fill),
         );
@@ -420,6 +430,7 @@ impl Build {
             }
             BuildState::RequiredInput => {
                 let before_title = Text::new("Before Run")
+                    .horizontal_alignment(HorizontalAlignment::Center)
                     .font(CQ_MONO)
                     .size(40)
                     .width(Length::Fill);
@@ -443,12 +454,14 @@ impl Build {
                                 .font(CQ_MONO)
                                 .horizontal_alignment(HorizontalAlignment::Center),
                         )
+                        .style(Theme::Blue)
                         .on_press(BuildMessage::AddInputBefore)
                         .padding(10)
                         .width(Length::Units(400)),
                     )
                     .push(Space::with_width(Length::Fill));
                 let after_title = Text::new("After Run")
+                    .horizontal_alignment(HorizontalAlignment::Center)
                     .font(CQ_MONO)
                     .size(40)
                     .width(Length::Fill);
@@ -471,6 +484,7 @@ impl Build {
                                 .font(CQ_MONO)
                                 .horizontal_alignment(HorizontalAlignment::Center),
                         )
+                        .style(Theme::Blue)
                         .on_press(BuildMessage::AddInputAfter)
                         .padding(10)
                         .width(Length::Units(400)),
@@ -557,13 +571,15 @@ impl RequiredInput {
                     &self.value[..],
                     RequiredInputMessage::InputChanged,
                 )
+                .style(Theme::Blue)
                 .padding(10),
             )
             .push(
                 Button::new(&mut self.delete_btn, delete_icon())
                     .width(Length::Units(50))
                     .padding(10)
-                    .on_press(RequiredInputMessage::Delete),
+                    .on_press(RequiredInputMessage::Delete)
+                    .style(Theme::Red),
             )
             .into()
     }
@@ -789,6 +805,7 @@ impl BuildStep {
                                         self.step_num,
                                         StepMessage::NewNum,
                                     )
+                                    .style(Theme::Blue)
                                     .padding(10)
                                     .width(Length::Shrink),
                                 ),
@@ -810,6 +827,7 @@ impl BuildStep {
                                         self.selected_destination.clone(),
                                         StepMessage::NewDestination,
                                     )
+                                    .style(Theme::Blue)
                                     .padding(10)
                                     .width(Length::Shrink),
                                 ),
@@ -831,6 +849,7 @@ impl BuildStep {
                                                 self.selected_action.clone(),
                                                 StepMessage::NewAction,
                                             )
+                                            .style(Theme::Blue)
                                             .padding(10)
                                             .width(Length::Shrink),
                                         )
@@ -842,6 +861,7 @@ impl BuildStep {
                                                 &self.hours_value,
                                                 StepMessage::HoursChanged,
                                             )
+                                            .style(Theme::Blue)
                                             .on_scroll_up(StepMessage::HoursIncrement)
                                             .on_scroll_down(StepMessage::HoursDecrement)
                                             .padding(10)
@@ -854,7 +874,8 @@ impl BuildStep {
                                                 "Minutes",
                                                 &self.mins_value,
                                                 StepMessage::MinsChanged,
-                                            ))
+                                            )
+                                            .style(Theme::Blue))
                                             .on_scroll_up(StepMessage::MinsIncrement)
                                             .on_scroll_down(StepMessage::MinsDecrement)
                                             .padding(10)
@@ -868,6 +889,7 @@ impl BuildStep {
                                                 &self.secs_value,
                                                 StepMessage::SecsChanged,
                                             )
+                                            .style(Theme::Blue)
                                             .on_scroll_up(StepMessage::SecsIncrement)
                                             .on_scroll_down(StepMessage::SecsDecrement)
                                             .padding(10)
@@ -877,13 +899,15 @@ impl BuildStep {
                                             Button::new(okay_btn, okay_icon())
                                                 .on_press(StepMessage::Okay)
                                                 .padding(10)
-                                                .width(Length::Units(50)),
+                                                .width(Length::Units(50))
+                                                .style(Theme::Green),
                                         )
                                         .push(
                                             Button::new(delete_btn, delete_icon())
                                                 .on_press(StepMessage::Delete)
                                                 .padding(10)
-                                                .width(Length::Units(50)),
+                                                .width(Length::Units(50))
+                                                .style(Theme::Red),
                                         ),
                                 ),
                             ),
@@ -893,22 +917,28 @@ impl BuildStep {
                             .push(Space::with_width(Length::Fill))
                             .push(
                                 Column::new()
-                                    .push(Checkbox::new(
-                                        self.hover,
-                                        "Hover Above",
-                                        StepMessage::ToggleHover,
-                                    ))
+                                    .push(
+                                        Checkbox::new(
+                                            self.hover,
+                                            "Hover Above",
+                                            StepMessage::ToggleHover,
+                                        )
+                                        .style(Theme::Blue),
+                                    )
                                     .padding(4)
                                     .width(Length::Shrink),
                             )
                             .push(Space::with_width(Length::Units(25)))
                             .push(
                                 Column::new()
-                                    .push(Checkbox::new(
-                                        self.wait,
-                                        "Require Input",
-                                        StepMessage::ToggleWait,
-                                    ))
+                                    .push(
+                                        Checkbox::new(
+                                            self.wait,
+                                            "Require Input",
+                                            StepMessage::ToggleWait,
+                                        )
+                                        .style(Theme::Blue),
+                                    )
                                     .padding(4)
                                     .width(Length::Shrink),
                             )
@@ -1059,6 +1089,7 @@ impl BuildStep {
                                 .horizontal_alignment(HorizontalAlignment::Center)
                                 .font(CQ_MONO),
                         )
+                        .style(Theme::Blue)
                         .padding(10)
                         .on_press(StepMessage::Edit)
                         //.height(Length::Units(75))
@@ -1257,6 +1288,7 @@ impl AddStep {
                                 self.step_num,
                                 AddStepMessage::NewNum,
                             )
+                            .style(Theme::Blue)
                             .padding(10)
                             .width(Length::Shrink),
                         ),
@@ -1278,6 +1310,7 @@ impl AddStep {
                                 self.selected_destination.clone(),
                                 AddStepMessage::NewDestination,
                             )
+                            .style(Theme::Blue)
                             .padding(10)
                             .width(Length::Shrink),
                         ),
@@ -1299,6 +1332,7 @@ impl AddStep {
                                         self.selected_action.clone(),
                                         AddStepMessage::NewAction,
                                     )
+                                    .style(Theme::Blue)
                                     .padding(10)
                                     .width(Length::Shrink),
                                 )
@@ -1310,6 +1344,7 @@ impl AddStep {
                                         &self.hours_value,
                                         AddStepMessage::HoursChanged,
                                     )
+                                    .style(Theme::Blue)
                                     .on_scroll_up(AddStepMessage::HoursIncrement)
                                     .on_scroll_down(AddStepMessage::HoursDecrement)
                                     .padding(10)
@@ -1322,7 +1357,8 @@ impl AddStep {
                                         "Minutes",
                                         &self.mins_value,
                                         AddStepMessage::MinsChanged,
-                                    ))
+                                    )
+                                    .style(Theme::Blue))
                                     .on_scroll_up(AddStepMessage::MinsIncrement)
                                     .on_scroll_down(AddStepMessage::MinsDecrement)
                                     .padding(10)
@@ -1336,6 +1372,7 @@ impl AddStep {
                                         &self.secs_value,
                                         AddStepMessage::SecsChanged,
                                     )
+                                    .style(Theme::Blue)
                                     .on_scroll_up(AddStepMessage::SecsIncrement)
                                     .on_scroll_down(AddStepMessage::SecsDecrement)
                                     .padding(10)
@@ -1348,6 +1385,7 @@ impl AddStep {
                                             .horizontal_alignment(HorizontalAlignment::Center)
                                             .font(CQ_MONO),
                                     )
+                                    .style(Theme::Blue)
                                     .on_press(AddStepMessage::Add(
                                         self.selected_destination.clone(),
                                         self.hover,
@@ -1369,22 +1407,28 @@ impl AddStep {
                     .push(Space::with_width(Length::Fill))
                     .push(
                         Column::new()
-                            .push(Checkbox::new(
-                                self.hover,
-                                "Hover Above",
-                                AddStepMessage::ToggleHover,
-                            ))
+                            .push(
+                                Checkbox::new(
+                                    self.hover,
+                                    "Hover Above",
+                                    AddStepMessage::ToggleHover,
+                                )
+                                .style(Theme::Blue),
+                            )
                             .padding(4)
                             .width(Length::Shrink),
                     )
                     .push(Space::with_width(Length::Units(25)))
                     .push(
                         Column::new()
-                            .push(Checkbox::new(
-                                self.wait,
-                                "Wait for User",
-                                AddStepMessage::ToggleWait,
-                            ))
+                            .push(
+                                Checkbox::new(
+                                    self.wait,
+                                    "Wait for User",
+                                    AddStepMessage::ToggleWait,
+                                )
+                                .style(Theme::Blue),
+                            )
                             .padding(4)
                             .width(Length::Shrink),
                     )

@@ -1,14 +1,17 @@
 use crate::{RecipeState, CQ_MONO};
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Column, Command, Container, Element,
-    HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
-    VerticalAlignment,
+    button, pick_list, scrollable, text_input, tooltip, Align, Button, Column, Command, Container,
+    Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
+    Tooltip, VerticalAlignment,
 };
 
 use super::build::{attention_icon, ns, pause_icon, play_icon, Recipe};
 use super::logger::Logger;
+use super::style::style::Theme;
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::{fs, mem::discriminant};
 
@@ -31,8 +34,9 @@ pub struct Run {
     pub active_recipie: Option<Vec<Step>>,
     pub state: RunState,
     required_before_inputs: Vec<RequiredInput>,
-    required_after_inputs: Vec<RequiredInput>,
+    pub required_after_inputs: Vec<RequiredInput>,
     logger: Logger,
+    homing_required: Rc<RefCell<bool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +66,11 @@ pub enum RunMessage {
 }
 
 impl Run {
-    pub fn new(recipe_state: Arc<(Mutex<RecipeState>, Condvar)>, logger: Logger) -> Self {
+    pub fn new(
+        recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
+        logger: Logger,
+        homing_required: Rc<RefCell<bool>>,
+    ) -> Self {
         Run {
             scroll: scrollable::State::new(),
             large_start_btn: button::State::new(),
@@ -84,6 +92,7 @@ impl Run {
             required_before_inputs: Vec::new(),
             required_after_inputs: Vec::new(),
             logger,
+            homing_required,
         }
     }
 
@@ -243,6 +252,7 @@ impl Run {
                                     self.search_value.clone(),
                                     RunMessage::RecipieChanged,
                                 )
+                                .style(Theme::Blue)
                                 .padding(10)
                                 .width(Length::Units(500)),
                             )
@@ -263,16 +273,34 @@ impl Run {
                         let (recipe_state, _) = &*self.recipe_state;
                         match *recipe_state.lock().unwrap() {
                             RecipeState::Stopped => Row::new().push(
-                                Button::new(
-                                    &mut self.large_start_btn,
-                                    Text::new("Start")
-                                        .size(30)
-                                        .horizontal_alignment(HorizontalAlignment::Center)
-                                        .font(CQ_MONO),
+                                Tooltip::new(
+                                    Button::new(
+                                        &mut self.large_start_btn,
+                                        Text::new("Start")
+                                            .size(30)
+                                            .horizontal_alignment(HorizontalAlignment::Center)
+                                            .font(CQ_MONO),
+                                    )
+                                    .style(Theme::Green)
+                                    .on_press(RunMessage::LargeStart)
+                                    .padding(10)
+                                    .width(Length::Units(500)),
+                                    if *self.homing_required.borrow() {
+                                        "Will run homing cycle first!"
+                                    } else {
+                                        ""
+                                    },
+                                    tooltip::Position::FollowCursor,
                                 )
-                                .on_press(RunMessage::LargeStart)
-                                .padding(10)
-                                .width(Length::Units(500)),
+                                .size(25)
+                                .padding(5)
+                                .style(
+                                    if *self.homing_required.borrow() {
+                                        Theme::Active
+                                    } else {
+                                        Theme::Disabled
+                                    },
+                                ),
                             ),
                             RecipeState::RecipeRunning => Row::new()
                                 .push(
@@ -283,6 +311,7 @@ impl Run {
                                             .horizontal_alignment(HorizontalAlignment::Center)
                                             .font(CQ_MONO),
                                     )
+                                    .style(Theme::Red)
                                     .on_press(RunMessage::RequireStopConfirm)
                                     .padding(10)
                                     .width(Length::Units(200)),
@@ -295,6 +324,7 @@ impl Run {
                                             .size(30)
                                             .horizontal_alignment(HorizontalAlignment::Center),
                                     )
+                                    .style(Theme::Blue)
                                     .on_press(RunMessage::Pause(()))
                                     .padding(10)
                                     .width(Length::Units(200)),
@@ -308,6 +338,7 @@ impl Run {
                                             .horizontal_alignment(HorizontalAlignment::Center)
                                             .font(CQ_MONO),
                                     )
+                                    .style(Theme::Red)
                                     .on_press(RunMessage::RequireStopConfirm)
                                     .padding(10)
                                     .width(Length::Units(200)),
@@ -401,7 +432,7 @@ impl Run {
                                     Text::new("Yes, stop now.")
                                         .font(CQ_MONO)
                                         .horizontal_alignment(HorizontalAlignment::Center),
-                                )
+                                ).style(Theme::Red)
                                 .on_press(RunMessage::Stop)
                                 .padding(10)
                                 .width(Length::Units(200))
@@ -412,7 +443,7 @@ impl Run {
                                     Text::new("No, just pause.")
                                         .font(CQ_MONO)
                                         .horizontal_alignment(HorizontalAlignment::Center),
-                                )
+                                ).style(Theme::Blue)
                                 .on_press(RunMessage::Cancel)
                                 .width(Length::Units(200))
                                 .padding(10)
@@ -448,6 +479,7 @@ impl Run {
                                         .font(CQ_MONO)
                                         .horizontal_alignment(HorizontalAlignment::Center),
                                 )
+                                .style(Theme::Green)
                                 .on_press(RunMessage::Start)
                                 .padding(10)
                                 .width(Length::Units(200))
@@ -459,6 +491,7 @@ impl Run {
                                         .font(CQ_MONO)
                                         .horizontal_alignment(HorizontalAlignment::Center),
                                 )
+                                .style(Theme::Red)
                                 .on_press(RunMessage::Cancel)
                                 .width(Length::Units(200))
                                 .padding(10)
@@ -495,6 +528,7 @@ impl Run {
                                         .font(CQ_MONO)
                                         .horizontal_alignment(HorizontalAlignment::Center),
                                 )
+                                .style(Theme::Blue)
                                 .on_press(RunMessage::Finish)
                                 .padding(10)
                                 .width(Length::Units(500))
@@ -511,7 +545,7 @@ impl Run {
     }
 }
 
-struct RequiredInput {
+pub struct RequiredInput {
     input_state: text_input::State,
     input_value: String,
     title: String,
@@ -554,6 +588,7 @@ impl RequiredInput {
                 &self.input_value,
                 RequiredInputMessage::InputChanged,
             )
+            .style(Theme::Blue)
             .padding(10)
             .into(),
         ])

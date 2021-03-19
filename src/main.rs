@@ -8,6 +8,7 @@ mod manual;
 mod nodes;
 mod paths;
 mod run;
+mod style;
 use actions::Actions;
 use advanced::{Advanced, AdvancedMessage, NodeTabMessage};
 use build::{Build, BuildMessage};
@@ -25,10 +26,11 @@ use std::rc::Rc;
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
 use std::{fs, mem::discriminant, thread};
+use style::style::Theme;
 
 use iced::{
-    button, time, Align, Application, Button, Column, Command, Container, Element, Font,
-    HorizontalAlignment, Length, Row, Settings, Space, Subscription, Text, Clipboard,
+    button, time, Align, Application, Button, Clipboard, Column, Command, Container, Element, Font,
+    HorizontalAlignment, Length, Row, Settings, Space, Subscription, Text,
 };
 
 pub fn main() -> iced::Result {
@@ -51,6 +53,7 @@ struct State {
     current_node: Arc<Mutex<Node>>,
     next_nodes: Arc<Mutex<Vec<Node>>>,
     actions: Rc<RefCell<Actions>>,
+    homing_required: Rc<RefCell<bool>>,
     grbl: Grbl,
     connected: bool,
     logger: Logger,
@@ -391,6 +394,7 @@ struct TabBar {
     build_btn: button::State,
     run_btn: button::State,
     advanced_btn: button::State,
+    current_tab: TabState,
 }
 
 #[derive(Debug, Clone)]
@@ -408,7 +412,12 @@ impl TabBar {
             run_btn: button::State::new(),
             build_btn: button::State::new(),
             advanced_btn: button::State::new(),
+            current_tab: TabState::Manual,
         }
+    }
+
+    fn change_state(&mut self, tab_state: TabState) {
+        self.current_tab = tab_state;
     }
 
     fn view(&mut self) -> Element<TabBarMessage> {
@@ -421,6 +430,10 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Manual => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .width(Length::Fill)
                 .padding(20)
                 .on_press(TabBarMessage::Manual),
@@ -433,6 +446,10 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Run => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .width(Length::Fill)
                 .padding(20)
                 .on_press(TabBarMessage::Run),
@@ -445,6 +462,10 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Build => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .width(Length::Fill)
                 .padding(20)
                 .on_press(TabBarMessage::Build),
@@ -457,6 +478,10 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Advanced => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .width(Length::Fill)
                 .padding(20)
                 .on_press(TabBarMessage::Advanced),
@@ -548,6 +573,7 @@ impl<'a> Application for Bathtub {
                         let next_nodes = Arc::new(Mutex::new(Vec::new()));
                         let grbl = grbl::new();
                         let logger = Logger::new();
+                        let homing_required = Rc::new(RefCell::new(true));
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
@@ -556,8 +582,13 @@ impl<'a> Application for Bathtub {
                                     Rc::clone(&ref_node),
                                     grbl.clone(),
                                     logger.clone(),
+                                    homing_required.clone(),
                                 ),
-                                run: Run::new(Arc::clone(&recipe_state), logger.clone()),
+                                run: Run::new(
+                                    Arc::clone(&recipe_state),
+                                    logger.clone(),
+                                    homing_required.clone(),
+                                ),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
@@ -577,6 +608,7 @@ impl<'a> Application for Bathtub {
                             current_node: Arc::clone(&current_node),
                             next_nodes: Arc::clone(&next_nodes),
                             actions: Rc::clone(&ref_actions),
+                            homing_required,
                             grbl: grbl.clone(),
                             connected: true,
                             logger: logger.clone(),
@@ -597,10 +629,17 @@ impl<'a> Application for Bathtub {
             }
             Bathtub::Loaded(state) => {
                 match message {
-                    Message::TabBar(TabBarMessage::Manual) => state.state = TabState::Manual,
-                    Message::TabBar(TabBarMessage::Build) => state.state = TabState::Build,
+                    Message::TabBar(TabBarMessage::Manual) => {
+                        state.state = TabState::Manual;
+                        state.tab_bar.change_state(TabState::Manual);
+                    }
+                    Message::TabBar(TabBarMessage::Build) => {
+                        state.state = TabState::Build;
+                        state.tab_bar.change_state(TabState::Build);
+                    }
                     Message::TabBar(TabBarMessage::Advanced) => {
                         state.state = TabState::Advanced;
+                        state.tab_bar.change_state(TabState::Advanced)
                     }
                     Message::TabBar(TabBarMessage::Run) => {
                         state.tabs.run.search =
@@ -617,7 +656,8 @@ impl<'a> Application for Bathtub {
                                 });
                         state.tabs.run.search.sort();
                         state.tabs.run.update(RunMessage::TabActive);
-                        state.state = TabState::Run
+                        state.state = TabState::Run;
+                        state.tab_bar.change_state(TabState::Run);
                     }
                     Message::Manual(ManualMessage::Stop) => {
                         {
@@ -669,7 +709,8 @@ impl<'a> Application for Bathtub {
                                 state.actions.borrow().clone(),
                             ),
                             Message::RecipieDone,
-                        )
+                        );
+                        *state.homing_required.borrow_mut() = false;
                     }
                     Message::Run(RunMessage::Run(_)) => {
                         let rs: RecipeState;
@@ -702,6 +743,7 @@ impl<'a> Application for Bathtub {
                                 ),
                                 Message::RecipieDone,
                             );
+                            *state.homing_required.borrow_mut() = false;
                         }
                     }
                     Message::Run(RunMessage::Pause(_)) => {
@@ -738,7 +780,11 @@ impl<'a> Application for Bathtub {
                             Arc::clone(&state.next_nodes),
                             state.grbl.clone(),
                         );
-                        state.tabs.run.state = RunState::AfterRequiredInput;
+                        state.tabs.run.state = if state.tabs.run.required_after_inputs.len() > 0 {
+                            RunState::AfterRequiredInput
+                        } else {
+                            RunState::Standard
+                        };
                     }
                     Message::RecipieDone(Ok(_)) => {
                         state
@@ -774,6 +820,7 @@ impl<'a> Application for Bathtub {
                             let grbl = grbl::new();
                             thread::sleep(Duration::from_millis(100));
                             if grbl.is_ok() {
+                                *state.homing_required.borrow_mut() = true;
                                 state.connected = true;
                                 state.grbl = grbl.clone();
                                 state.tabs.manual.grbl = grbl.clone();

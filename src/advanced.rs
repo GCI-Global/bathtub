@@ -2,6 +2,7 @@ use super::actions::{Action, Actions};
 use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use super::run::do_nothing;
+use super::style::style::Theme;
 use crate::CQ_MONO;
 use iced::{
     button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command, Container,
@@ -62,7 +63,7 @@ impl Advanced {
     ) -> Self {
         Advanced {
             scroll: scrollable::State::new(),
-            state: TabState::Grbl,
+            state: TabState::Logs,
             tab_bar: TabBar::new(),
             grbl_tab: GrblTab::new(grbl, Vec::new(), logger.clone()),
             nodes_tab: NodeTab::new(ref_nodes, logger.clone()),
@@ -126,14 +127,24 @@ impl Advanced {
                     self.grbl_tab.settings = self.grbl_tab.modified_settings.clone()
                 }
                 self.state = TabState::Grbl;
+                self.tab_bar.change_state(TabState::Grbl)
             }
             AdvancedMessage::GrblTab(GrblMessage::SaveMessage(SaveBarMessage::Cancel)) => {
                 self.grbl_tab.modified_settings = self.grbl_tab.settings.clone();
                 self.grbl_tab.unsaved = false;
             }
-            AdvancedMessage::TabBar(TabBarMessage::Nodes) => self.state = TabState::Nodes,
-            AdvancedMessage::TabBar(TabBarMessage::Actions) => self.state = TabState::Actions,
-            AdvancedMessage::TabBar(TabBarMessage::Logs) => self.state = TabState::Logs,
+            AdvancedMessage::TabBar(TabBarMessage::Nodes) => {
+                self.state = TabState::Nodes;
+                self.tab_bar.change_state(TabState::Nodes)
+            }
+            AdvancedMessage::TabBar(TabBarMessage::Actions) => {
+                self.state = TabState::Actions;
+                self.tab_bar.change_state(TabState::Actions);
+            }
+            AdvancedMessage::TabBar(TabBarMessage::Logs) => {
+                self.state = TabState::Logs;
+                self.tab_bar.change_state(TabState::Logs)
+            }
             AdvancedMessage::GrblTab(msg) => {
                 self.grbl_tab.unsaved = true;
                 self.grbl_tab.update(msg);
@@ -204,6 +215,7 @@ struct TabBar {
     nodes_btn: button::State,
     actions_btn: button::State,
     logs_btn: button::State,
+    current_tab: TabState,
 }
 
 #[derive(Debug, Clone)]
@@ -221,7 +233,12 @@ impl TabBar {
             nodes_btn: button::State::new(),
             actions_btn: button::State::new(),
             logs_btn: button::State::new(),
+            current_tab: TabState::Logs,
         }
+    }
+
+    fn change_state(&mut self, tab_state: TabState) {
+        self.current_tab = tab_state;
     }
 
     fn view(&mut self) -> Element<TabBarMessage> {
@@ -230,17 +247,21 @@ impl TabBar {
             .width(Length::Shrink)
             .push(
                 Button::new(
-                    &mut self.grbl_btn,
-                    Text::new("GRBL")
+                    &mut self.logs_btn,
+                    Text::new("Logs")
                         .horizontal_alignment(HorizontalAlignment::Center)
                         .vertical_alignment(VerticalAlignment::Center)
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Logs => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .height(Length::Fill)
                 .width(Length::Units(200))
                 .padding(20)
-                .on_press(TabBarMessage::Grbl),
+                .on_press(TabBarMessage::Logs),
             )
             .push(
                 Button::new(
@@ -251,6 +272,10 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Nodes => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .height(Length::Fill)
                 .width(Length::Units(200))
                 .padding(20)
@@ -265,6 +290,10 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Actions => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .height(Length::Fill)
                 .width(Length::Units(200))
                 .padding(20)
@@ -272,17 +301,21 @@ impl TabBar {
             )
             .push(
                 Button::new(
-                    &mut self.logs_btn,
-                    Text::new("Logs")
+                    &mut self.grbl_btn,
+                    Text::new("GRBL")
                         .horizontal_alignment(HorizontalAlignment::Center)
                         .vertical_alignment(VerticalAlignment::Center)
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Grbl => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .height(Length::Fill)
                 .width(Length::Units(200))
                 .padding(20)
-                .on_press(TabBarMessage::Logs),
+                .on_press(TabBarMessage::Grbl),
             )
             .into()
     }
@@ -326,6 +359,7 @@ impl SaveBar {
                         .size(20)
                         .horizontal_alignment(HorizontalAlignment::Center),
                 )
+                .style(Theme::Green)
                 .padding(10)
                 .on_press(SaveBarMessage::Save),
             )
@@ -337,6 +371,7 @@ impl SaveBar {
                         .size(20)
                         .horizontal_alignment(HorizontalAlignment::Center),
                 )
+                .style(Theme::Red)
                 .padding(10)
                 .on_press(SaveBarMessage::Cancel),
             )
@@ -533,6 +568,7 @@ impl GrblSetting {
                     &self.input_value,
                     GrblSettingMessage::TextChanged,
                 )
+                .style(Theme::Blue)
                 .padding(10)
                 .width(Length::Units(400)),
             )
@@ -874,11 +910,12 @@ impl NodeTab {
             .push(
                 Button::new(
                     &mut self.add_config_node_btn,
-                    Text::new("Add Node")
+                    Text::new("Add New Node")
                         .horizontal_alignment(HorizontalAlignment::Center)
                         .size(20)
                         .font(CQ_MONO),
                 )
+                .style(Theme::Blue)
                 .padding(10)
                 .width(Length::Units(400))
                 .on_press(NodeTabMessage::AddConfigNode),
@@ -1071,19 +1108,23 @@ impl ConfigNode {
                                 &self.name,
                                 ConfigNodeMessage::NameChanged,
                             )
+                            .style(Theme::Blue)
                             .padding(10),
                         )
                         .push(
                             Button::new(&mut self.okay_btn, okay_icon())
                                 .on_press(ConfigNodeMessage::Okay)
                                 .width(Length::Units(50))
-                                .padding(10),
+                                .padding(10)
+                                .style(Theme::Green),
                         )
                         .push(
                             Button::new(&mut self.delete_btn, delete_icon())
+                                .style(Theme::Red)
                                 .on_press(ConfigNodeMessage::Delete)
                                 .width(Length::Units(50))
-                                .padding(10),
+                                .padding(10)
+                                .style(Theme::Red),
                         ),
                 )
                 .push(
@@ -1098,6 +1139,7 @@ impl ConfigNode {
                                 Some(self.hide),
                                 ConfigNodeMessage::HideChanged,
                             )
+                            .style(Theme::Blue)
                             .padding(10)
                             .width(Length::Fill),
                         ),
@@ -1114,6 +1156,7 @@ impl ConfigNode {
                                 &self.x,
                                 ConfigNodeMessage::XChanged,
                             )
+                            .style(Theme::Blue)
                             .font(CQ_MONO)
                             .padding(10)
                             .max_width(400),
@@ -1131,6 +1174,7 @@ impl ConfigNode {
                                 &self.y,
                                 ConfigNodeMessage::YChanged,
                             )
+                            .style(Theme::Blue)
                             .font(CQ_MONO)
                             .padding(10)
                             .max_width(400),
@@ -1148,6 +1192,7 @@ impl ConfigNode {
                                 &self.z,
                                 ConfigNodeMessage::ZChanged,
                             )
+                            .style(Theme::Blue)
                             .font(CQ_MONO)
                             .padding(10)
                             .max_width(400),
@@ -1169,13 +1214,18 @@ impl ConfigNode {
                                                 ConfigNodeMessage::Neighbors(i, msg)
                                             }))
                                         })
+                                        .push(Space::with_height(Length::Units(5)))
                                         .push(
                                             Button::new(
                                                 &mut self.add_neighbor_btn,
-                                                Text::new("Add Neighbor").horizontal_alignment(
-                                                    HorizontalAlignment::Center,
-                                                ),
+                                                Text::new("Add Neighbor")
+                                                    .font(CQ_MONO)
+                                                    .horizontal_alignment(
+                                                        HorizontalAlignment::Center,
+                                                    )
+                                                    .font(CQ_MONO),
                                             )
+                                            .style(Theme::Blue)
                                             .on_press(ConfigNodeMessage::AddNeighbor)
                                             .width(Length::Fill)
                                             .padding(10),
@@ -1195,6 +1245,7 @@ impl ConfigNode {
                                 &self.name,
                                 ConfigNodeMessage::NameChanged,
                             )
+                            .style(Theme::Blue)
                             .padding(10),
                         )
                         .push(
@@ -1202,6 +1253,7 @@ impl ConfigNode {
                                 &mut self.edit_btn,
                                 Text::new("Edit").horizontal_alignment(HorizontalAlignment::Center),
                             )
+                            .style(Theme::Blue)
                             .on_press(ConfigNodeMessage::Edit)
                             .width(Length::Units(100))
                             .padding(10),
@@ -1319,11 +1371,13 @@ impl StringPickList {
                     self.value.clone(),
                     StringPickListMessage::Changed,
                 )
+                .style(Theme::Blue)
                 .width(Length::Fill)
                 .padding(10),
             )
             .push(
                 Button::new(&mut self.delete_btn, delete_icon())
+                    .style(Theme::Red)
                     .on_press(StringPickListMessage::Delete)
                     .padding(10),
             )
@@ -1534,6 +1588,7 @@ impl ActionTab {
                         .size(20)
                         .font(CQ_MONO),
                 )
+                .style(Theme::Blue)
                 .padding(10)
                 .width(Length::Units(400))
                 .on_press(ActionTabMessage::AddConfigAction),
@@ -1622,16 +1677,19 @@ impl ConfigAction {
                                 &self.name,
                                 ConfigActionMessage::NameChanged,
                             )
+                            .style(Theme::Blue)
                             .padding(10),
                         )
                         .push(
                             Button::new(&mut self.okay_btn, okay_icon())
                                 .on_press(ConfigActionMessage::Okay)
                                 .width(Length::Units(50))
-                                .padding(10),
+                                .padding(10)
+                                .style(Theme::Green),
                         )
                         .push(
                             Button::new(&mut self.delete_btn, delete_icon())
+                                .style(Theme::Red)
                                 .on_press(ConfigActionMessage::Delete)
                                 .width(Length::Units(50))
                                 .padding(10),
@@ -1656,10 +1714,13 @@ impl ConfigAction {
                                         .push(
                                             Button::new(
                                                 &mut self.add_command_btn,
-                                                Text::new("Add Command").horizontal_alignment(
-                                                    HorizontalAlignment::Center,
-                                                ),
+                                                Text::new("Add Command")
+                                                    .horizontal_alignment(
+                                                        HorizontalAlignment::Center,
+                                                    )
+                                                    .font(CQ_MONO),
                                             )
+                                            .style(Theme::Blue)
                                             .on_press(ConfigActionMessage::AddCommand)
                                             .width(Length::Fill)
                                             .padding(10),
@@ -1679,6 +1740,7 @@ impl ConfigAction {
                                 &self.name,
                                 ConfigActionMessage::NameChanged,
                             )
+                            .style(Theme::Blue)
                             .padding(10),
                         )
                         .push(
@@ -1686,6 +1748,7 @@ impl ConfigAction {
                                 &mut self.edit_btn,
                                 Text::new("Edit").horizontal_alignment(HorizontalAlignment::Center),
                             )
+                            .style(Theme::Blue)
                             .on_press(ConfigActionMessage::Edit)
                             .width(Length::Units(100))
                             .padding(10),
@@ -1746,10 +1809,12 @@ impl CommandInput {
                     &self.value[..],
                     CommandInputMessage::InputChanged,
                 )
+                .style(Theme::Blue)
                 .padding(10),
             )
             .push(
                 Button::new(&mut self.delete_btn, delete_icon())
+                    .style(Theme::Red)
                     .width(Length::Units(50))
                     .padding(10)
                     .on_press(CommandInputMessage::Delete),
@@ -2032,6 +2097,7 @@ impl SearchBar {
                     &self.value,
                     SearchBarMessage::InputChanged,
                 )
+                .style(Theme::Blue)
                 .padding(10),
             )
             .into()
@@ -2134,6 +2200,7 @@ impl Log {
                             .push(down_icon())
                             .push(Text::new(&self.title).font(CQ_MONO)),
                     )
+                    .style(Theme::Blue)
                     .padding(10)
                     .width(Length::Fill)
                     .on_press(LogMessage::ToggleView),
@@ -2141,11 +2208,14 @@ impl Log {
                 .push(
                     Row::new()
                         .push(Space::with_width(Length::Fill))
-                        .push(Checkbox::new(
-                            self.hide_gcode,
-                            "Hide G-code lines",
-                            LogMessage::ToggleGcode,
-                        ))
+                        .push(
+                            Checkbox::new(
+                                self.hide_gcode,
+                                "Hide G-code lines",
+                                LogMessage::ToggleGcode,
+                            )
+                            .style(Theme::Blue),
+                        )
                         .padding(10)
                         .push(Space::with_width(Length::Fill)),
                 )
@@ -2156,6 +2226,7 @@ impl Log {
                 )
                 .into(),
             false => Column::new()
+                .spacing(5)
                 .push(
                     Button::new(
                         &mut self.toggle_view_btn,
@@ -2163,6 +2234,7 @@ impl Log {
                             .push(right_icon())
                             .push(Text::new(&self.title).font(CQ_MONO)),
                     )
+                    .style(Theme::Blue)
                     .padding(10)
                     .width(Length::Fill)
                     .on_press(LogMessage::ToggleView),
