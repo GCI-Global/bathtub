@@ -2,7 +2,7 @@ use super::grbl::{Command as Cmd, Grbl};
 use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use super::style::style::Theme;
-use crate::CQ_MONO;
+use crate::{RecipeState, CQ_MONO};
 use chrono::prelude::*;
 use iced::{
     button, scrollable, text_input, tooltip, Button, Checkbox, Column, Command, Container, Element,
@@ -11,6 +11,7 @@ use iced::{
 use regex::Regex;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Arc, Condvar, Mutex};
 
 pub struct Manual {
     pub scroll: scrollable::State,
@@ -29,6 +30,8 @@ pub struct Manual {
     homing_required: Rc<RefCell<bool>>,
     pub grbl: Grbl,
     logger: Logger,
+    recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
+    current_node: Arc<Mutex<Node>>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,8 +58,9 @@ impl Manual {
         grbl: Grbl,
         logger: Logger,
         homing_required: Rc<RefCell<bool>>,
+        recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
+        current_node: Arc<Mutex<Node>>,
     ) -> Self {
-        //let grid_red = grid(Rc::clone(&ref_nodes));
         Manual {
             scroll: scrollable::State::new(),
             bath_btns: get_grid_btns(Rc::clone(&ref_nodes)),
@@ -77,6 +81,8 @@ impl Manual {
             terminal_input_value: String::new(),
             grbl,
             logger,
+            recipe_state,
+            current_node,
         }
     }
 
@@ -159,6 +165,9 @@ impl Manual {
     pub fn view(&mut self) -> Element<ManualMessage> {
         let ref_nodes = self.ref_nodes.borrow();
         let homing_required = self.homing_required.borrow();
+        let (recipie_state, _) = &*self.recipe_state;
+        let recipie_state = recipie_state.lock().unwrap();
+        let current_node = self.current_node.lock().unwrap();
         let title = Text::new(self.status.clone())
             .width(Length::Fill)
             .size(40)
@@ -222,6 +231,23 @@ impl Manual {
                                                         )
                                                         .font(CQ_MONO),
                                                 )
+                                                .style(match *recipie_state {
+                                                    RecipeState::ManualRunning => {
+                                                        if current_node.name
+                                                            == ref_nodes.node[nt.0].name
+                                                            || current_node.name
+                                                                == format!(
+                                                                    "{}_hover",
+                                                                    ref_nodes.node[nt.0].name
+                                                                )
+                                                        {
+                                                            Theme::BlueDisabledBright
+                                                        } else {
+                                                            Theme::BlueDisabled
+                                                        }
+                                                    }
+                                                    _ => Theme::Blue,
+                                                })
                                                 .padding(15)
                                                 .width(Length::Fill)
                                                 .on_press(ManualMessage::ButtonPressed(

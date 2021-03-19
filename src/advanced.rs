@@ -102,6 +102,9 @@ impl Advanced {
                     }
                     self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
                     loop {
+                        if self.grbl_tab.grbl.queue_len() == 0 {
+                            self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
+                        }
                         if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
                             if cmd.command == "$$".to_string() {
                                 self.grbl_tab.modified_settings = cmd.result.unwrap().lines().fold(
@@ -523,10 +526,7 @@ impl GrblTab {
                 )
             } else {
                 Column::new().push(
-                    Text::new("Error loading settings.\nPlease press 'GRBL' tab button again.")
-                        .font(CQ_MONO)
-                        .size(30),
-                )
+                Container::new(Row::with_children(vec![Space::with_width(Length::Fill).into(), Text::new("Error loading settings.\nPlease press 'Grbl tab button again to attempt reload.'").horizontal_alignment(HorizontalAlignment::Center).into(), Space::with_width(Length::Fill).into()]).padding(10)).style(Theme::Red))
             })
             .into()
     }
@@ -1902,7 +1902,7 @@ impl LogTab {
                                 v
                             },
                         ))
-                        .all(|(a, b)| a == b)
+                        .all(|(a, b)| a == &b.to_lowercase())
                 {
                     if let Some(log) = log {
                         self.logs.push(log);
@@ -1965,7 +1965,7 @@ impl LogTab {
                                     self.search_bars.iter().fold(
                                         Vec::with_capacity(self.search_bars.len()),
                                         |mut v, bar| {
-                                            v.push(bar.value.clone().to_lowercase());
+                                            v.push(bar.value.to_lowercase().clone());
                                             v
                                         },
                                     ),
@@ -2015,6 +2015,11 @@ impl LogTab {
                     }),
             )
             .push(logs.enumerate().fold(Column::new(), |col, (i, log)| {
+                log.set_style(if i % 2 == 0 {
+                    Theme::Blue
+                } else {
+                    Theme::DarkBlue
+                });
                 col.push(log.view().map(move |msg| LogTabMessage::Log(i, msg)))
             }))
             .push(if logs_count == LOG_MAX {
@@ -2111,6 +2116,7 @@ pub struct Log {
     opened: bool,
     toggle_view_btn: button::State,
     hide_gcode: bool,
+    style: Theme,
 }
 
 #[derive(Debug, Clone)]
@@ -2127,7 +2133,12 @@ impl Log {
             opened: false,
             toggle_view_btn: button::State::new(),
             hide_gcode: true,
+            style: Theme::Blue,
         }
+    }
+
+    fn set_style(&mut self, style: Theme) {
+        self.style = style;
     }
 
     fn update(&mut self, message: LogMessage) {
@@ -2200,7 +2211,7 @@ impl Log {
                             .push(down_icon())
                             .push(Text::new(&self.title).font(CQ_MONO)),
                     )
-                    .style(Theme::Blue)
+                    .style(self.style)
                     .padding(10)
                     .width(Length::Fill)
                     .on_press(LogMessage::ToggleView),
@@ -2234,7 +2245,7 @@ impl Log {
                             .push(right_icon())
                             .push(Text::new(&self.title).font(CQ_MONO)),
                     )
-                    .style(Theme::Blue)
+                    .style(self.style)
                     .padding(10)
                     .width(Length::Fill)
                     .on_press(LogMessage::ToggleView),

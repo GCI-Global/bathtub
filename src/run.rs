@@ -351,6 +351,7 @@ impl Run {
                                             .size(30)
                                             .horizontal_alignment(HorizontalAlignment::Center),
                                     )
+                                    .style(Theme::Blue)
                                     .on_press(RunMessage::Resume)
                                     .padding(10)
                                     .width(Length::Units(200)),

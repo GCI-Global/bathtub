@@ -583,6 +583,8 @@ impl<'a> Application for Bathtub {
                                     grbl.clone(),
                                     logger.clone(),
                                     homing_required.clone(),
+                                    Arc::clone(&recipe_state),
+                                    Arc::clone(&current_node),
                                 ),
                                 run: Run::new(
                                     Arc::clone(&recipe_state),
@@ -680,37 +682,42 @@ impl<'a> Application for Bathtub {
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         let (recipe_state, _) = &*state.recipe_state;
                         let mut recipe_state = recipe_state.lock().unwrap();
-                        *recipe_state = RecipeState::ManualRunning;
-                        let log_title =
-                            format!("{}| Manual - Going to {}", Local::now().to_rfc2822(), &node);
-                        state.logger.set_log_file(log_title.clone());
-                        state.tabs.advanced.update_logs();
+                        if discriminant(&*recipe_state) == discriminant(&RecipeState::Stopped) {
+                            *recipe_state = RecipeState::ManualRunning;
+                            let log_title = format!(
+                                "{}| Manual - Going to {}",
+                                Local::now().to_rfc2822(),
+                                &node
+                            );
+                            state.logger.set_log_file(log_title.clone());
+                            state.tabs.advanced.update_logs();
 
-                        command = Command::perform(
-                            State::run_recipie(
-                                state.grbl.clone(),
-                                state.logger.clone(),
-                                Arc::clone(&state.recipe_state),
-                                Arc::clone(&state.prev_node),
-                                Arc::clone(&state.current_node),
-                                Arc::clone(&state.next_nodes),
-                                vec![Step {
-                                    step_num: 0.to_string(),
-                                    selected_destination: node,
-                                    selected_action: "Rest".to_string(),
-                                    secs_value: 0.to_string(),
-                                    mins_value: 0.to_string(),
-                                    hours_value: 0.to_string(),
-                                    hover: state.tabs.manual.hover,
-                                    wait: false,
-                                }],
-                                state.node_map.clone(),
-                                state.nodes.borrow().clone(),
-                                state.actions.borrow().clone(),
-                            ),
-                            Message::RecipieDone,
-                        );
-                        *state.homing_required.borrow_mut() = false;
+                            command = Command::perform(
+                                State::run_recipie(
+                                    state.grbl.clone(),
+                                    state.logger.clone(),
+                                    Arc::clone(&state.recipe_state),
+                                    Arc::clone(&state.prev_node),
+                                    Arc::clone(&state.current_node),
+                                    Arc::clone(&state.next_nodes),
+                                    vec![Step {
+                                        step_num: 0.to_string(),
+                                        selected_destination: node,
+                                        selected_action: "Rest".to_string(),
+                                        secs_value: 0.to_string(),
+                                        mins_value: 0.to_string(),
+                                        hours_value: 0.to_string(),
+                                        hover: state.tabs.manual.hover,
+                                        wait: false,
+                                    }],
+                                    state.node_map.clone(),
+                                    state.nodes.borrow().clone(),
+                                    state.actions.borrow().clone(),
+                                ),
+                                Message::RecipieDone,
+                            );
+                            *state.homing_required.borrow_mut() = false;
+                        }
                     }
                     Message::Run(RunMessage::Run(_)) => {
                         let rs: RecipeState;
@@ -798,7 +805,11 @@ impl<'a> Application for Bathtub {
                             *recipe_state = RecipeState::Stopped;
                             cvar.notify_all();
                         }
-                        state.tabs.run.state = RunState::AfterRequiredInput;
+                        state.tabs.run.state = if state.tabs.run.required_after_inputs.len() > 0 {
+                            RunState::AfterRequiredInput
+                        } else {
+                            RunState::Standard
+                        };
                     }
                     Message::RecipieDone(Err(_err)) => {
                         let (recipe_state, cvar) = &*state.recipe_state;

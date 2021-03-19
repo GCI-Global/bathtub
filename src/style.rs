@@ -1,8 +1,12 @@
 pub mod style {
     use iced::{button, checkbox, container, pick_list, text_input};
+    #[derive(Debug, Clone, Copy)]
     pub enum Theme {
         Blue,
+        DarkBlue,
         BlueBorderOnly,
+        BlueDisabled,
+        BlueDisabledBright,
         TabSelected,
         Active,
         Disabled,
@@ -12,13 +16,16 @@ pub mod style {
     }
 
     impl Theme {
-        pub const ALL: [Theme; 8] = [
+        pub const ALL: [Theme; 11] = [
             Theme::Active,
             Theme::Disabled,
             Theme::Idle,
             Theme::Blue,
+            Theme::DarkBlue,
             Theme::TabSelected,
             Theme::BlueBorderOnly,
+            Theme::BlueDisabled,
+            Theme::BlueDisabledBright,
             Theme::Red,
             Theme::Green,
         ];
@@ -44,8 +51,11 @@ pub mod style {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Blue => blue::Button.into(),
+                Theme::DarkBlue => dark_blue::Button.into(),
                 Theme::TabSelected => tab_selected::Button.into(),
+                Theme::BlueDisabled => blue_disabled::Button.into(),
                 Theme::BlueBorderOnly => blue_border_only::Button.into(),
+                Theme::BlueDisabledBright => blue_disabled_bright::Button.into(),
                 Theme::Red => red::Button.into(),
                 Theme::Green => green::Button.into(),
                 _ => Default::default(),
@@ -207,6 +217,74 @@ pub mod style {
                     border_color: Color::from_rgb8(47, 181, 246),
                     border_width: 2.0,
                     border_radius: 0.0,
+                }
+            }
+        }
+    }
+    mod dark_blue {
+        use iced::{button, Color};
+
+        pub struct Button;
+
+        impl button::StyleSheet for Button {
+            fn active(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(17, 151, 226).into(),
+                    text_color: Color::from_rgb8(255, 255, 255),
+                    ..button::Style::default()
+                }
+            }
+            fn hovered(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(47, 181, 246).into(),
+                    text_color: Color::from_rgb8(255, 255, 255),
+                    ..button::Style::default()
+                }
+            }
+        }
+    }
+
+    mod blue_disabled {
+        use iced::{button, Color};
+
+        pub struct Button;
+
+        impl button::StyleSheet for Button {
+            fn active(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(112, 128, 164).into(),
+                    text_color: Color::from_rgb8(100, 100, 120),
+                    ..button::Style::default()
+                }
+            }
+            fn hovered(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(112, 128, 164).into(),
+                    text_color: Color::from_rgb8(100, 100, 120),
+                    ..button::Style::default()
+                }
+            }
+        }
+    }
+
+    mod blue_disabled_bright {
+        use iced::{button, Color};
+
+        pub struct Button;
+
+        impl button::StyleSheet for Button {
+            fn active(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(162, 168, 214).into(),
+                    text_color: Color::from_rgb8(150, 150, 170),
+                    ..button::Style::default()
+                }
+            }
+            fn hovered(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(162, 168, 214).into(),
+                    text_color: Color::from_rgb8(150, 150, 170),
+                    ..button::Style::default()
                 }
             }
         }
