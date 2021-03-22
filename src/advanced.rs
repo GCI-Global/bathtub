@@ -344,18 +344,19 @@ impl SaveBar {
     }
 
     pub fn view(&mut self) -> Element<'_, SaveBarMessage> {
-        Row::new()
-            .height(Length::Units(50))
-            .width(Length::Fill)
-            .push(Space::with_width(Length::Units(50)))
-            .push(
-                Text::new("Unsaved Changes!")
-                    .vertical_alignment(VerticalAlignment::Center)
-                    .size(20)
-                    .font(CQ_MONO),
-            )
-            .push(Space::with_width(Length::Fill))
-            .push(
+        Container::new(
+            Row::with_children(vec![
+                Space::with_width(Length::Units(50)).into(),
+                Column::with_children(vec![
+                    Space::with_height(Length::Units(12)).into(),
+                    Text::new("Unsaved Changes!")
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .size(25)
+                        .font(CQ_MONO)
+                        .into(),
+                ])
+                .into(),
+                Space::with_width(Length::Fill).into(),
                 Button::new(
                     &mut self.save_btn,
                     Text::new("Save")
@@ -363,11 +364,9 @@ impl SaveBar {
                         .horizontal_alignment(HorizontalAlignment::Center),
                 )
                 .style(Theme::Green)
-                .padding(10)
-                .on_press(SaveBarMessage::Save),
-            )
-            .push(Space::with_width(Length::Units(25)))
-            .push(
+                .padding(15)
+                .on_press(SaveBarMessage::Save)
+                .into(),
                 Button::new(
                     &mut self.cancel_btn,
                     Text::new("Cancel")
@@ -375,11 +374,16 @@ impl SaveBar {
                         .horizontal_alignment(HorizontalAlignment::Center),
                 )
                 .style(Theme::Red)
-                .padding(10)
-                .on_press(SaveBarMessage::Cancel),
-            )
-            .push(Space::with_width(Length::Units(50)))
-            .into()
+                .padding(15)
+                .on_press(SaveBarMessage::Cancel)
+                .into(),
+                Space::with_width(Length::Units(50)).into(),
+            ])
+            .height(Length::Units(50))
+            .width(Length::Fill),
+        )
+        .style(Theme::Yellow)
+        .into()
     }
 }
 

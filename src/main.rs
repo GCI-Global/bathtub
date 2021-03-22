@@ -75,30 +75,37 @@ impl State {
         nodes: Nodes,
         actions: Actions,
     ) -> Result<(), Errors> {
-        if let Some(s) = grbl.get_status() {
-            if s.status == "Alarm".to_string() {
-                let state: RecipeState;
-                {
-                    let (recipe_state, _) = &*recipe_state;
-                    let mut recipe_state = recipe_state.lock().unwrap();
-                    state = *recipe_state;
-                    *recipe_state = match state {
-                        RecipeState::ManualRunning => RecipeState::HomingManual,
-                        _ => RecipeState::HomingRun,
-                    };
-                }
-                grbl.push_command(Cmd::new("$H".to_string()));
-                // wait for homing to finish
-                loop {
-                    if let Some(s) = grbl.get_status() {
-                        if s.status == "Idle".to_string() {
+        if (*current_node.lock().unwrap()).name[..] == *"HOME" {
+            let state: RecipeState;
+            {
+                let (recipe_state, _) = &*recipe_state;
+                let mut recipe_state = recipe_state.lock().unwrap();
+                state = *recipe_state;
+                *recipe_state = match state {
+                    RecipeState::RecipeRunning => RecipeState::HomingRun,
+                    _ => RecipeState::HomingManual,
+                };
+            }
+            grbl.push_command(Cmd::new("$H".to_string()));
+            // wait for homing to finish
+            loop {
+                if grbl.is_ok() {
+                    if let Some(cmd) = grbl.pop_command() {
+                        if cmd.command[..] == *"test" {
                             break;
+                        } else {
+                            grbl.push_command(Cmd::new("test".to_string()));
+                            thread::sleep(Duration::from_millis(100))
                         }
                     }
+                } else {
+                    break;
                 }
-                {
-                    let (recipe_state, _) = &*recipe_state;
-                    let mut recipe_state = recipe_state.lock().unwrap();
+            }
+            {
+                let (recipe_state, _) = &*recipe_state;
+                let mut recipe_state = recipe_state.lock().unwrap();
+                if discriminant(&*recipe_state) != discriminant(&RecipeState::Stopped) {
                     *recipe_state = state;
                 }
             }
@@ -388,7 +395,7 @@ impl State {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum RecipeState {
     Stopped,
     ManualRunning,
@@ -740,6 +747,19 @@ impl<'a> Application for Bathtub {
                             *state.homing_required.borrow_mut() = false;
                         }
                     }
+                    Message::Manual(ManualMessage::TerminalInputSubmitted) => {
+                        *state.current_node.lock().unwrap() = state.nodes.borrow().node
+                            [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
+                        .clone();
+                        command = state
+                            .tabs
+                            .manual
+                            .update(ManualMessage::TerminalInputSubmitted)
+                            .map(move |msg| Message::Manual(msg));
+                        let (recipe_state, _) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        *recipe_state = RecipeState::Stopped;
+                    }
                     Message::Run(RunMessage::Run(_)) => {
                         let rs: RecipeState;
                         {
@@ -848,10 +868,28 @@ impl<'a> Application for Bathtub {
                                 )
                             }
                         } else {
+                            if state.connected {
+                                // ony run these on the first time grbl loses connection
+                                let (recipe_state, _) = &*state.recipe_state;
+                                let mut recipe_state = recipe_state.lock().unwrap();
+                                *recipe_state = RecipeState::Stopped;
+                                state.logger.set_log_file(format!(
+                                    "{}| GRBL Critical error! - Connection Lost",
+                                    Local::now().to_rfc2822()
+                                ));
+                                state.logger.send_line(String::new()).unwrap();
+                                state.logger.send_line(format!("{}| More detailed information not currently logged by Bathtub.", Local::now().to_rfc2822())).unwrap();
+                            }
                             state.connected = false;
                             let grbl = grbl::new();
                             thread::sleep(Duration::from_millis(100));
                             if grbl.is_ok() {
+                                state.logger.set_log_file(format!(
+                                    "{}| GRBL Connection reestablished!",
+                                    Local::now().to_rfc2822()
+                                ));
+                                state.logger.send_line(String::new()).unwrap();
+                                state.logger.send_line(format!("{}| More detailed information not currently logged by Bathtub.", Local::now().to_rfc2822())).unwrap();
                                 *state.homing_required.borrow_mut() = true;
                                 state.connected = true;
                                 state.grbl = grbl.clone();
@@ -861,6 +899,9 @@ impl<'a> Application for Bathtub {
                                     [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
                                 .clone();
                             }
+                            let (recipe_state, _) = &*state.recipe_state;
+                            let mut recipe_state = recipe_state.lock().unwrap();
+                            *recipe_state = RecipeState::Stopped;
                         }
                     }
                     Message::Manual(msg) => {

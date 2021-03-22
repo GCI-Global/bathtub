@@ -243,6 +243,9 @@ impl Manual {
                                                             Theme::BlueDisabled
                                                         }
                                                     }
+                                                    RecipeState::HomingManual => {
+                                                        Theme::BlueDisabled
+                                                    }
                                                     _ => Theme::Blue,
                                                 })
                                                 .padding(15)

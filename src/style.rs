@@ -14,10 +14,11 @@ pub mod style {
         Red,
         RedDisabled,
         Green,
+        Yellow,
     }
 
     impl Theme {
-        pub const ALL: [Theme; 12] = [
+        pub const ALL: [Theme; 13] = [
             Theme::Active,
             Theme::Disabled,
             Theme::Idle,
@@ -30,6 +31,7 @@ pub mod style {
             Theme::Red,
             Theme::RedDisabled,
             Theme::Green,
+            Theme::Yellow,
         ];
     }
 
@@ -42,8 +44,9 @@ pub mod style {
     impl From<Theme> for Box<dyn container::StyleSheet> {
         fn from(theme: Theme) -> Self {
             match theme {
-                Theme::Active => active::Tooltip.into(),
+                Theme::Active => yellow::Tooltip.into(),
                 Theme::Red => red::Container.into(),
+                Theme::Yellow => yellow::Container.into(),
                 _ => Default::default(),
             }
         }
@@ -469,7 +472,7 @@ pub mod style {
         }
     }
 
-    mod active {
+    mod yellow {
         use iced::{container, Color};
 
         pub struct Tooltip;
@@ -477,10 +480,24 @@ pub mod style {
         impl container::StyleSheet for Tooltip {
             fn style(&self) -> container::Style {
                 container::Style {
-                    text_color: Some(Color::from_rgb8(0, 0, 0)),
-                    background: Some(Color::from_rgb8(240, 163, 10).into()),
+                    text_color: Some(Color::BLACK),
+                    background: Some(Color::from_rgb8(255, 193, 10).into()),
                     border_radius: 6.0,
                     ..container::Style::default()
+                }
+            }
+        }
+
+        pub struct Container;
+
+        impl container::StyleSheet for Container {
+            fn style(&self) -> container::Style {
+                container::Style {
+                    text_color: Some(Color::BLACK),
+                    background: Color::from_rgb8(255, 193, 10).into(),
+                    border_color: Color::from_rgb8(245, 183, 0),
+                    border_width: 5.0,
+                    border_radius: 8.0,
                 }
             }
         }

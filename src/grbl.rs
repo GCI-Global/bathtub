@@ -219,7 +219,10 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
         loop {
             // read until caridge return kek from grbl
             match reader.read_until(0xD, &mut buf) {
-                Ok(_num_of_chars_read) => {
+                Ok(num_of_chars_read) => {
+                    if num_of_chars_read == 0 {
+                        panic!("Connection likely lost")
+                    }
                     line = str::from_utf8(&buf).unwrap().to_string();
                     // the first reponse from grbl initializing the connection is a bit weird, it has multiple
                     // caridge returns, lockily it is the only one with a unicode 'null' char. GRBL doesnt do
@@ -258,7 +261,7 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
                         output.push(line);
                     }
                 }
-                Err(err) => println!("{:?}", err),
+                Err(err) => panic!("{}", err),
             }
         }
     }
