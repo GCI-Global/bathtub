@@ -12,11 +12,12 @@ pub mod style {
         Disabled,
         Idle,
         Red,
+        RedDisabled,
         Green,
     }
 
     impl Theme {
-        pub const ALL: [Theme; 11] = [
+        pub const ALL: [Theme; 12] = [
             Theme::Active,
             Theme::Disabled,
             Theme::Idle,
@@ -27,6 +28,7 @@ pub mod style {
             Theme::BlueDisabled,
             Theme::BlueDisabledBright,
             Theme::Red,
+            Theme::RedDisabled,
             Theme::Green,
         ];
     }
@@ -57,6 +59,7 @@ pub mod style {
                 Theme::BlueBorderOnly => blue_border_only::Button.into(),
                 Theme::BlueDisabledBright => blue_disabled_bright::Button.into(),
                 Theme::Red => red::Button.into(),
+                Theme::RedDisabled => red_disabled::Button.into(),
                 Theme::Green => green::Button.into(),
                 _ => Default::default(),
             }
@@ -439,6 +442,29 @@ pub mod style {
 
             fn selection_color(&self) -> Color {
                 Color::from_rgb8(249, 40, 20)
+            }
+        }
+    }
+
+    mod red_disabled {
+        use iced::{button, Color};
+
+        pub struct Button;
+
+        impl button::StyleSheet for Button {
+            fn active(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(164, 128, 112).into(),
+                    text_color: Color::from_rgb8(120, 100, 100),
+                    ..button::Style::default()
+                }
+            }
+            fn hovered(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(164, 128, 112).into(),
+                    text_color: Color::from_rgb8(120, 100, 100),
+                    ..button::Style::default()
+                }
             }
         }
     }

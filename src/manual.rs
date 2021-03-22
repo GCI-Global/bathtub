@@ -105,11 +105,8 @@ impl Manual {
                 None => {}
             },
             ManualMessage::TerminalInputSubmitted => {
-                let val = self
-                    .terminal_input_value
-                    .replace("\n", "")
-                    .replace(" ", "")
-                    .to_uppercase();
+                *self.homing_required.borrow_mut() = true;
+                let val = self.terminal_input_value.replace("\n", "").to_uppercase();
                 self.terminal_input_value = "".to_string();
                 if val.contains("?") {
                     self.terminal_responses.insert(
@@ -165,8 +162,8 @@ impl Manual {
     pub fn view(&mut self) -> Element<ManualMessage> {
         let ref_nodes = self.ref_nodes.borrow();
         let homing_required = self.homing_required.borrow();
-        let (recipie_state, _) = &*self.recipe_state;
-        let recipie_state = recipie_state.lock().unwrap();
+        let (recipe_state, _) = &*self.recipe_state;
+        let recipe_state = recipe_state.lock().unwrap();
         let current_node = self.current_node.lock().unwrap();
         let title = Text::new(self.status.clone())
             .width(Length::Fill)
@@ -231,7 +228,7 @@ impl Manual {
                                                         )
                                                         .font(CQ_MONO),
                                                 )
-                                                .style(match *recipie_state {
+                                                .style(match *recipe_state {
                                                     RecipeState::ManualRunning => {
                                                         if current_node.name
                                                             == ref_nodes.node[nt.0].name
@@ -289,17 +286,33 @@ impl Manual {
                     )
                     .push(Space::with_width(Length::Units(25)))
                     .push(
-                        Button::new(
-                            &mut self.stop_btn,
-                            Text::new("STOP")
-                                .horizontal_alignment(HorizontalAlignment::Center)
-                                .font(CQ_MONO)
-                                .size(30),
+                        Tooltip::new(
+                            Button::new(
+                                &mut self.stop_btn,
+                                Text::new("STOP")
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO)
+                                    .size(30),
+                            )
+                            .style(match *recipe_state {
+                                RecipeState::HomingManual => Theme::RedDisabled,
+                                _ => Theme::Red,
+                            })
+                            .padding(10)
+                            .width(Length::Fill)
+                            .on_press(ManualMessage::Stop),
+                            match *recipe_state {
+                                RecipeState::HomingManual => "Unavailable while homing!",
+                                _ => "",
+                            },
+                            tooltip::Position::FollowCursor,
                         )
-                        .style(Theme::Red)
-                        .padding(10)
-                        .width(Length::Fill)
-                        .on_press(ManualMessage::Stop),
+                        .size(25)
+                        .padding(5)
+                        .style(match *recipe_state {
+                            RecipeState::HomingManual => Theme::Red,
+                            _ => Theme::Disabled,
+                        }),
                     );
 
                 let content = Column::new()

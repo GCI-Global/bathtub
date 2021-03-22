@@ -329,6 +329,41 @@ impl Run {
                                     .padding(10)
                                     .width(Length::Units(200)),
                                 ),
+                            RecipeState::HomingRun => Row::new()
+                                .push(
+                                    Tooltip::new(
+                                        Button::new(
+                                            &mut self.stop_btn,
+                                            Text::new("Stop")
+                                                .size(30)
+                                                .horizontal_alignment(HorizontalAlignment::Center)
+                                                .font(CQ_MONO),
+                                        )
+                                        .style(Theme::RedDisabled)
+                                        .padding(10)
+                                        .width(Length::Units(200)),
+                                        "Unavailable while homing!",
+                                        tooltip::Position::FollowCursor,
+                                    )
+                                    .style(Theme::Red),
+                                )
+                                .push(Space::with_width(Length::Units(100)))
+                                .push(
+                                    Tooltip::new(
+                                        Button::new(
+                                            &mut self.pause_btn,
+                                            pause_icon()
+                                                .size(30)
+                                                .horizontal_alignment(HorizontalAlignment::Center),
+                                        )
+                                        .style(Theme::BlueDisabled)
+                                        .padding(10)
+                                        .width(Length::Units(200)),
+                                        "Unavailable while homing!",
+                                        tooltip::Position::FollowCursor,
+                                    )
+                                    .style(Theme::Red),
+                                ),
                             RecipeState::RecipePaused => Row::new()
                                 .push(
                                     Button::new(

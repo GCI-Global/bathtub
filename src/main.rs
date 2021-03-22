@@ -77,14 +77,29 @@ impl State {
     ) -> Result<(), Errors> {
         if let Some(s) = grbl.get_status() {
             if s.status == "Alarm".to_string() {
+                let state: RecipeState;
+                {
+                    let (recipe_state, _) = &*recipe_state;
+                    let mut recipe_state = recipe_state.lock().unwrap();
+                    state = *recipe_state;
+                    *recipe_state = match state {
+                        RecipeState::ManualRunning => RecipeState::HomingManual,
+                        _ => RecipeState::HomingRun,
+                    };
+                }
                 grbl.push_command(Cmd::new("$H".to_string()));
-            }
-        }
-        // wait for homing to finish
-        loop {
-            if let Some(s) = grbl.get_status() {
-                if s.status == "Idle".to_string() {
-                    break;
+                // wait for homing to finish
+                loop {
+                    if let Some(s) = grbl.get_status() {
+                        if s.status == "Idle".to_string() {
+                            break;
+                        }
+                    }
+                }
+                {
+                    let (recipe_state, _) = &*recipe_state;
+                    let mut recipe_state = recipe_state.lock().unwrap();
+                    *recipe_state = state;
                 }
             }
         }
@@ -380,6 +395,8 @@ pub enum RecipeState {
     RecipeRunning,
     RecipePaused,
     RequireInput,
+    HomingManual,
+    HomingRun,
 }
 
 struct Tabs {
@@ -662,18 +679,22 @@ impl<'a> Application for Bathtub {
                         state.tab_bar.change_state(TabState::Run);
                     }
                     Message::Manual(ManualMessage::Stop) => {
-                        {
-                            let (recipe_state, cvar) = &*state.recipe_state;
-                            let mut recipe_state = recipe_state.lock().unwrap();
-                            *recipe_state = RecipeState::Stopped;
-                            cvar.notify_all();
+                        let (recipe_state, cvar) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        match *recipe_state {
+                            RecipeState::HomingManual => {}
+                            RecipeState::HomingRun => {}
+                            _ => {
+                                *recipe_state = RecipeState::Stopped;
+                                cvar.notify_all();
+                                state.grbl.push_command(Cmd::new("\u{85}".to_string()));
+                                set_pause_node(
+                                    Arc::clone(&state.current_node),
+                                    Arc::clone(&state.next_nodes),
+                                    state.grbl.clone(),
+                                );
+                            }
                         }
-                        state.grbl.push_command(Cmd::new("\u{85}".to_string()));
-                        set_pause_node(
-                            Arc::clone(&state.current_node),
-                            Arc::clone(&state.next_nodes),
-                            state.grbl.clone(),
-                        );
                     }
                     Message::Manual(ManualMessage::ThankYou(cmd)) => {
                         state.tabs.advanced.update_logs();
@@ -929,6 +950,7 @@ impl<'a> Application for Bathtub {
                     }
                     if discriminant(&rs) == discriminant(&RecipeState::RecipeRunning)
                         || discriminant(&rs) == discriminant(&RecipeState::RecipePaused)
+                        || discriminant(&rs) == discriminant(&RecipeState::HomingRun)
                     {
                         content
                             .push(Space::with_height(Length::Units(100)))
@@ -953,7 +975,9 @@ impl<'a> Application for Bathtub {
                         let (recipe_state, _) = &**recipe_state;
                         rs = *recipe_state.lock().unwrap();
                     }
-                    if discriminant(&rs) == discriminant(&RecipeState::ManualRunning) {
+                    if discriminant(&rs) == discriminant(&RecipeState::ManualRunning)
+                        || discriminant(&rs) == discriminant(&RecipeState::HomingManual)
+                    {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
