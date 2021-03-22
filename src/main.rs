@@ -419,6 +419,7 @@ struct TabBar {
     run_btn: button::State,
     advanced_btn: button::State,
     current_tab: TabState,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -430,13 +431,14 @@ enum TabBarMessage {
 }
 
 impl TabBar {
-    fn new() -> Self {
+    fn new(unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>) -> Self {
         TabBar {
             manual_btn: button::State::new(),
             run_btn: button::State::new(),
             build_btn: button::State::new(),
             advanced_btn: button::State::new(),
             current_tab: TabState::Manual,
+            unsaved_tabs,
         }
     }
 
@@ -487,8 +489,20 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .style(match self.current_tab {
-                    TabState::Build => Theme::TabSelected,
-                    _ => Theme::Blue,
+                    TabState::Build => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Build).unwrap() {
+                            Theme::YellowSelected
+                        } else {
+                            Theme::TabSelected
+                        }
+                    }
+                    _ => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Build).unwrap() {
+                            Theme::Yellow
+                        } else {
+                            Theme::Blue
+                        }
+                    }
                 })
                 .width(Length::Fill)
                 .padding(20)
@@ -503,8 +517,20 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .style(match self.current_tab {
-                    TabState::Advanced => Theme::TabSelected,
-                    _ => Theme::Blue,
+                    TabState::Advanced => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Advanced).unwrap() {
+                            Theme::YellowSelected
+                        } else {
+                            Theme::TabSelected
+                        }
+                    }
+                    _ => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Advanced).unwrap() {
+                            Theme::Yellow
+                        } else {
+                            Theme::Blue
+                        }
+                    }
                 })
                 .width(Length::Fill)
                 .padding(20)
@@ -514,12 +540,19 @@ impl TabBar {
     }
 }
 
-enum TabState {
+#[derive(Hash)]
+pub enum TabState {
     Manual,
     Run,
     Build,
     Advanced,
 }
+impl PartialEq for TabState {
+    fn eq(&self, other: &Self) -> bool {
+        discriminant(self) == discriminant(other)
+    }
+}
+impl Eq for TabState {}
 
 #[derive(Debug, Clone)]
 struct LoadState {
@@ -598,6 +631,10 @@ impl<'a> Application for Bathtub {
                         let grbl = grbl::new();
                         let logger = Logger::new();
                         let homing_required = Rc::new(RefCell::new(true));
+                        let mut unsaved_tabs_local = HashMap::with_capacity(2);
+                        unsaved_tabs_local.insert(TabState::Build, false);
+                        unsaved_tabs_local.insert(TabState::Advanced, false);
+                        let unsaved_tabs = Rc::new(RefCell::new(unsaved_tabs_local));
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
@@ -619,15 +656,17 @@ impl<'a> Application for Bathtub {
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
                                     logger.clone(),
+                                    unsaved_tabs.clone(),
                                 ),
                                 advanced: Advanced::new(
                                     grbl.clone(),
                                     logger.clone(),
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
+                                    unsaved_tabs.clone(),
                                 ),
                             },
-                            tab_bar: TabBar::new(),
+                            tab_bar: TabBar::new(unsaved_tabs),
                             nodes: Rc::clone(&ref_node),
                             node_map: state.node_map.clone(),
                             prev_node: Arc::new(Mutex::new(None)),
@@ -902,6 +941,7 @@ impl<'a> Application for Bathtub {
                             let (recipe_state, _) = &*state.recipe_state;
                             let mut recipe_state = recipe_state.lock().unwrap();
                             *recipe_state = RecipeState::Stopped;
+                            state.tabs.advanced.update_logs();
                         }
                     }
                     Message::Manual(msg) => {

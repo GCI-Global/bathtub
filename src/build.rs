@@ -5,7 +5,7 @@ use super::nodes::Nodes;
 use super::run::do_nothing;
 use super::run::Step;
 use super::style::style::Theme;
-use crate::CQ_MONO;
+use crate::{TabState, CQ_MONO};
 use chrono::prelude::*;
 use iced::{
     button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command, Container,
@@ -14,6 +14,7 @@ use iced::{
 };
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -41,6 +42,7 @@ pub struct Build {
     add_input_after_btn: button::State,
     state: BuildState,
     logger: Logger,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
 }
 
 enum BuildState {
@@ -68,6 +70,7 @@ impl Build {
         nodes_ref: Rc<RefCell<Nodes>>,
         actions_ref: Rc<RefCell<Actions>>,
         logger: Logger,
+        unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
     ) -> Self {
         Build {
             unsaved: false,
@@ -90,6 +93,7 @@ impl Build {
             modified_after_inputs: Vec::new(),
             state: BuildState::Steps,
             logger,
+            unsaved_tabs,
         }
     }
 
@@ -125,6 +129,7 @@ impl Build {
             }
             BuildMessage::StepMessage(i, StepMessage::Edit) => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 // reset all to idle so ony one can be edited at a time
                 for step in &mut self.modified_steps {
                     step.update(StepMessage::Okay)
@@ -148,6 +153,7 @@ impl Build {
             )) => {
                 if let Some(d) = dest {
                     self.unsaved = true;
+                    self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                     for i in nodes.unwrap() - 1..self.modified_steps.len() {
                         self.modified_steps[i].step_num =
                             Some(self.modified_steps[i].step_num.unwrap() + 1);
@@ -186,6 +192,7 @@ impl Build {
             BuildMessage::StepsTab => self.state = BuildState::Steps,
             BuildMessage::BeforeRequiredInputMessage(i, RequiredInputMessage::Delete) => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 self.modified_before_inputs.remove(i);
             }
             BuildMessage::BeforeRequiredInputMessage(i, msg) => {
@@ -193,11 +200,13 @@ impl Build {
             }
             BuildMessage::AddInputBefore => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 self.modified_before_inputs
                     .push(RequiredInput::new("".to_string()));
             }
             BuildMessage::AfterRequiredInputMessage(i, RequiredInputMessage::Delete) => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 self.modified_after_inputs.remove(i);
             }
             BuildMessage::AfterRequiredInputMessage(i, msg) => {
@@ -205,6 +214,7 @@ impl Build {
             }
             BuildMessage::AddInputAfter => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 self.modified_after_inputs
                     .push(RequiredInput::new("".to_string()));
             }
@@ -214,6 +224,9 @@ impl Build {
                 self.modified_before_inputs = self.before_inputs.clone();
                 self.modified_after_inputs = self.after_inputs.clone();
                 self.unsaved = false;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Build, false);
             }
             BuildMessage::SaveMessage(SaveBarMessage::Save) => {
                 if self.recipe_name_value != "".to_string() {
@@ -318,6 +331,9 @@ impl Build {
                     self.before_inputs = self.modified_before_inputs.clone();
                     self.after_inputs = self.modified_after_inputs.clone();
                     self.unsaved = false;
+                    self.unsaved_tabs
+                        .borrow_mut()
+                        .insert(TabState::Build, false);
                     // TODO: Have errors show to user if unable to save
                     // TODO: Have different logging if name is unique vs changed name
                     command = Command::perform(do_nothing(), BuildMessage::Saved);

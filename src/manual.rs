@@ -32,6 +32,7 @@ pub struct Manual {
     logger: Logger,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
     current_node: Arc<Mutex<Node>>,
+    pub unsaved_in_bathtub: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +84,7 @@ impl Manual {
             logger,
             recipe_state,
             current_node,
+            unsaved_in_bathtub: false,
         }
     }
 

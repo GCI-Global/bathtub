@@ -15,10 +15,11 @@ pub mod style {
         RedDisabled,
         Green,
         Yellow,
+        YellowSelected,
     }
 
     impl Theme {
-        pub const ALL: [Theme; 13] = [
+        pub const ALL: [Theme; 14] = [
             Theme::Active,
             Theme::Disabled,
             Theme::Idle,
@@ -32,6 +33,7 @@ pub mod style {
             Theme::RedDisabled,
             Theme::Green,
             Theme::Yellow,
+            Theme::YellowSelected,
         ];
     }
 
@@ -64,6 +66,8 @@ pub mod style {
                 Theme::Red => red::Button.into(),
                 Theme::RedDisabled => red_disabled::Button.into(),
                 Theme::Green => green::Button.into(),
+                Theme::Yellow => yellow::Button.into(),
+                Theme::YellowSelected => yellow_selected::Button.into(),
                 _ => Default::default(),
             }
         }
@@ -473,7 +477,26 @@ pub mod style {
     }
 
     mod yellow {
-        use iced::{container, Color};
+        use iced::{button, container, Color};
+
+        pub struct Button;
+
+        impl button::StyleSheet for Button {
+            fn active(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(255, 191, 10).into(),
+                    text_color: Color::BLACK,
+                    ..button::Style::default()
+                }
+            }
+            fn hovered(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(255, 211, 30).into(),
+                    text_color: Color::BLACK,
+                    ..button::Style::default()
+                }
+            }
+        }
 
         pub struct Tooltip;
 
@@ -498,6 +521,29 @@ pub mod style {
                     border_color: Color::from_rgb8(245, 183, 0),
                     border_width: 5.0,
                     border_radius: 8.0,
+                }
+            }
+        }
+    }
+
+    mod yellow_selected {
+        use iced::{button, Color};
+
+        pub struct Button;
+
+        impl button::StyleSheet for Button {
+            fn active(&self) -> button::Style {
+                button::Style {
+                    background: Color::WHITE.into(),
+                    text_color: Color::from_rgb8(243, 156, 18),
+                    ..button::Style::default()
+                }
+            }
+            fn hovered(&self) -> button::Style {
+                button::Style {
+                    background: Color::WHITE.into(),
+                    text_color: Color::from_rgb8(253, 166, 28),
+                    ..button::Style::default()
                 }
             }
         }

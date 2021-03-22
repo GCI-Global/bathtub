@@ -3,7 +3,7 @@ use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use super::run::do_nothing;
 use super::style::style::Theme;
-use crate::CQ_MONO;
+use crate::{TabState as ParentTabState, CQ_MONO};
 use iced::{
     button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command, Container,
     Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
@@ -15,10 +15,11 @@ use super::grbl::{Command as Cmd, Grbl};
 use chrono::prelude::*;
 use chrono::DateTime;
 use regex::Regex;
-use serde::Serialize;
 use std::cell::RefCell;
 use std::cmp::min;
+use std::collections::HashMap;
 use std::fs;
+use std::mem::discriminant;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -33,14 +34,23 @@ pub struct Advanced {
     nodes_tab: NodeTab,
     actions_tab: ActionTab,
     logs_tab: LogTab,
+    parent_unsaved_tabs: Rc<RefCell<HashMap<ParentTabState, bool>>>,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
 }
 
+#[derive(Clone, Debug, Hash)]
 enum TabState {
     Grbl,
     Nodes,
     Actions,
     Logs,
 }
+impl PartialEq for TabState {
+    fn eq(&self, other: &Self) -> bool {
+        discriminant(self) == discriminant(other)
+    }
+}
+impl Eq for TabState {}
 
 #[derive(Debug, Clone)]
 pub enum AdvancedMessage {
@@ -60,15 +70,23 @@ impl Advanced {
         logger: Logger,
         ref_nodes: Rc<RefCell<Nodes>>,
         ref_actions: Rc<RefCell<Actions>>,
+        parent_unsaved_tabs: Rc<RefCell<HashMap<ParentTabState, bool>>>,
     ) -> Self {
+        let mut unsaved_tabs_local = HashMap::with_capacity(3);
+        unsaved_tabs_local.insert(TabState::Nodes, false);
+        unsaved_tabs_local.insert(TabState::Actions, false);
+        unsaved_tabs_local.insert(TabState::Grbl, false);
+        let unsaved_tabs = Rc::new(RefCell::new(unsaved_tabs_local));
         Advanced {
             scroll: scrollable::State::new(),
             state: TabState::Logs,
-            tab_bar: TabBar::new(),
-            grbl_tab: GrblTab::new(grbl, Vec::new(), logger.clone()),
-            nodes_tab: NodeTab::new(ref_nodes, logger.clone()),
-            actions_tab: ActionTab::new(ref_actions, logger),
+            tab_bar: TabBar::new(unsaved_tabs.clone()),
+            grbl_tab: GrblTab::new(grbl, Vec::new(), logger.clone(), unsaved_tabs.clone()),
+            nodes_tab: NodeTab::new(ref_nodes, logger.clone(), unsaved_tabs.clone()),
+            actions_tab: ActionTab::new(ref_actions, logger, unsaved_tabs.clone()),
             logs_tab: LogTab::new(),
+            parent_unsaved_tabs,
+            unsaved_tabs,
         }
     }
 
@@ -134,6 +152,10 @@ impl Advanced {
             }
             AdvancedMessage::GrblTab(GrblMessage::SaveMessage(SaveBarMessage::Cancel)) => {
                 self.grbl_tab.modified_settings = self.grbl_tab.settings.clone();
+                self.grbl_tab
+                    .unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Grbl, false);
                 self.grbl_tab.unsaved = false;
             }
             AdvancedMessage::TabBar(TabBarMessage::Nodes) => {
@@ -149,7 +171,6 @@ impl Advanced {
                 self.tab_bar.change_state(TabState::Logs)
             }
             AdvancedMessage::GrblTab(msg) => {
-                self.grbl_tab.unsaved = true;
                 self.grbl_tab.update(msg);
             }
             AdvancedMessage::NodesTab(NodeTabMessage::AddConfigNode) => {
@@ -180,6 +201,10 @@ impl Advanced {
                     .map(move |msg| AdvancedMessage::LogsTab(msg))
             }
         };
+        self.parent_unsaved_tabs.borrow_mut().insert(
+            ParentTabState::Advanced,
+            self.unsaved_tabs.borrow().values().any(|v| *v),
+        );
         command
     }
 
@@ -219,6 +244,7 @@ struct TabBar {
     actions_btn: button::State,
     logs_btn: button::State,
     current_tab: TabState,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -230,13 +256,14 @@ pub enum TabBarMessage {
 }
 
 impl TabBar {
-    fn new() -> Self {
+    fn new(unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>) -> Self {
         TabBar {
             grbl_btn: button::State::new(),
             nodes_btn: button::State::new(),
             actions_btn: button::State::new(),
             logs_btn: button::State::new(),
             current_tab: TabState::Logs,
+            unsaved_tabs,
         }
     }
 
@@ -276,8 +303,20 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .style(match self.current_tab {
-                    TabState::Nodes => Theme::TabSelected,
-                    _ => Theme::Blue,
+                    TabState::Nodes => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Nodes).unwrap() {
+                            Theme::YellowSelected
+                        } else {
+                            Theme::TabSelected
+                        }
+                    }
+                    _ => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Nodes).unwrap() {
+                            Theme::Yellow
+                        } else {
+                            Theme::Blue
+                        }
+                    }
                 })
                 .height(Length::Fill)
                 .width(Length::Units(200))
@@ -294,8 +333,20 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .style(match self.current_tab {
-                    TabState::Actions => Theme::TabSelected,
-                    _ => Theme::Blue,
+                    TabState::Actions => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Actions).unwrap() {
+                            Theme::YellowSelected
+                        } else {
+                            Theme::TabSelected
+                        }
+                    }
+                    _ => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Actions).unwrap() {
+                            Theme::Yellow
+                        } else {
+                            Theme::Blue
+                        }
+                    }
                 })
                 .height(Length::Fill)
                 .width(Length::Units(200))
@@ -312,8 +363,20 @@ impl TabBar {
                         .font(CQ_MONO),
                 )
                 .style(match self.current_tab {
-                    TabState::Grbl => Theme::TabSelected,
-                    _ => Theme::Blue,
+                    TabState::Grbl => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Grbl).unwrap() {
+                            Theme::YellowSelected
+                        } else {
+                            Theme::TabSelected
+                        }
+                    }
+                    _ => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Grbl).unwrap() {
+                            Theme::Yellow
+                        } else {
+                            Theme::Blue
+                        }
+                    }
                 })
                 .height(Length::Fill)
                 .width(Length::Units(200))
@@ -396,6 +459,7 @@ pub struct GrblTab {
     modified_settings: Vec<GrblSetting>,
     version: Option<String>,
     version_release_date: Option<String>,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -412,7 +476,12 @@ pub enum GrblMessage {
 }
 
 impl GrblTab {
-    fn new(grbl: Grbl, settings: Vec<GrblSetting>, logger: Logger) -> Self {
+    fn new(
+        grbl: Grbl,
+        settings: Vec<GrblSetting>,
+        logger: Logger,
+        unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
+    ) -> Self {
         GrblTab {
             save_bar: SaveBar::new(),
             unsaved: false,
@@ -422,12 +491,15 @@ impl GrblTab {
             version: None,
             version_release_date: None,
             logger,
+            unsaved_tabs,
         }
     }
 
     fn update(&mut self, message: GrblMessage) {
         match message {
             GrblMessage::SettingChanged(i, GrblSettingMessage::TextChanged(val)) => {
+                self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Grbl, true);
                 self.modified_settings[i].input_value = val
             }
             GrblMessage::SaveMessage(SaveBarMessage::Save) => {
@@ -478,6 +550,7 @@ impl GrblTab {
                     }
                 }
                 self.unsaved = false;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Grbl, false);
             }
             _ => {}
         }
@@ -588,6 +661,7 @@ struct NodeTab {
     config_nodes: Vec<ConfigNode>,
     add_config_node_btn: button::State,
     logger: Logger,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -599,7 +673,11 @@ pub enum NodeTabMessage {
 }
 
 impl NodeTab {
-    fn new(ref_nodes: Rc<RefCell<Nodes>>, logger: Logger) -> Self {
+    fn new(
+        ref_nodes: Rc<RefCell<Nodes>>,
+        logger: Logger,
+        unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
+    ) -> Self {
         // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
         // nested iter if to flatten the 3d nodes
         let node_pairs = ref_nodes
@@ -661,6 +739,7 @@ impl NodeTab {
             config_nodes,
             add_config_node_btn: button::State::new(),
             logger,
+            unsaved_tabs,
         }
     }
 
@@ -669,6 +748,7 @@ impl NodeTab {
         match message {
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::NameChanged(name))) => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Nodes, true);
                 // If a name is changed update all other instances of the node name
                 let original_name = self.config_nodes[i].name.clone();
                 let index = self
@@ -721,6 +801,7 @@ impl NodeTab {
                     node.update(ConfigNodeMessage::Okay);
                 }
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Nodes, true);
                 self.config_nodes[i].update(ConfigNodeMessage::Edit)
             }
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::HideChanged(b))) => {
@@ -732,6 +813,7 @@ impl NodeTab {
             }
             NodeTabMessage::ConfigNode((i, msg)) => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Nodes, true);
                 self.config_nodes[i].update(msg);
             }
             NodeTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
@@ -790,6 +872,9 @@ impl NodeTab {
                         v
                     });
                 self.unsaved = false;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Nodes, false);
             }
             NodeTabMessage::SaveMessage(SaveBarMessage::Save) => {
                 let mut nodes = self.modified_nodes.borrow().clone();
@@ -836,9 +921,13 @@ impl NodeTab {
                 self.logger.send_line(new_toml).unwrap();
                 command = Command::perform(do_nothing(), NodeTabMessage::Saved);
                 self.unsaved = false;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Nodes, false);
             }
             NodeTabMessage::AddConfigNode => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Nodes, true);
                 // generate unique name
                 let mut i = 2;
                 let name = if self
@@ -1429,6 +1518,7 @@ struct ActionTab {
     config_actions: Vec<ConfigAction>,
     add_config_action_btn: button::State,
     logger: Logger,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1440,7 +1530,11 @@ pub enum ActionTabMessage {
 }
 
 impl ActionTab {
-    fn new(ref_actions: Rc<RefCell<Actions>>, logger: Logger) -> Self {
+    fn new(
+        ref_actions: Rc<RefCell<Actions>>,
+        logger: Logger,
+        unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
+    ) -> Self {
         let modified_actions = Rc::new(RefCell::new(ref_actions.borrow().clone()));
         ActionTab {
             unsaved: false,
@@ -1456,6 +1550,7 @@ impl ActionTab {
             ),
             add_config_action_btn: button::State::new(),
             logger,
+            unsaved_tabs,
         }
     }
 
@@ -1468,6 +1563,9 @@ impl ActionTab {
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::NameChanged(name)) => {
                 // mark unsaved, change value in UI and modfied_nodes
                 self.unsaved = true;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Actions, true);
                 let index = self
                     .modified_actions
                     .borrow()
@@ -1483,11 +1581,17 @@ impl ActionTab {
                     config_action.update(ConfigActionMessage::Okay);
                 }
                 self.unsaved = true;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Actions, true);
                 self.config_actions[i].update(ConfigActionMessage::Edit);
             }
             ActionTabMessage::ConfigAction(i, msg) => self.config_actions[i].update(msg),
             ActionTabMessage::AddConfigAction => {
                 self.unsaved = true;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Actions, true);
                 // generate unique name
                 let mut i = 2;
                 let name = if self
@@ -1540,6 +1644,9 @@ impl ActionTab {
                 self.logger.send_line(new_toml).unwrap();
                 command = Command::perform(do_nothing(), ActionTabMessage::Saved);
                 self.unsaved = false;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Actions, false);
             }
             ActionTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
                 self.modified_actions = Rc::new(RefCell::new(self.ref_actions.borrow().clone()));
@@ -1553,6 +1660,9 @@ impl ActionTab {
                     });
 
                 self.unsaved = false;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Actions, false);
             }
             _ => {}
         }
