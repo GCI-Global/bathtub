@@ -49,7 +49,6 @@ pub enum RunState {
 
 #[derive(Debug, Clone)]
 pub enum RunMessage {
-    LargeStart,
     Start,
     Cancel,
     Run(()),
@@ -158,7 +157,6 @@ impl Run {
                 }
                 self.search_value = Some(recipe);
             }
-            RunMessage::LargeStart => self.state = RunState::BeforeRequiredInput,
             RunMessage::Start => {
                 if self.required_before_inputs.len() == 0
                     || self
@@ -190,6 +188,8 @@ impl Run {
                         .unwrap();
                     self.state = RunState::Standard;
                     command = Command::perform(do_nothing(), RunMessage::Run);
+                } else {
+                    self.state = RunState::BeforeRequiredInput
                 }
             }
             RunMessage::Finish => {
@@ -282,7 +282,7 @@ impl Run {
                                             .font(CQ_MONO),
                                     )
                                     .style(Theme::Green)
-                                    .on_press(RunMessage::LargeStart)
+                                    .on_press(RunMessage::Start)
                                     .padding(10)
                                     .width(Length::Units(500)),
                                     if *self.homing_required.borrow() {
