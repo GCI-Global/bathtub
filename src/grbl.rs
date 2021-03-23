@@ -58,6 +58,14 @@ impl Grbl {
         let mut rb = self.response_buffer.lock().unwrap();
         rb.pop()
     }
+    pub fn safe_pop(&self) -> Option<Command> {
+        let mut rb = self.response_buffer.lock().unwrap();
+        if rb.len() > 0 {
+            rb.pop();
+        } else {
+            None
+        };
+    }
     pub fn revive(&mut self) -> Result<(), ()> {
         if self.is_ok() {
             return Err(());
@@ -238,7 +246,7 @@ pub fn send(port: &mut SystemPort, command: &mut Command) {
                     }
                     // my code does not perfectly 1 to 1 grab location from '?', so filter out
                     // occasional extras
-                    if line.ends_with("\r\nok\r\nok\r") {
+                    if line.ends_with("\r\nok\r\nok\r") || line.contains("\n[VER:") {
                         line = "ok\r".to_string()
                     }
                     if command.command != "?".to_string() && line.contains("<") {

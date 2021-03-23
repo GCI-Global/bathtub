@@ -97,10 +97,10 @@ impl Advanced {
                 if !self.grbl_tab.unsaved {
                     self.grbl_tab.grbl.push_command(Cmd::new("$I".to_string()));
                     loop {
-                        if self.grbl_tab.grbl.queue_len() == 0 {
+                        if self.grbl_tab.grbl.queue_len() < 2 {
                             self.grbl_tab.grbl.push_command(Cmd::new("$I".to_string()));
                         }
-                        if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
+                        if let Some(cmd) = self.grbl_tab.grbl.safe_pop() {
                             if cmd.command == "$I".to_string() {
                                 let r = Regex::new(r"[0-9]*\.+[0-9]*[a-z]*").unwrap();
                                 let r2 = Regex::new(r"[0-9]{8}").unwrap();
@@ -120,10 +120,10 @@ impl Advanced {
                     }
                     self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
                     loop {
-                        if self.grbl_tab.grbl.queue_len() == 0 {
+                        if self.grbl_tab.grbl.queue_len() < 2 {
                             self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
                         }
-                        if let Some(cmd) = self.grbl_tab.grbl.pop_command() {
+                        if let Some(cmd) = self.grbl_tab.grbl.safe_pop() {
                             if cmd.command == "$$".to_string() {
                                 self.grbl_tab.modified_settings = cmd.result.unwrap().lines().fold(
                                     Vec::new(),
