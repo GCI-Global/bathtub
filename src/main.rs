@@ -57,7 +57,6 @@ struct State {
     grbl: Grbl,
     connected: bool,
     logger: Logger,
-    recipe_regex: Regex,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
 }
@@ -678,7 +677,6 @@ impl<'a> Application for Bathtub {
                             connected: true,
                             logger: logger.clone(),
                             grbl_status: None,
-                            recipe_regex: Regex::new(r"^[^.]+").unwrap(),
                             recipe_state: Arc::clone(&recipe_state),
                         });
                     }
@@ -699,6 +697,7 @@ impl<'a> Application for Bathtub {
                         state.tab_bar.change_state(TabState::Manual);
                     }
                     Message::TabBar(TabBarMessage::Build) => {
+                        state.tabs.build.update(BuildMessage::UpdateSearch);
                         state.state = TabState::Build;
                         state.tab_bar.change_state(TabState::Build);
                     }
@@ -707,20 +706,7 @@ impl<'a> Application for Bathtub {
                         state.tab_bar.change_state(TabState::Advanced)
                     }
                     Message::TabBar(TabBarMessage::Run) => {
-                        state.tabs.run.search =
-                            fs::read_dir("./recipes")
-                                .unwrap()
-                                .fold(Vec::new(), |mut rec, file| {
-                                    if let Some(caps) = state
-                                        .recipe_regex
-                                        .captures(&file.unwrap().file_name().to_str().unwrap())
-                                    {
-                                        rec.push(caps[0].to_string());
-                                    }
-                                    rec
-                                });
-                        state.tabs.run.search.sort();
-                        state.tabs.run.update(RunMessage::TabActive);
+                        state.tabs.run.update(RunMessage::UpdateSearch);
                         state.state = TabState::Run;
                         state.tab_bar.change_state(TabState::Run);
                     }

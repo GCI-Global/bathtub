@@ -12,12 +12,14 @@ use iced::{
     Element, Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
     VerticalAlignment,
 };
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::mem::discriminant;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -34,20 +36,32 @@ pub struct Build {
     modified_before_inputs: Vec<RequiredInput>,
     modified_after_inputs: Vec<RequiredInput>,
     add_step: AddStep,
-    recipe_name: text_input::State,
-    recipe_name_value: String,
+    search_options: Vec<String>,
+    search_state: pick_list::State<String>,
+    search_value: Option<String>,
     required_input_tab_btn: button::State,
     steps_tab_btn: button::State,
     add_input_before_btn: button::State,
     add_input_after_btn: button::State,
+    cancel_btn: button::State,
+    overwrite_confirmed_btn: button::State,
+    delete_confirmed_btn: button::State,
+    confirm_delete_btn: button::State,
+    save_with_name_btn: button::State,
+    name_entry_value: String,
+    name_entry_state: text_input::State,
     state: BuildState,
     logger: Logger,
     unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
+    recipe_regex: Regex,
 }
 
 enum BuildState {
     Steps,
     RequiredInput,
+    DeleteConfirm,
+    EnterName,
+    OverwriteConfirm,
 }
 
 #[derive(Debug, Clone)]
@@ -56,13 +70,20 @@ pub enum BuildMessage {
     BeforeRequiredInputMessage(usize, RequiredInputMessage),
     AfterRequiredInputMessage(usize, RequiredInputMessage),
     AddStepMessage(AddStepMessage),
-    UserChangedName(String),
+    SearchChanged(String),
+    UpdateSearch,
     SaveMessage(SaveBarMessage),
     StepsTab,
     RequiredInputTab,
     AddInputBefore,
     AddInputAfter,
     Saved(()),
+    Cancel,
+    ConfirmOverWrite,
+    DeleteConfirmed,
+    ConfirmDelete,
+    SaveWithName,
+    NameEntryChanged(String),
 }
 
 impl Build {
@@ -79,12 +100,20 @@ impl Build {
             add_step: AddStep::new(1, 0, Rc::clone(&nodes_ref), Rc::clone(&actions_ref)),
             nodes_ref,
             actions_ref,
-            recipe_name: text_input::State::new(),
-            recipe_name_value: "".to_string(),
+            search_options: Vec::new(),
+            search_state: pick_list::State::default(),
+            search_value: None,
             required_input_tab_btn: button::State::new(),
             steps_tab_btn: button::State::new(),
             add_input_before_btn: button::State::new(),
             add_input_after_btn: button::State::new(),
+            cancel_btn: button::State::new(),
+            save_with_name_btn: button::State::new(),
+            confirm_delete_btn: button::State::new(),
+            delete_confirmed_btn: button::State::new(),
+            overwrite_confirmed_btn: button::State::new(),
+            name_entry_state: text_input::State::new(),
+            name_entry_value: String::new(),
             steps: Vec::new(),
             before_inputs: Vec::new(),
             after_inputs: Vec::new(),
@@ -94,12 +123,17 @@ impl Build {
             state: BuildState::Steps,
             logger,
             unsaved_tabs,
+            recipe_regex: Regex::new(r"^[^.]+").unwrap(),
         }
     }
 
     pub fn update(&mut self, message: BuildMessage) -> Command<BuildMessage> {
         let mut command = Command::none();
         match message {
+            BuildMessage::Cancel => {
+                self.name_entry_value = String::new();
+                self.state = BuildState::Steps;
+            }
             BuildMessage::StepMessage(i, StepMessage::Delete) => {
                 self.modified_steps.remove(i);
                 for i in 0..self.modified_steps.len() {
@@ -218,8 +252,46 @@ impl Build {
                 self.modified_after_inputs
                     .push(RequiredInput::new("".to_string()));
             }
-            BuildMessage::UserChangedName(new_name) => self.recipe_name_value = new_name,
+            BuildMessage::SearchChanged(recipe) => {
+                if self.unsaved {
+                    self.save_bar.message = "Save or Cancel before changing recipe!".to_string();
+                } else {
+                    self.search_value = Some(recipe);
+                    update_recipe(self);
+                }
+            }
+            BuildMessage::ConfirmDelete => {
+                self.state = BuildState::DeleteConfirm;
+            }
+            BuildMessage::DeleteConfirmed => {
+                std::fs::remove_file(format!(
+                    "./recipes/{}.toml",
+                    self.search_value.take().unwrap()
+                ))
+                .unwrap();
+                update_search(self);
+                update_recipe(self);
+                self.state = BuildState::Steps;
+            }
+            BuildMessage::UpdateSearch => {
+                // check for and update with new recipe files
+                update_search(self);
+                // update the ui with recipie if it was changed
+                if let Some(selection) = self.search_value.as_ref() {
+                    if self.search_options.iter().any(|o| o == selection) {
+                        update_recipe(self);
+                    }
+                } else {
+                    self.steps = Vec::new();
+                    self.before_inputs = Vec::new();
+                    self.after_inputs = Vec::new();
+                    self.modified_steps = Vec::new();
+                    self.modified_before_inputs = Vec::new();
+                    self.modified_after_inputs = Vec::new();
+                }
+            }
             BuildMessage::SaveMessage(SaveBarMessage::Cancel) => {
+                self.save_bar.message = "Unsaved Changes!".to_string();
                 self.modified_steps = self.steps.clone();
                 self.modified_before_inputs = self.before_inputs.clone();
                 self.modified_after_inputs = self.after_inputs.clone();
@@ -228,115 +300,36 @@ impl Build {
                     .borrow_mut()
                     .insert(TabState::Build, false);
             }
+            BuildMessage::NameEntryChanged(val) => {
+                // unsfe windows chars
+                if ![r"/", r"\", r":", r"*", r"?", "\"", r"<", r">", r"|"]
+                    .iter()
+                    .any(|c| val.contains(c))
+                {
+                    self.name_entry_value = val
+                }
+            }
             BuildMessage::SaveMessage(SaveBarMessage::Save) => {
-                if self.recipe_name_value != "".to_string() {
-                    self.modified_before_inputs
-                        .retain(|input| input.value != "".to_string());
-                    self.modified_after_inputs
-                        .retain(|input| input.value != "".to_string());
-                    let save_data = Recipe {
-                        required_inputs: Input {
-                            before: self.modified_before_inputs.iter().fold(
-                                Vec::with_capacity(self.modified_before_inputs.len()),
-                                |mut v, input| {
-                                    v.push(input.value.clone());
-                                    v
-                                },
-                            ),
-                            after: self.modified_after_inputs.iter().fold(
-                                Vec::with_capacity(self.modified_after_inputs.len()),
-                                |mut v, input| {
-                                    v.push(input.value.clone());
-                                    v
-                                },
-                            ),
-                        },
-                        steps: self.modified_steps.iter().fold(
-                            Vec::with_capacity(self.modified_steps.len()),
-                            |mut v, step| {
-                                v.push(Step {
-                                    step_num: step.step_num.unwrap().to_string(),
-                                    selected_destination: step
-                                        .selected_destination
-                                        .clone()
-                                        .unwrap(),
-                                    hover: step.hover,
-                                    selected_action: step.selected_action.clone().unwrap(),
-                                    secs_value: step.secs_value.clone(),
-                                    mins_value: step.mins_value.clone(),
-                                    hours_value: step.hours_value.clone(),
-                                    wait: step.wait,
-                                });
-                                v
-                            },
-                        ),
-                    };
-                    // TODO: add error is unable to build toml
-                    let old_recipe = fs::read_to_string(Path::new(&format!(
-                        "./recipes/{}",
-                        &self.recipe_name_value
-                    )))
-                    .unwrap_or(String::new());
-                    let new_recipe = toml::to_string_pretty(&save_data).unwrap();
-                    match OpenOptions::new().write(true).open(Path::new(&format!(
-                        "./recipes/{}.toml",
-                        &self.recipe_name_value
-                    ))) {
-                        Ok(mut file) => {
-                            // file already exists, thus we need to log that recipe was changed
-                            write!(file, "{}", new_recipe).unwrap();
-                            self.logger.set_log_file(format!(
-                                "{}| Build - Changed '{}'",
-                                Local::now().to_rfc2822(),
-                                self.recipe_name_value
-                            ));
-                            self.logger.send_line(String::new()).unwrap();
-                            self.logger
-                                .send_line("Recipe changed from:".to_string())
-                                .unwrap();
-                            self.logger.send_line(old_recipe).unwrap();
-                            self.logger
-                                .send_line("\n\n\nRecipe changed to:".to_string())
-                                .unwrap();
-                            self.logger.send_line(new_recipe).unwrap();
-                        }
-                        Err(_) => {
-                            // new file thus new recipie, log should state created recipe
-                            println!("{:?}", self.recipe_name_value);
-                            let mut file = OpenOptions::new()
-                                .create(true)
-                                .write(true)
-                                .open(Path::new(&format!(
-                                    "./recipes/{}.toml",
-                                    &self.recipe_name_value
-                                )))
-                                .unwrap();
-                            write!(file, "{}", new_recipe).unwrap();
-                            self.logger.set_log_file(format!(
-                                "{}| Build - Created '{}'",
-                                Local::now().to_rfc2822(),
-                                self.recipe_name_value
-                            ));
-                            self.logger.send_line(String::new()).unwrap();
-                            self.logger
-                                .send_line(format!(
-                                    "Created Recipe '{}' as:",
-                                    self.recipe_name_value
-                                ))
-                                .unwrap();
-                            self.logger.send_line(new_recipe).unwrap();
-                        }
-                    }
-                    self.steps = self.modified_steps.clone();
-                    self.before_inputs = self.modified_before_inputs.clone();
-                    self.after_inputs = self.modified_after_inputs.clone();
-                    self.unsaved = false;
-                    self.unsaved_tabs
-                        .borrow_mut()
-                        .insert(TabState::Build, false);
-                    // TODO: Have errors show to user if unable to save
-                    // TODO: Have different logging if name is unique vs changed name
+                if self.modified_steps.iter().all(|s| match s.state {
+                    StepState::Idle { .. } => false,
+                    StepState::Editing { .. } => true,
+                }) {
+                    self.save_bar.message = "'Ok' all steps before saving".to_string();
+                } else {
+                    self.name_entry_value = self.search_value.clone().unwrap_or(String::new());
+                    self.state = BuildState::EnterName;
+                }
+            }
+            BuildMessage::ConfirmOverWrite => {
+                save(self);
+                command = Command::perform(do_nothing(), BuildMessage::Saved);
+            }
+            BuildMessage::SaveWithName => {
+                if !Path::new(&format!("./recipes/{}.toml", self.name_entry_value)).exists() {
+                    save(self);
                     command = Command::perform(do_nothing(), BuildMessage::Saved);
+                } else {
+                    self.state = BuildState::OverwriteConfirm
                 }
             }
             _ => {}
@@ -354,6 +347,30 @@ impl Build {
                 .align_items(Align::Center)
                 .push(Space::with_height(Length::Units(50))),
         };
+        let search = Row::new()
+            .height(Length::Units(40))
+            .push(
+                PickList::new(
+                    &mut self.search_state,
+                    &self.search_options[..],
+                    self.search_value.clone(),
+                    BuildMessage::SearchChanged,
+                )
+                .style(Theme::Blue)
+                .padding(10)
+                .width(Length::Fill),
+            )
+            .push(match self.search_value {
+                Some(_) => Row::with_children(vec![Button::new(
+                    &mut self.confirm_delete_btn,
+                    Text::new("Delete Recipe").font(CQ_MONO).size(20),
+                )
+                .padding(10)
+                .style(Theme::Red)
+                .on_press(BuildMessage::ConfirmDelete)
+                .into()]),
+                None => Row::new(),
+            });
         let tab_btns = Column::new().align_items(Align::Center).push(
             Row::new()
                 .push(Space::with_width(Length::Fill))
@@ -388,17 +405,6 @@ impl Build {
                     .width(Length::Units(200)),
                 )
                 .push(Space::with_width(Length::Fill)),
-        );
-        let search = Row::new().height(Length::Units(40)).push(
-            TextInput::new(
-                &mut self.recipe_name,
-                "Recipie Name",
-                &self.recipe_name_value,
-                BuildMessage::UserChangedName,
-            )
-            .style(Theme::Blue)
-            .padding(10)
-            .width(Length::Fill),
         );
         match self.state {
             BuildState::Steps => {
@@ -528,6 +534,143 @@ impl Build {
                             .push(width_limit)
                             .push(Space::with_width(Length::Fill)),
                     );
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            BuildState::EnterName => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(Text::new("SAVE").font(CQ_MONO).size(40))
+                    .push(
+                        Text::new("What should this recipe be saved as?")
+                            .horizontal_alignment(HorizontalAlignment::Center)
+                            .size(30),
+                    )
+                    .push(
+                        TextInput::new(
+                            &mut self.name_entry_state,
+                            "Name (Required)",
+                            &self.name_entry_value,
+                            BuildMessage::NameEntryChanged,
+                        )
+                        .padding(10),
+                    )
+                    .push(Row::with_children(vec![
+                        Space::with_width(Length::Fill).into(),
+                        Button::new(
+                            &mut self.save_with_name_btn,
+                            Text::new(format!("Save as\n'{}'", self.name_entry_value))
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .style(Theme::Green)
+                        .on_press(BuildMessage::SaveWithName)
+                        .padding(10)
+                        .width(Length::Units(200))
+                        .into(),
+                        Space::with_width(Length::Units(100)).into(),
+                        Button::new(
+                            &mut self.cancel_btn,
+                            Text::new("No.\nDon't save.")
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .style(Theme::Red)
+                        .on_press(BuildMessage::Cancel)
+                        .width(Length::Units(200))
+                        .padding(10)
+                        .into(),
+                        Space::with_width(Length::Fill).into(),
+                    ]));
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            BuildState::DeleteConfirm => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(Text::new("DELETE").font(CQ_MONO).size(40))
+                    .push(
+                        Text::new(format!(
+                            "Delete '{}'?\nThis CANNOT be undone!",
+                            self.search_value.as_ref().unwrap_or(&String::new())
+                        ))
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .size(30),
+                    )
+                    .push(Row::with_children(vec![
+                        Space::with_width(Length::Fill).into(),
+                        Button::new(
+                            &mut self.delete_confirmed_btn,
+                            Text::new(format!("DELETE"))
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .style(Theme::Red)
+                        .on_press(BuildMessage::DeleteConfirmed)
+                        .padding(10)
+                        .width(Length::Units(200))
+                        .into(),
+                        Space::with_width(Length::Units(100)).into(),
+                        Button::new(
+                            &mut self.cancel_btn,
+                            Text::new("Cancel")
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .style(Theme::Blue)
+                        .on_press(BuildMessage::Cancel)
+                        .width(Length::Units(200))
+                        .padding(10)
+                        .into(),
+                        Space::with_width(Length::Fill).into(),
+                    ]));
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            BuildState::OverwriteConfirm => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(
+                        Text::new(format!("'{}' already exists!", self.name_entry_value)).font(CQ_MONO).size(40)    
+                    )
+                    .push(Text::new(format!("This will delete the old '{}' and replace it with the new one.\nThis CANNOT be undone!", self.search_value.as_ref().unwrap_or(&String::new()))).horizontal_alignment(HorizontalAlignment::Center).size(30))
+                            .push(Row::with_children(vec![
+                                Space::with_width(Length::Fill).into(),
+                                Button::new(
+                                    &mut self.overwrite_confirmed_btn,
+                                    Text::new(format!("Yes, replace\n'{}'", self.name_entry_value))
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                ).style(Theme::Red)
+                                .on_press(BuildMessage::ConfirmOverWrite)
+                                .padding(10)
+                                .width(Length::Units(200))
+                                .into(),
+                                Space::with_width(Length::Units(100)).into(),
+                                Button::new(
+                                    &mut self.cancel_btn,
+                                    Text::new("Cancel\n ")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                ).style(Theme::Blue)
+                                .on_press(BuildMessage::Cancel)
+                                .width(Length::Units(200))
+                                .padding(10)
+                                .into(),
+                                Space::with_width(Length::Fill).into(),
+                            ]));
                 Scrollable::new(&mut self.scroll)
                     .padding(40)
                     .push(Container::new(content).width(Length::Fill).center_x())
@@ -1511,4 +1654,185 @@ pub fn down_icon() -> Text {
 
 pub fn right_icon() -> Text {
     icon('\u{E803}')
+}
+fn update_recipe(tab: &mut Build) {
+    match &fs::read_to_string(format!(
+        "./recipes/{}.toml",
+        tab.search_value.as_ref().unwrap_or(&String::new())
+    )) {
+        Ok(toml_str) => {
+            let rec: Recipe = toml::from_str(toml_str).unwrap();
+            tab.before_inputs = rec.required_inputs.before.iter().fold(
+                Vec::with_capacity(rec.required_inputs.before.len()),
+                |mut v, input| {
+                    v.push(RequiredInput::new(input.clone()));
+                    v
+                },
+            );
+            tab.after_inputs = rec.required_inputs.after.iter().fold(
+                Vec::with_capacity(rec.required_inputs.after.len()),
+                |mut v, input| {
+                    v.push(RequiredInput::new(input.clone()));
+                    v
+                },
+            );
+            let steps_len = rec.steps.len();
+            tab.steps = rec.steps.into_iter().enumerate().fold(
+                Vec::with_capacity(steps_len),
+                |mut v, (i, step)| {
+                    v.push(BuildStep::new(
+                        Some(i + 1),
+                        steps_len,
+                        Rc::clone(&tab.nodes_ref),
+                        Rc::clone(&tab.actions_ref),
+                        Some(step.selected_destination),
+                        step.hover,
+                        Some(step.selected_action),
+                        step.hours_value,
+                        step.mins_value,
+                        step.secs_value,
+                        step.wait,
+                    ));
+                    v
+                },
+            );
+            tab.add_step.step_num = Some(steps_len + 1);
+            tab.add_step.steps_len = steps_len;
+            tab.modified_steps = tab.steps.clone();
+            tab.modified_after_inputs = tab.after_inputs.clone();
+            tab.modified_before_inputs = tab.before_inputs.clone();
+        }
+        // TODO: Display Error when unable to read file
+        Err(_err) => {}
+    }
+}
+
+fn save(tab: &mut Build) {
+    tab.save_bar.message = "Unsaved Changes!".to_string();
+    if tab.name_entry_value != String::new() {
+        tab.modified_before_inputs
+            .retain(|input| input.value != "".to_string());
+        tab.modified_after_inputs
+            .retain(|input| input.value != "".to_string());
+        let save_data = Recipe {
+            required_inputs: Input {
+                before: tab.modified_before_inputs.iter().fold(
+                    Vec::with_capacity(tab.modified_before_inputs.len()),
+                    |mut v, input| {
+                        v.push(input.value.clone());
+                        v
+                    },
+                ),
+                after: tab.modified_after_inputs.iter().fold(
+                    Vec::with_capacity(tab.modified_after_inputs.len()),
+                    |mut v, input| {
+                        v.push(input.value.clone());
+                        v
+                    },
+                ),
+            },
+            steps: tab.modified_steps.iter().fold(
+                Vec::with_capacity(tab.modified_steps.len()),
+                |mut v, step| {
+                    v.push(Step {
+                        step_num: step.step_num.unwrap().to_string(),
+                        selected_destination: step.selected_destination.clone().unwrap(),
+                        hover: step.hover,
+                        selected_action: step.selected_action.clone().unwrap(),
+                        secs_value: step.secs_value.clone(),
+                        mins_value: step.mins_value.clone(),
+                        hours_value: step.hours_value.clone(),
+                        wait: step.wait,
+                    });
+                    v
+                },
+            ),
+        };
+        // TODO: add error is unable to build toml
+        let old_recipe = fs::read_to_string(Path::new(&format!(
+            "./recipes/{}.toml",
+            &tab.search_value.as_ref().unwrap(),
+        )))
+        .unwrap_or(String::new());
+        let new_recipe = toml::to_string_pretty(&save_data).unwrap();
+        match OpenOptions::new().write(true).open(Path::new(&format!(
+            "./recipes/{}.toml",
+            &tab.name_entry_value,
+        ))) {
+            Ok(mut file) => {
+                // file already exists, thus we need to log that recipe was changed
+                write!(file, "{}", new_recipe).unwrap();
+                tab.logger.set_log_file(format!(
+                    "{}| Build - Changed '{}'",
+                    Local::now().to_rfc2822(),
+                    tab.name_entry_value,
+                ));
+                tab.logger.send_line(String::new()).unwrap();
+                tab.logger
+                    .send_line("Recipe changed from:".to_string())
+                    .unwrap();
+                tab.logger.send_line(old_recipe).unwrap();
+                tab.logger
+                    .send_line("\n\n\nRecipe changed to:".to_string())
+                    .unwrap();
+                tab.logger.send_line(new_recipe).unwrap();
+            }
+            Err(_) => {
+                // new file thus new recipie, log should state created recipe
+                let mut file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(Path::new(&format!(
+                        "./recipes/{}.toml",
+                        &tab.name_entry_value
+                    )))
+                    .unwrap();
+                write!(file, "{}", new_recipe).unwrap();
+                tab.logger.set_log_file(format!(
+                    "{}| Build - Created '{}'",
+                    Local::now().to_rfc2822(),
+                    tab.name_entry_value
+                ));
+                tab.logger.send_line(String::new()).unwrap();
+                tab.logger
+                    .send_line(format!("Created Recipe '{}' as:", tab.name_entry_value))
+                    .unwrap();
+                tab.logger.send_line(new_recipe).unwrap();
+            }
+        }
+        tab.steps = tab.modified_steps.clone();
+        tab.before_inputs = tab.modified_before_inputs.clone();
+        tab.after_inputs = tab.modified_after_inputs.clone();
+        tab.unsaved = false;
+        tab.unsaved_tabs.borrow_mut().insert(TabState::Build, false);
+        tab.search_value = Some(tab.name_entry_value.clone());
+        update_search(tab);
+        update_recipe(tab);
+        tab.state = BuildState::Steps;
+        // TODO: Have errors show to user if unable to save
+    } else {
+        tab.name_entry_value = String::new();
+        tab.steps = Vec::new();
+        tab.before_inputs = Vec::new();
+        tab.after_inputs = Vec::new();
+        tab.modified_steps = Vec::new();
+        tab.modified_before_inputs = Vec::new();
+        tab.modified_after_inputs = Vec::new();
+        update_search(tab);
+        update_recipe(tab);
+    }
+}
+fn update_search(tab: &mut Build) {
+    tab.search_options = fs::read_dir("./recipes")
+        .unwrap()
+        .fold(Vec::new(), |mut rec, file| {
+            if let Some(caps) = tab
+                .recipe_regex
+                .captures(&file.unwrap().file_name().to_str().unwrap())
+            {
+                rec.push(caps[0].to_string());
+            }
+            rec
+        });
+    tab.search_options.sort();
 }

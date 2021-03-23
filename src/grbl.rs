@@ -61,10 +61,10 @@ impl Grbl {
     pub fn safe_pop(&self) -> Option<Command> {
         let mut rb = self.response_buffer.lock().unwrap();
         if rb.len() > 0 {
-            rb.pop();
+            rb.pop()
         } else {
             None
-        };
+        }
     }
     pub fn revive(&mut self) -> Result<(), ()> {
         if self.is_ok() {

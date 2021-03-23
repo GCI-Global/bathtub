@@ -9,6 +9,7 @@ use super::build::{attention_icon, ns, pause_icon, play_icon, Recipe};
 use super::logger::Logger;
 use super::style::style::Theme;
 use chrono::prelude::*;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -25,9 +26,10 @@ pub struct Run {
     stop_confirm_btn: button::State,
     pause_btn: button::State,
     resume_btn: button::State,
-    pub search: Vec<String>,
+    pub search_options: Vec<String>,
     search_state: pick_list::State<String>,
     pub search_value: Option<String>,
+    recipe_regex: Regex,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
     pub recipe: Option<Recipe>,
     continue_btns: Vec<Option<ContinueButton>>,
@@ -57,8 +59,8 @@ pub enum RunMessage {
     RequireStopConfirm,
     Pause(()),
     Resume,
-    TabActive,
-    RecipieChanged(String),
+    UpdateSearch,
+    SearchChanged(String),
     RequiredBeforeInput(usize, RequiredInputMessage),
     RequiredAfterInput(usize, RequiredInputMessage),
     Step,
@@ -80,12 +82,13 @@ impl Run {
             stop_confirm_btn: button::State::new(),
             pause_btn: button::State::new(),
             resume_btn: button::State::new(),
-            search: Vec::new(),
+            search_options: Vec::new(),
             search_state: pick_list::State::default(),
             search_value: None,
             continue_btns: Vec::new(),
             recipe: None,
             active_recipie: None,
+            recipe_regex: Regex::new(r"^[^.]+").unwrap(),
             recipe_state,
             state: RunState::Standard,
             required_before_inputs: Vec::new(),
@@ -98,11 +101,6 @@ impl Run {
     pub fn update(&mut self, message: RunMessage) -> Command<RunMessage> {
         let mut command = Command::none();
         match message {
-            RunMessage::TabActive => {
-                if let Some(sv) = self.search_value.clone() {
-                    self.update(RunMessage::RecipieChanged(sv));
-                }
-            }
             RunMessage::Step => {
                 for btn in &mut self.continue_btns {
                     if let Some(b) = btn {
@@ -117,45 +115,30 @@ impl Run {
                 *recipe_state = RecipeState::RecipeRunning;
                 cvar.notify_all();
             }
-            RunMessage::RecipieChanged(recipe) => {
-                match &fs::read_to_string(format!("./recipes/{}.toml", recipe)) {
-                    Ok(toml_str) => {
-                        let rec: Recipe = toml::from_str(toml_str).unwrap();
-                        self.continue_btns = Vec::with_capacity(rec.steps.len());
-                        let mut count = 1;
-                        for step in &rec.steps {
-                            if step.wait {
-                                self.continue_btns.push(Some(ContinueButton::new(
-                                    count,
-                                    Arc::clone(&self.recipe_state),
-                                )));
-                                count += 1;
-                            } else {
-                                self.continue_btns.push(None);
+            RunMessage::UpdateSearch => {
+                // check for and update with new recipe files
+                self.search_options =
+                    fs::read_dir("./recipes")
+                        .unwrap()
+                        .fold(Vec::new(), |mut rec, file| {
+                            if let Some(caps) = self
+                                .recipe_regex
+                                .captures(&file.unwrap().file_name().to_str().unwrap())
+                            {
+                                rec.push(caps[0].to_string());
                             }
-                        }
-                        self.required_before_inputs = rec.required_inputs.before.iter().fold(
-                            Vec::with_capacity(rec.required_inputs.before.len()),
-                            |mut v, input| {
-                                v.push(RequiredInput::new(input.clone()));
-                                v
-                            },
-                        );
-                        self.required_after_inputs = rec.required_inputs.after.iter().fold(
-                            Vec::with_capacity(rec.required_inputs.after.len()),
-                            |mut v, input| {
-                                v.push(RequiredInput::new(input.clone()));
-                                v
-                            },
-                        );
-                        self.recipe = Some(rec);
-                    }
-                    // TODO: Display Error when unable to read file
-                    Err(_err) => {
-                        self.recipe = None;
+                            rec
+                        });
+                self.search_options.sort();
+                // update the ui with recipie if it was changed
+                if let Some(selection) = self.search_value.take() {
+                    if self.search_options.iter().any(|o| o == &selection) {
+                        update_recipe(self, selection);
                     }
                 }
-                self.search_value = Some(recipe);
+            }
+            RunMessage::SearchChanged(recipe) => {
+                update_recipe(self, recipe);
             }
             RunMessage::Start => {
                 if self.required_before_inputs.len() == 0
@@ -242,15 +225,15 @@ impl Run {
             RunState::Standard => {
                 let search: Element<_>;
                 {
-                    let (recipie_state, _) = &*self.recipe_state;
-                    search = match *recipie_state.lock().unwrap() {
+                    let (recipe_state, _) = &*self.recipe_state;
+                    search = match *recipe_state.lock().unwrap() {
                         RecipeState::Stopped => Row::new()
                             .push(
                                 PickList::new(
                                     &mut self.search_state,
-                                    &self.search[..],
+                                    &self.search_options[..],
                                     self.search_value.clone(),
-                                    RunMessage::RecipieChanged,
+                                    RunMessage::SearchChanged,
                                 )
                                 .style(Theme::Blue)
                                 .padding(10)
@@ -794,4 +777,44 @@ impl ContinueButton {
 
 pub async fn do_nothing() {
     ()
+}
+fn update_recipe(tab: &mut Run, recipe: String) {
+    match &fs::read_to_string(format!("./recipes/{}.toml", recipe)) {
+        Ok(toml_str) => {
+            let rec: Recipe = toml::from_str(toml_str).unwrap();
+            tab.continue_btns = Vec::with_capacity(rec.steps.len());
+            let mut count = 1;
+            for step in &rec.steps {
+                if step.wait {
+                    tab.continue_btns.push(Some(ContinueButton::new(
+                        count,
+                        Arc::clone(&tab.recipe_state),
+                    )));
+                    count += 1;
+                } else {
+                    tab.continue_btns.push(None);
+                }
+            }
+            tab.required_before_inputs = rec.required_inputs.before.iter().fold(
+                Vec::with_capacity(rec.required_inputs.before.len()),
+                |mut v, input| {
+                    v.push(RequiredInput::new(input.clone()));
+                    v
+                },
+            );
+            tab.required_after_inputs = rec.required_inputs.after.iter().fold(
+                Vec::with_capacity(rec.required_inputs.after.len()),
+                |mut v, input| {
+                    v.push(RequiredInput::new(input.clone()));
+                    v
+                },
+            );
+            tab.recipe = Some(rec);
+        }
+        // TODO: Display Error when unable to read file
+        Err(_err) => {
+            tab.recipe = None;
+        }
+    }
+    tab.search_value = Some(recipe);
 }

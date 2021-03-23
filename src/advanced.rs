@@ -388,6 +388,7 @@ impl TabBar {
 }
 
 pub struct SaveBar {
+    pub message: String,
     save_btn: button::State,
     cancel_btn: button::State,
 }
@@ -403,6 +404,7 @@ impl SaveBar {
         SaveBar {
             save_btn: button::State::new(),
             cancel_btn: button::State::new(),
+            message: "Unsaved Changes!".to_string(),
         }
     }
 
@@ -411,10 +413,10 @@ impl SaveBar {
             Row::with_children(vec![
                 Space::with_width(Length::Units(50)).into(),
                 Column::with_children(vec![
-                    Space::with_height(Length::Units(12)).into(),
-                    Text::new("Unsaved Changes!")
+                    Space::with_height(Length::Units(15)).into(),
+                    Text::new(&self.message)
                         .vertical_alignment(VerticalAlignment::Center)
-                        .size(25)
+                        .size(22)
                         .font(CQ_MONO)
                         .into(),
                 ])
