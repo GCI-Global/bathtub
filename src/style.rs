@@ -16,10 +16,12 @@ pub mod style {
         Green,
         Yellow,
         YellowSelected,
+        LightGray,
+        LighterGray,
     }
 
     impl Theme {
-        pub const ALL: [Theme; 14] = [
+        pub const ALL: [Theme; 16] = [
             Theme::Active,
             Theme::Disabled,
             Theme::Idle,
@@ -34,6 +36,8 @@ pub mod style {
             Theme::Green,
             Theme::Yellow,
             Theme::YellowSelected,
+            Theme::LightGray,
+            Theme::LighterGray,
         ];
     }
 
@@ -49,6 +53,8 @@ pub mod style {
                 Theme::Active => yellow::Tooltip.into(),
                 Theme::Red => red::Container.into(),
                 Theme::Yellow => yellow::Container.into(),
+                Theme::LightGray => light_gray::Container.into(),
+                Theme::LighterGray => lighter_gray::Container.into(),
                 _ => Default::default(),
             }
         }
@@ -544,6 +550,40 @@ pub mod style {
                     background: Color::WHITE.into(),
                     text_color: Color::from_rgb8(253, 166, 28),
                     ..button::Style::default()
+                }
+            }
+        }
+    }
+    mod light_gray {
+        use iced::{container, Color};
+
+        pub struct Container;
+
+        impl container::StyleSheet for Container {
+            fn style(&self) -> container::Style {
+                container::Style {
+                    text_color: Some(Color::BLACK),
+                    background: Color::from_rgb8(220, 220, 220).into(),
+                    border_radius: 0.0,
+                    border_width: 0.0,
+                    border_color: Color::TRANSPARENT,
+                }
+            }
+        }
+    }
+    mod lighter_gray {
+        use iced::{container, Color};
+
+        pub struct Container;
+
+        impl container::StyleSheet for Container {
+            fn style(&self) -> container::Style {
+                container::Style {
+                    text_color: Some(Color::BLACK),
+                    background: Color::from_rgb8(240, 240, 240).into(),
+                    border_radius: 0.0,
+                    border_width: 0.0,
+                    border_color: Color::TRANSPARENT,
                 }
             }
         }

@@ -19,7 +19,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::mem::discriminant;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -428,7 +427,12 @@ impl Build {
                     .modified_steps
                     .iter_mut()
                     .enumerate()
-                    .fold(Column::new().spacing(15), |column, (i, step)| {
+                    .fold(Column::new(), |column, (i, step)| {
+                        step.set_style(if i % 2 == 0 {
+                            Theme::LightGray
+                        } else {
+                            Theme::LighterGray
+                        });
                         column.push(
                             step.view()
                                 .map(move |msg| BuildMessage::StepMessage(i, msg)),
@@ -772,6 +776,7 @@ pub struct BuildStep {
     hours_value: String,
     wait: bool,
     state: StepState,
+    style: Theme,
 }
 
 #[derive(Debug, Clone)]
@@ -849,7 +854,11 @@ impl BuildStep {
             state: StepState::Idle {
                 edit_btn: button::State::new(),
             },
+            style: Theme::LightGray,
         }
+    }
+    fn set_style(&mut self, style: Theme) {
+        self.style = style;
     }
 
     fn update(&mut self, message: StepMessage) {
@@ -966,158 +975,161 @@ impl BuildStep {
                 mins_input,
                 hours_input,
             } => {
-                Column::new()
-                    .push(
-                        Row::new()
-                            .push(
-                                // Step num
-                                Column::new().push(
-                                    PickList::new(
-                                        step_num_state,
-                                        (1..self.steps_len + 1).collect::<Vec<usize>>(),
-                                        self.step_num,
-                                        StepMessage::NewNum,
-                                    )
-                                    .style(Theme::Blue)
-                                    .padding(10)
-                                    .width(Length::Shrink),
-                                ),
-                            )
-                            .push(
-                                // Destination
-                                Column::new().push(
-                                    PickList::new(
-                                        destination_state,
-                                        self.nodes_ref
-                                            .borrow()
-                                            .node
-                                            .iter()
-                                            .filter(|n| !n.name.contains("_hover") && !n.hide)
-                                            .fold(Vec::new(), |mut v, n| {
-                                                v.push(n.name.clone());
-                                                v
-                                            }),
-                                        self.selected_destination.clone(),
-                                        StepMessage::NewDestination,
-                                    )
-                                    .style(Theme::Blue)
-                                    .padding(10)
-                                    .width(Length::Shrink),
-                                ),
-                            )
-                            .push(
-                                // actions
-                                Column::new().push(
-                                    Row::new()
-                                        .push(
-                                            PickList::new(
-                                                actions_state,
-                                                self.actions_ref.borrow().action.iter().fold(
-                                                    Vec::new(),
-                                                    |mut v, a| {
-                                                        v.push(a.name.clone());
-                                                        v
-                                                    },
-                                                ),
-                                                self.selected_action.clone(),
-                                                StepMessage::NewAction,
-                                            )
-                                            .style(Theme::Blue)
-                                            .padding(10)
-                                            .width(Length::Shrink),
+                Container::new(
+                    Column::new()
+                        .push(
+                            Row::new()
+                                .push(
+                                    // Step num
+                                    Column::new().push(
+                                        PickList::new(
+                                            step_num_state,
+                                            (1..self.steps_len + 1).collect::<Vec<usize>>(),
+                                            self.step_num,
+                                            StepMessage::NewNum,
                                         )
-                                        .push(
-                                            TextInput::new(
-                                                // hours
-                                                hours_input,
-                                                "Hours",
-                                                &self.hours_value,
-                                                StepMessage::HoursChanged,
-                                            )
-                                            .style(Theme::Blue)
-                                            .on_scroll_up(StepMessage::HoursIncrement)
-                                            .on_scroll_down(StepMessage::HoursDecrement)
-                                            .padding(10)
-                                            .width(Length::Fill),
+                                        .style(Theme::Blue)
+                                        .padding(10)
+                                        .width(Length::Shrink),
+                                    ),
+                                )
+                                .push(
+                                    // Destination
+                                    Column::new().push(
+                                        PickList::new(
+                                            destination_state,
+                                            self.nodes_ref
+                                                .borrow()
+                                                .node
+                                                .iter()
+                                                .filter(|n| !n.name.contains("_hover") && !n.hide)
+                                                .fold(Vec::new(), |mut v, n| {
+                                                    v.push(n.name.clone());
+                                                    v
+                                                }),
+                                            self.selected_destination.clone(),
+                                            StepMessage::NewDestination,
                                         )
-                                        .push(
-                                            (TextInput::new(
-                                                // mins
-                                                mins_input,
-                                                "Minutes",
-                                                &self.mins_value,
-                                                StepMessage::MinsChanged,
-                                            )
-                                            .style(Theme::Blue))
-                                            .on_scroll_up(StepMessage::MinsIncrement)
-                                            .on_scroll_down(StepMessage::MinsDecrement)
-                                            .padding(10)
-                                            .width(Length::Fill),
-                                        )
-                                        .push(
-                                            TextInput::new(
-                                                // secs
-                                                secs_input,
-                                                "Seconds",
-                                                &self.secs_value,
-                                                StepMessage::SecsChanged,
-                                            )
-                                            .style(Theme::Blue)
-                                            .on_scroll_up(StepMessage::SecsIncrement)
-                                            .on_scroll_down(StepMessage::SecsDecrement)
-                                            .padding(10)
-                                            .width(Length::Fill),
-                                        )
-                                        .push(
-                                            Button::new(okay_btn, okay_icon())
-                                                .on_press(StepMessage::Okay)
+                                        .style(Theme::Blue)
+                                        .padding(10)
+                                        .width(Length::Shrink),
+                                    ),
+                                )
+                                .push(
+                                    // actions
+                                    Column::new().push(
+                                        Row::new()
+                                            .push(
+                                                PickList::new(
+                                                    actions_state,
+                                                    self.actions_ref.borrow().action.iter().fold(
+                                                        Vec::new(),
+                                                        |mut v, a| {
+                                                            v.push(a.name.clone());
+                                                            v
+                                                        },
+                                                    ),
+                                                    self.selected_action.clone(),
+                                                    StepMessage::NewAction,
+                                                )
+                                                .style(Theme::Blue)
                                                 .padding(10)
-                                                .width(Length::Units(50))
-                                                .style(Theme::Green),
-                                        )
-                                        .push(
-                                            Button::new(delete_btn, delete_icon())
-                                                .on_press(StepMessage::Delete)
+                                                .width(Length::Shrink),
+                                            )
+                                            .push(
+                                                TextInput::new(
+                                                    // hours
+                                                    hours_input,
+                                                    "Hours",
+                                                    &self.hours_value,
+                                                    StepMessage::HoursChanged,
+                                                )
+                                                .style(Theme::Blue)
+                                                .on_scroll_up(StepMessage::HoursIncrement)
+                                                .on_scroll_down(StepMessage::HoursDecrement)
                                                 .padding(10)
-                                                .width(Length::Units(50))
-                                                .style(Theme::Red),
-                                        ),
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                (TextInput::new(
+                                                    // mins
+                                                    mins_input,
+                                                    "Minutes",
+                                                    &self.mins_value,
+                                                    StepMessage::MinsChanged,
+                                                )
+                                                .style(Theme::Blue))
+                                                .on_scroll_up(StepMessage::MinsIncrement)
+                                                .on_scroll_down(StepMessage::MinsDecrement)
+                                                .padding(10)
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                TextInput::new(
+                                                    // secs
+                                                    secs_input,
+                                                    "Seconds",
+                                                    &self.secs_value,
+                                                    StepMessage::SecsChanged,
+                                                )
+                                                .style(Theme::Blue)
+                                                .on_scroll_up(StepMessage::SecsIncrement)
+                                                .on_scroll_down(StepMessage::SecsDecrement)
+                                                .padding(10)
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                Button::new(okay_btn, okay_icon())
+                                                    .on_press(StepMessage::Okay)
+                                                    .padding(10)
+                                                    .width(Length::Units(50))
+                                                    .style(Theme::Green),
+                                            )
+                                            .push(
+                                                Button::new(delete_btn, delete_icon())
+                                                    .on_press(StepMessage::Delete)
+                                                    .padding(10)
+                                                    .width(Length::Units(50))
+                                                    .style(Theme::Red),
+                                            ),
+                                    ),
                                 ),
-                            ),
-                    )
-                    .push(
-                        Row::new()
-                            .push(Space::with_width(Length::Fill))
-                            .push(
-                                Column::new()
-                                    .push(
-                                        Checkbox::new(
-                                            self.hover,
-                                            "Hover Above",
-                                            StepMessage::ToggleHover,
+                        )
+                        .push(
+                            Row::new()
+                                .push(Space::with_width(Length::Fill))
+                                .push(
+                                    Column::new()
+                                        .push(
+                                            Checkbox::new(
+                                                self.hover,
+                                                "Hover Above",
+                                                StepMessage::ToggleHover,
+                                            )
+                                            .style(Theme::Blue),
                                         )
-                                        .style(Theme::Blue),
-                                    )
-                                    .padding(4)
-                                    .width(Length::Shrink),
-                            )
-                            .push(Space::with_width(Length::Units(25)))
-                            .push(
-                                Column::new()
-                                    .push(
-                                        Checkbox::new(
-                                            self.wait,
-                                            "Require Input",
-                                            StepMessage::ToggleWait,
+                                        .padding(4)
+                                        .width(Length::Shrink),
+                                )
+                                .push(Space::with_width(Length::Units(25)))
+                                .push(
+                                    Column::new()
+                                        .push(
+                                            Checkbox::new(
+                                                self.wait,
+                                                "Require Input",
+                                                StepMessage::ToggleWait,
+                                            )
+                                            .style(Theme::Blue),
                                         )
-                                        .style(Theme::Blue),
-                                    )
-                                    .padding(4)
-                                    .width(Length::Shrink),
-                            )
-                            .push(Space::with_width(Length::Fill)),
-                    )
-                    .into()
+                                        .padding(4)
+                                        .width(Length::Shrink),
+                                )
+                                .push(Space::with_width(Length::Fill)),
+                        ),
+                )
+                .style(self.style)
+                .into()
             }
             StepState::Idle { edit_btn } => {
                 let e = "".to_string(); //empty
@@ -1219,56 +1231,59 @@ impl BuildStep {
                         ns(&s)
                     ),
                 };
-                Row::new()
-                    .align_items(Align::Center)
-                    .push(
-                        Text::new(format!("{}", self.step_num.unwrap()))
-                            .width(Length::Units(75))
-                            .horizontal_alignment(HorizontalAlignment::Center)
-                            .font(CQ_MONO),
-                    )
-                    .push(
-                        // Destination
-                        Column::new().push(
-                            Text::new(format!(
-                                "{}{}",
-                                hover,
-                                self.selected_destination
-                                    .as_ref()
-                                    .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
-                            ))
-                            .font(CQ_MONO)
-                            .width(Length::Units(120))
-                            .vertical_alignment(VerticalAlignment::Center),
-                        ),
-                    )
-                    .push(
-                        // action
-                        Column::new()
-                            .push(
-                                Text::new(step_time_text)
-                                    .vertical_alignment(VerticalAlignment::Center)
-                                    .font(CQ_MONO),
-                            )
-                            .width(Length::Fill)
-                            .align_items(Align::Start),
-                    )
-                    .push(
-                        // edit button
-                        Button::new(
-                            edit_btn,
-                            Text::new("Edit")
-                                .vertical_alignment(VerticalAlignment::Center)
+                Container::new(
+                    Row::new()
+                        .align_items(Align::Center)
+                        .push(
+                            Text::new(format!("{}", self.step_num.unwrap()))
+                                .width(Length::Units(75))
                                 .horizontal_alignment(HorizontalAlignment::Center)
                                 .font(CQ_MONO),
                         )
-                        .style(Theme::Blue)
-                        .padding(10)
-                        .on_press(StepMessage::Edit)
-                        //.height(Length::Units(75))
-                        .width(Length::Units(100)),
-                    )
-                    .into()
+                        .push(
+                            // Destination
+                            Column::new().push(
+                                Text::new(format!(
+                                    "{}{}",
+                                    hover,
+                                    self.selected_destination
+                                        .as_ref()
+                                        .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                                ))
+                                .font(CQ_MONO)
+                                .width(Length::Units(120))
+                                .vertical_alignment(VerticalAlignment::Center),
+                            ),
+                        )
+                        .push(
+                            // action
+                            Column::new()
+                                .push(
+                                    Text::new(step_time_text)
+                                        .vertical_alignment(VerticalAlignment::Center)
+                                        .font(CQ_MONO),
+                                )
+                                .width(Length::Fill)
+                                .align_items(Align::Start),
+                        )
+                        .push(
+                            // edit button
+                            Button::new(
+                                edit_btn,
+                                Text::new("Edit")
+                                    .vertical_alignment(VerticalAlignment::Center)
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO),
+                            )
+                            .style(Theme::Blue)
+                            .padding(15)
+                            .on_press(StepMessage::Edit)
+                            //.height(Length::Units(75))
+                            .width(Length::Units(100)),
+                        ),
+                )
+                .style(self.style)
+                .into()
             }
         }
     }

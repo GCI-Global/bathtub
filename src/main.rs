@@ -1022,7 +1022,7 @@ impl<'a> Application for Bathtub {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
-                                Text::new("Unavailable while running recipie")
+                                Text::new("Unavailable while running recipe")
                                     .size(50)
                                     .font(CQ_MONO),
                             )

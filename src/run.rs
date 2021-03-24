@@ -5,7 +5,7 @@ use iced::{
     Tooltip, VerticalAlignment,
 };
 
-use super::build::{attention_icon, ns, pause_icon, play_icon, Recipe};
+use super::build::{attention_icon, ns, pause_icon, play_icon, Input, Recipe, SaveRecipe};
 use super::logger::Logger;
 use super::style::style::Theme;
 use chrono::prelude::*;
@@ -259,36 +259,54 @@ impl Run {
                     Some(_) => {
                         let (recipe_state, _) = &*self.recipe_state;
                         match *recipe_state.lock().unwrap() {
-                            RecipeState::Stopped => Row::new().push(
-                                Tooltip::new(
-                                    Button::new(
-                                        &mut self.large_start_btn,
-                                        Text::new("Start")
-                                            .size(30)
-                                            .horizontal_alignment(HorizontalAlignment::Center)
-                                            .font(CQ_MONO),
+                            RecipeState::Stopped => {
+                                Row::new().push(if let Some(recipe) = &self.recipe {
+                                    if recipe.steps.len() > 0 {
+                                        Tooltip::new(
+                                            Button::new(
+                                                &mut self.large_start_btn,
+                                                Text::new("Start")
+                                                    .size(30)
+                                                    .horizontal_alignment(
+                                                        HorizontalAlignment::Center,
+                                                    )
+                                                    .font(CQ_MONO),
+                                            )
+                                            .style(Theme::Green)
+                                            .on_press(RunMessage::Start)
+                                            .padding(10)
+                                            .width(Length::Units(500)),
+                                            if *self.homing_required.borrow() {
+                                                "Will run homing cycle first!"
+                                            } else {
+                                                ""
+                                            },
+                                            tooltip::Position::FollowCursor,
+                                        )
+                                        .size(25)
+                                        .padding(5)
+                                        .style(
+                                            if *self.homing_required.borrow() {
+                                                Theme::Active
+                                            } else {
+                                                Theme::Disabled
+                                            },
+                                        )
+                                    } else {
+                                        Tooltip::new(
+                                            Space::with_width(Length::Shrink),
+                                            "",
+                                            tooltip::Position::Top,
+                                        )
+                                    }
+                                } else {
+                                    Tooltip::new(
+                                        Space::with_width(Length::Shrink),
+                                        "",
+                                        tooltip::Position::Top,
                                     )
-                                    .style(Theme::Green)
-                                    .on_press(RunMessage::Start)
-                                    .padding(10)
-                                    .width(Length::Units(500)),
-                                    if *self.homing_required.borrow() {
-                                        "Will run homing cycle first!"
-                                    } else {
-                                        ""
-                                    },
-                                    tooltip::Position::FollowCursor,
-                                )
-                                .size(25)
-                                .padding(5)
-                                .style(
-                                    if *self.homing_required.borrow() {
-                                        Theme::Active
-                                    } else {
-                                        Theme::Disabled
-                                    },
-                                ),
-                            ),
+                                })
+                            }
                             RecipeState::RecipeRunning => Row::new()
                                 .push(
                                     Button::new(
@@ -404,27 +422,80 @@ impl Run {
                     None => Row::new(),
                 };
 
-                let recipie: Element<_> = match self.recipe.as_mut() {
-                    Some(recipe) => recipe
-                        .steps
-                        .iter_mut()
-                        .zip(self.continue_btns.iter_mut())
-                        .fold(Column::new().spacing(15), |col, (step, btn)| {
-                            if let Some(b) = btn {
-                                col.push(
-                                    Row::new()
-                                        .push(step.view().map(move |_msg| RunMessage::Step))
-                                        .push(b.view().map(move |_msg| RunMessage::Step)),
-                                )
+                let recipie: Element<_> =
+                    match self.recipe.as_mut() {
+                        Some(recipe) => {
+                            if recipe.steps.len() > 0 {
+                                recipe
+                                    .steps
+                                    .iter_mut()
+                                    .zip(self.continue_btns.iter_mut())
+                                    .enumerate()
+                                    .fold(Column::new(), |col, (i, (step, btn))| {
+                                        if let Some(b) = btn {
+                                            col.push(
+                                                Container::new(
+                                                    Column::new()
+                                                        .height(Length::Units(50))
+                                                        .push(Space::with_height(Length::Fill))
+                                                        .push(
+                                                            Row::new()
+                                                                .width(Length::Units(500))
+                                                                .push(step.view().map(
+                                                                    move |_msg| RunMessage::Step,
+                                                                ))
+                                                                .push(b.view().map(move |_msg| {
+                                                                    RunMessage::Step
+                                                                })),
+                                                        )
+                                                        .push(Space::with_height(Length::Fill)),
+                                                )
+                                                .style(if i % 2 == 0 {
+                                                    Theme::LightGray
+                                                } else {
+                                                    Theme::LighterGray
+                                                }),
+                                            )
+                                        } else {
+                                            col.push(
+                                                Container::new(
+                                                    Column::new()
+                                                        .height(Length::Units(50))
+                                                        .push(Space::with_height(Length::Fill))
+                                                        .push(
+                                                            Row::new()
+                                                                .width(Length::Units(500))
+                                                                .push(step.view().map(
+                                                                    move |_msg| RunMessage::Step,
+                                                                )),
+                                                        )
+                                                        .push(Space::with_height(Length::Fill)),
+                                                )
+                                                .style(if i % 2 == 0 {
+                                                    Theme::LightGray
+                                                } else {
+                                                    Theme::LighterGray
+                                                }),
+                                            )
+                                        }
+                                    })
+                                    .into()
                             } else {
-                                col.push(
-                                    Row::new().push(step.view().map(move |_msg| RunMessage::Step)),
+                                Container::new(
+                                    Row::with_children(vec![
+                                        Space::with_width(Length::Fill).into(),
+                                        Text::new("This Recipie has no steps. It cannot be run.")
+                                            .into(),
+                                        Space::with_width(Length::Fill).into(),
+                                    ])
+                                    .padding(10),
                                 )
+                                .style(Theme::Red)
+                                .into()
                             }
-                        })
-                        .into(),
-                    None => Column::new().into(),
-                };
+                        }
+                        None => Column::new().into(),
+                    };
 
                 let content = Column::new()
                     .max_width(800)
@@ -766,7 +837,8 @@ impl ContinueButton {
                             Button::new(&mut self.continue_btn, attention_icon().size(30))
                                 .width(Length::Units(50))
                                 .padding(10)
-                                .on_press(ContinueButtonMessage::Continue),
+                                .on_press(ContinueButtonMessage::Continue)
+                                .style(Theme::Yellow),
                         ),
                     )
                     .into()
@@ -788,7 +860,26 @@ fn update_recipe(tab: &mut Run) {
         tab.search_value.as_ref().unwrap_or(&String::new())
     )) {
         Ok(toml_str) => {
-            let rec: Recipe = toml::from_str(toml_str).unwrap();
+            let save_rec: SaveRecipe = toml::from_str(toml_str).unwrap();
+            let rec = Recipe {
+                required_inputs: Input {
+                    before: if let Some(b) = save_rec.required_inputs.before {
+                        b
+                    } else {
+                        Vec::new()
+                    },
+                    after: if let Some(a) = save_rec.required_inputs.after {
+                        a
+                    } else {
+                        Vec::new()
+                    },
+                },
+                steps: if let Some(s) = save_rec.steps {
+                    s
+                } else {
+                    Vec::new()
+                },
+            };
             tab.continue_btns = Vec::with_capacity(rec.steps.len());
             let mut count = 1;
             for step in &rec.steps {
