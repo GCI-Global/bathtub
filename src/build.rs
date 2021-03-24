@@ -1751,9 +1751,9 @@ fn save(tab: &mut Build) {
         // TODO: add error is unable to build toml
         let old_recipe = fs::read_to_string(Path::new(&format!(
             "./recipes/{}.toml",
-            &tab.search_value.as_ref().unwrap(),
+            &tab.search_value.as_ref().unwrap_or(&String::new()),
         )))
-        .unwrap_or(String::new());
+        .unwrap_or(format!("No old recipie '{}' is new", tab.name_entry_value));
         let new_recipe = toml::to_string_pretty(&save_data).unwrap();
         match OpenOptions::new().write(true).open(Path::new(&format!(
             "./recipes/{}.toml",

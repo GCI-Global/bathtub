@@ -131,14 +131,18 @@ impl Run {
                         });
                 self.search_options.sort();
                 // update the ui with recipie if it was changed
-                if let Some(selection) = self.search_value.take() {
-                    if self.search_options.iter().any(|o| o == &selection) {
-                        update_recipe(self, selection);
-                    }
+                if !self
+                    .search_options
+                    .iter()
+                    .any(|o| o == self.search_value.as_ref().unwrap_or(&String::new()))
+                {
+                    self.search_value = None
                 }
+                update_recipe(self);
             }
             RunMessage::SearchChanged(recipe) => {
-                update_recipe(self, recipe);
+                self.search_value = Some(recipe);
+                update_recipe(self);
             }
             RunMessage::Start => {
                 if self.required_before_inputs.len() == 0
@@ -778,8 +782,11 @@ impl ContinueButton {
 pub async fn do_nothing() {
     ()
 }
-fn update_recipe(tab: &mut Run, recipe: String) {
-    match &fs::read_to_string(format!("./recipes/{}.toml", recipe)) {
+fn update_recipe(tab: &mut Run) {
+    match &fs::read_to_string(format!(
+        "./recipes/{}.toml",
+        tab.search_value.as_ref().unwrap_or(&String::new())
+    )) {
         Ok(toml_str) => {
             let rec: Recipe = toml::from_str(toml_str).unwrap();
             tab.continue_btns = Vec::with_capacity(rec.steps.len());
@@ -816,5 +823,4 @@ fn update_recipe(tab: &mut Run, recipe: String) {
             tab.recipe = None;
         }
     }
-    tab.search_value = Some(recipe);
 }

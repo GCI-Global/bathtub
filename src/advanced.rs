@@ -424,7 +424,7 @@ impl SaveBar {
                 Space::with_width(Length::Fill).into(),
                 Button::new(
                     &mut self.save_btn,
-                    Text::new("Save")
+                    Text::new("Save as")
                         .size(20)
                         .horizontal_alignment(HorizontalAlignment::Center),
                 )
