@@ -405,6 +405,7 @@ impl Run {
                                             .horizontal_alignment(HorizontalAlignment::Center)
                                             .font(CQ_MONO),
                                     )
+                                    .style(Theme::Red)
                                     .on_press(RunMessage::RequireStopConfirm)
                                     .padding(10)
                                     .width(Length::Units(200)),

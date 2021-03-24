@@ -309,13 +309,14 @@ impl Build {
                 }
             }
             BuildMessage::SaveMessage(SaveBarMessage::Save) => {
-                if self.modified_steps.iter().all(|s| match s.state {
+                if self.modified_steps.iter().any(|s| match s.state {
                     StepState::Idle { .. } => false,
                     StepState::Editing { .. } => true,
                 }) && self.modified_steps.len() > 0
                 {
                     self.save_bar.message = "'Ok' all steps before saving".to_string();
                 } else {
+                    self.save_bar.message = "Unsaved Changes!".to_string();
                     self.name_entry_value = self.search_value.clone().unwrap_or(String::new());
                     self.state = BuildState::EnterName;
                 }
@@ -1751,7 +1752,14 @@ fn update_recipe(tab: &mut Build) {
             tab.modified_before_inputs = tab.before_inputs.clone();
         }
         // TODO: Display Error when unable to read file
-        Err(_err) => {}
+        Err(_err) => {
+            tab.modified_steps = Vec::new();
+            tab.modified_before_inputs = Vec::new();
+            tab.modified_after_inputs = Vec::new();
+            tab.steps = Vec::new();
+            tab.before_inputs = Vec::new();
+            tab.after_inputs = Vec::new();
+        }
     }
 }
 

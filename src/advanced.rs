@@ -5,9 +5,9 @@ use super::run::do_nothing;
 use super::style::style::Theme;
 use crate::{TabState as ParentTabState, CQ_MONO};
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command, Container,
-    Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
-    VerticalAlignment,
+    button, pick_list, scrollable, text_input, tooltip, Align, Button, Checkbox, Column, Command,
+    Container, Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text,
+    TextInput, Tooltip, VerticalAlignment,
 };
 
 use super::build::{delete_icon, down_icon, okay_icon, right_icon};
@@ -413,12 +413,13 @@ impl SaveBar {
             Row::with_children(vec![
                 Space::with_width(Length::Units(50)).into(),
                 Column::with_children(vec![
-                    Space::with_height(Length::Units(15)).into(),
+                    Space::with_height(Length::Fill).into(),
                     Text::new(&self.message)
                         .vertical_alignment(VerticalAlignment::Center)
                         .size(22)
                         .font(CQ_MONO)
                         .into(),
+                    Space::with_height(Length::Fill).into(),
                 ])
                 .into(),
                 Space::with_width(Length::Fill).into(),
@@ -748,30 +749,45 @@ impl NodeTab {
     fn update(&mut self, message: NodeTabMessage) -> Command<NodeTabMessage> {
         let mut command = Command::none();
         match message {
+            NodeTabMessage::ConfigNode((i, ConfigNodeMessage::Okay)) => {
+                self.save_bar.message = "Unsaved Changes!".to_string();
+                self.config_nodes[i].update(ConfigNodeMessage::Okay);
+            }
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::NameChanged(name))) => {
-                self.unsaved = true;
-                self.unsaved_tabs.borrow_mut().insert(TabState::Nodes, true);
-                // If a name is changed update all other instances of the node name
-                let original_name = self.config_nodes[i].name.clone();
-                let index = self
-                    .modified_nodes
-                    .borrow()
-                    .node
-                    .iter()
-                    .position(|n| n.name == original_name)
-                    .unwrap();
-                self.modified_nodes.borrow_mut().node[index].name = name.clone();
-                for node in &mut self.config_nodes {
-                    for pick_list in &mut node.neighbors_pick_lists {
-                        if &pick_list.parent == &original_name {
-                            pick_list.parent = name.clone();
-                        }
-                        if pick_list.value.as_ref().unwrap() == &original_name {
-                            pick_list.value = Some(name.clone());
+                if &self.config_nodes[i].name[..] == "HOME" {
+                    self.config_nodes[i].errors.home_required = true;
+                } else if self.config_nodes.iter().any(|n| n.name == name) {
+                    self.config_nodes[i].errors.names_match = true;
+                } else {
+                    if name != String::new() {
+                        self.config_nodes[i].errors.clear_title();
+                    } else {
+                        self.config_nodes[i].errors.name_blank = true;
+                    }
+                    self.unsaved = true;
+                    self.unsaved_tabs.borrow_mut().insert(TabState::Nodes, true);
+                    // If a name is changed update all other instances of the node name
+                    let original_name = self.config_nodes[i].name.clone();
+                    let index = self
+                        .modified_nodes
+                        .borrow()
+                        .node
+                        .iter()
+                        .position(|n| n.name == original_name)
+                        .unwrap();
+                    self.modified_nodes.borrow_mut().node[index].name = name.clone();
+                    for node in &mut self.config_nodes {
+                        for pick_list in &mut node.neighbors_pick_lists {
+                            if &pick_list.parent == &original_name {
+                                pick_list.parent = name.clone();
+                            }
+                            if pick_list.value.as_ref().unwrap() == &original_name {
+                                pick_list.value = Some(name.clone());
+                            }
                         }
                     }
+                    self.config_nodes[i].update(ConfigNodeMessage::NameChanged(name))
                 }
-                self.config_nodes[i].update(ConfigNodeMessage::NameChanged(name))
             }
             NodeTabMessage::ConfigNode((i, ConfigNodeMessage::Delete)) => {
                 let delete_name = self.config_nodes[i].name.clone();
@@ -819,6 +835,7 @@ impl NodeTab {
                 self.config_nodes[i].update(msg);
             }
             NodeTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
+                self.save_bar.message = "Unsaved Changes!".to_string();
                 // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
                 // nested iter if to flatten the 3d nodes
                 let node_pairs = self
@@ -879,53 +896,76 @@ impl NodeTab {
                     .insert(TabState::Nodes, false);
             }
             NodeTabMessage::SaveMessage(SaveBarMessage::Save) => {
-                let mut nodes = self.modified_nodes.borrow().clone();
-                for i in 0..self.config_nodes.len() {
-                    nodes.node[i].neighbors = self.config_nodes[i]
-                        .neighbors_pick_lists
-                        .iter()
-                        .fold(Vec::new(), |mut v, pick_list| {
-                            v.push(pick_list.value.clone().unwrap());
-                            v
-                        });
-                    nodes.node[i].x = self.config_nodes[i].x.parse().unwrap();
-                    nodes.node[i].y = self.config_nodes[i].y.parse().unwrap();
-                    nodes.node[i].z = self.config_nodes[i].z.parse().unwrap();
+                for node in &mut self.config_nodes {
+                    node.errors.clear_temp();
                 }
-                let new_toml = toml::to_string_pretty(&nodes).unwrap();
-                nodes.add_height_nodes();
-                let old_toml = toml::to_string_pretty(&Nodes {
-                    node: self
-                        .ref_nodes
-                        .borrow()
-                        .clone()
-                        .node
-                        .into_iter()
-                        .filter(|n| !n.name.contains("_hover"))
-                        .collect(),
-                })
-                .unwrap_or(String::new());
-                fs::write("./config/baths.toml", &new_toml).expect("Unable to save baths");
+                if self.config_nodes.iter().any(|c| match c.state {
+                    ConfigNodeState::Editing => true,
+                    ConfigNodeState::Idle => false,
+                }) {
+                    self.save_bar.message = "'Ok' all steps before saving".to_string();
+                    for node in &mut self.config_nodes {
+                        match node.state {
+                            ConfigNodeState::Idle => {}
+                            ConfigNodeState::Editing => node.errors.try_save_while_edit = true,
+                        }
+                    }
+                } else if self
+                    .config_nodes
+                    .iter()
+                    .any(|n| n.errors.all().iter().any(|e| *e))
+                {
+                    self.save_bar.message = "Clear all errors below, and save again.".to_string();
+                } else {
+                    self.save_bar.message = "Unsaved Changed!".to_string();
+                    let mut nodes = self.modified_nodes.borrow().clone();
+                    for i in 0..self.config_nodes.len() {
+                        nodes.node[i].neighbors = self.config_nodes[i]
+                            .neighbors_pick_lists
+                            .iter()
+                            .fold(Vec::new(), |mut v, pick_list| {
+                                v.push(pick_list.value.clone().unwrap());
+                                v
+                            });
+                        nodes.node[i].x = self.config_nodes[i].x.parse().unwrap();
+                        nodes.node[i].y = self.config_nodes[i].y.parse().unwrap();
+                        nodes.node[i].z = self.config_nodes[i].z.parse().unwrap();
+                    }
+                    let new_toml = toml::to_string_pretty(&nodes).unwrap();
+                    nodes.add_height_nodes();
+                    let old_toml = toml::to_string_pretty(&Nodes {
+                        node: self
+                            .ref_nodes
+                            .borrow()
+                            .clone()
+                            .node
+                            .into_iter()
+                            .filter(|n| !n.name.contains("_hover"))
+                            .collect(),
+                    })
+                    .unwrap_or(String::new());
+                    fs::write("./config/baths.toml", &new_toml).expect("Unable to save baths");
 
-                *self.ref_nodes.borrow_mut() = nodes.clone();
-                self.logger.set_log_file(format!(
-                    "{}| Advanced (Nodes) - Save",
-                    Local::now().to_rfc2822()
-                ));
-                self.logger.send_line(String::new()).unwrap();
-                self.logger
-                    .send_line("Updated 'Nodes' from:".to_string())
-                    .unwrap();
-                self.logger.send_line(old_toml).unwrap();
-                self.logger
-                    .send_line("\n\nUpdated 'Nodes' to:".to_string())
-                    .unwrap();
-                self.logger.send_line(new_toml).unwrap();
-                command = Command::perform(do_nothing(), NodeTabMessage::Saved);
-                self.unsaved = false;
-                self.unsaved_tabs
-                    .borrow_mut()
-                    .insert(TabState::Nodes, false);
+                    *self.ref_nodes.borrow_mut() = nodes.clone();
+                    self.logger.set_log_file(format!(
+                        "{}| Advanced (Nodes) - Save",
+                        Local::now().to_rfc2822()
+                    ));
+                    self.logger.send_line(String::new()).unwrap();
+                    self.logger
+                        .send_line("Updated 'Nodes' from:".to_string())
+                        .unwrap();
+                    self.logger.send_line(old_toml).unwrap();
+                    self.logger
+                        .send_line("\n\nUpdated 'Nodes' to:".to_string())
+                        .unwrap();
+                    self.logger.send_line(new_toml).unwrap();
+                    command = Command::perform(do_nothing(), NodeTabMessage::Saved);
+                    self.unsaved = false;
+                    self.unsaved_tabs
+                        .borrow_mut()
+                        .insert(TabState::Nodes, false);
+                }
             }
             NodeTabMessage::AddConfigNode => {
                 self.unsaved = true;
@@ -1021,6 +1061,7 @@ impl NodeTab {
 
 struct ConfigNode {
     name: String,
+    error_message: Option<String>,
     name_state: text_input::State,
     hide: Boolean,
     hide_state: pick_list::State<Boolean>,
@@ -1037,6 +1078,51 @@ struct ConfigNode {
     edit_btn: button::State,
     okay_btn: button::State,
     delete_btn: button::State,
+    errors: ConfigNodeErrors,
+}
+
+#[derive(Debug, Clone)]
+struct ConfigNodeErrors {
+    names_match: bool,
+    name_blank: bool,
+    not_numbers: bool,
+    too_many_decimals: bool,
+    home_required: bool,
+    try_save_while_edit: bool,
+}
+
+impl ConfigNodeErrors {
+    fn new() -> Self {
+        ConfigNodeErrors {
+            names_match: false,
+            name_blank: false,
+            not_numbers: false,
+            too_many_decimals: false,
+            home_required: false,
+            try_save_while_edit: false,
+        }
+    }
+    fn clear_nums(&mut self) {
+        self.not_numbers = false;
+        self.too_many_decimals = false;
+    }
+    fn clear_title(&mut self) {
+        self.names_match = false;
+        self.name_blank = false;
+    }
+    fn clear_temp(&mut self) {
+        self.home_required = false;
+    }
+    fn all(&self) -> Vec<bool> {
+        vec![
+            self.names_match,
+            self.name_blank,
+            self.not_numbers,
+            self.too_many_decimals,
+            self.home_required,
+            self.try_save_while_edit,
+        ]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1071,6 +1157,7 @@ impl ConfigNode {
     ) -> Self {
         ConfigNode {
             name_state: text_input::State::new(),
+            error_message: None,
             hide: match hide {
                 true => Boolean::True,
                 false => Boolean::False,
@@ -1105,10 +1192,27 @@ impl ConfigNode {
             edit_btn: button::State::new(),
             okay_btn: button::State::new(),
             delete_btn: button::State::new(),
+            errors: ConfigNodeErrors {
+                names_match: false,
+                name_blank: false,
+                not_numbers: false,
+                too_many_decimals: false,
+                home_required: false,
+                try_save_while_edit: false,
+            },
         }
     }
 
+    fn set_error(&mut self, msg: impl ToString) {
+        self.error_message = Some(msg.to_string());
+    }
+
+    fn clear_error(&mut self) {
+        self.error_message = None;
+    }
+
     fn update(&mut self, message: ConfigNodeMessage) {
+        self.errors.clear_temp();
         // TODO: Disallow save if multiple nodes have same name
         match message {
             ConfigNodeMessage::NameChanged(name) => {
@@ -1119,9 +1223,39 @@ impl ConfigNode {
             }
             ConfigNodeMessage::HideChanged(b) => self.hide = b,
             // TODO: Highlight red if not valid f32 or more than 3 decimals
-            ConfigNodeMessage::XChanged(x) => self.x = x,
-            ConfigNodeMessage::YChanged(y) => self.y = y,
-            ConfigNodeMessage::ZChanged(z) => self.z = z,
+            ConfigNodeMessage::XChanged(x) => {
+                self.x = x;
+                match validate_nums(self) {
+                    ValidateNums::NotNums => self.errors.not_numbers = true,
+                    ValidateNums::TooManyDecimals => {
+                        self.errors.not_numbers = false;
+                        self.errors.too_many_decimals = true;
+                    }
+                    ValidateNums::Okay => self.errors.clear_nums(),
+                }
+            }
+            ConfigNodeMessage::YChanged(y) => {
+                self.y = y;
+                match validate_nums(self) {
+                    ValidateNums::NotNums => self.errors.not_numbers = true,
+                    ValidateNums::TooManyDecimals => {
+                        self.errors.not_numbers = false;
+                        self.errors.too_many_decimals = true;
+                    }
+                    ValidateNums::Okay => self.errors.clear_nums(),
+                }
+            }
+            ConfigNodeMessage::ZChanged(z) => {
+                self.z = z;
+                match validate_nums(self) {
+                    ValidateNums::NotNums => self.errors.not_numbers = true,
+                    ValidateNums::TooManyDecimals => {
+                        self.errors.not_numbers = false;
+                        self.errors.too_many_decimals = true;
+                    }
+                    ValidateNums::Okay => self.errors.clear_nums(),
+                }
+            }
             ConfigNodeMessage::Neighbors(i, StringPickListMessage::Delete) => {
                 self.neighbors_pick_lists.remove(i);
                 let siblings =
@@ -1177,6 +1311,7 @@ impl ConfigNode {
             )),
             ConfigNodeMessage::Edit => self.state = ConfigNodeState::Editing,
             ConfigNodeMessage::Okay => {
+                self.errors.try_save_while_edit = false;
                 for i in (0..self.neighbors_pick_lists.len()).rev() {
                     if self.neighbors_pick_lists[i].value.as_ref().unwrap()
                         == &"Choose Neighbor".to_string()
@@ -1192,145 +1327,204 @@ impl ConfigNode {
     }
 
     fn view(&mut self) -> Element<'_, ConfigNodeMessage> {
+        if self.errors.home_required {
+            self.set_error("'Home' is required");
+        } else if self.errors.name_blank {
+            self.set_error("Must have a name.");
+        } else if self.errors.names_match {
+            self.set_error("Names must be unique.");
+        } else if self.errors.not_numbers {
+            self.set_error("All positions must be numbers.");
+        } else if self.errors.too_many_decimals {
+            self.set_error("Limit to 3 decimals.");
+        } else if self.errors.try_save_while_edit {
+            self.set_error("Click green checkbox before saving.");
+        } else {
+            self.clear_error();
+        }
         match self.state {
-            ConfigNodeState::Editing => Column::new()
-                .push(
-                    Row::new()
-                        .push(
-                            TextInput::new(
-                                &mut self.name_state,
-                                "Name",
-                                &self.name,
-                                ConfigNodeMessage::NameChanged,
-                            )
-                            .style(Theme::Blue)
+            ConfigNodeState::Editing => {
+                Column::new()
+                    .push(if let Some(msg) = &self.error_message {
+                        Container::new(
+                            Row::with_children(vec![
+                                Space::with_width(Length::Fill).into(),
+                                Text::new(msg).into(),
+                                Space::with_width(Length::Fill).into(),
+                            ])
                             .padding(10),
                         )
-                        .push(
-                            Button::new(&mut self.okay_btn, okay_icon())
-                                .on_press(ConfigNodeMessage::Okay)
-                                .width(Length::Units(50))
-                                .padding(10)
-                                .style(Theme::Green),
-                        )
-                        .push(
-                            Button::new(&mut self.delete_btn, delete_icon())
+                        .height(Length::Units(40))
+                        .style(Theme::Red)
+                    } else {
+                        Container::new(Space::with_height(Length::Units(40)))
+                    })
+                    .push(
+                        Row::new()
+                            .push(
+                                TextInput::new(
+                                    &mut self.name_state,
+                                    "Name",
+                                    &self.name,
+                                    ConfigNodeMessage::NameChanged,
+                                )
+                                .style(Theme::Blue)
+                                .padding(10),
+                            )
+                            .push(
+                                Button::new(&mut self.okay_btn, okay_icon())
+                                    .on_press(ConfigNodeMessage::Okay)
+                                    .width(Length::Units(50))
+                                    .padding(10)
+                                    .style(Theme::Green),
+                            )
+                            .push(if self.name != "HOME".to_string() {
+                                Tooltip::new(
+                                    Button::new(&mut self.delete_btn, delete_icon())
+                                        .on_press(ConfigNodeMessage::Delete)
+                                        .width(Length::Units(50))
+                                        .padding(10)
+                                        .style(Theme::Red),
+                                    "",
+                                    tooltip::Position::Top,
+                                )
+                            } else {
+                                Tooltip::new(
+                                    Button::new(&mut self.delete_btn, delete_icon())
+                                        .style(Theme::RedDisabled)
+                                        .width(Length::Units(50))
+                                        .padding(10),
+                                    "'HOME' required by Bathub.\nCannot be deleted.",
+                                    tooltip::Position::FollowCursor,
+                                )
                                 .style(Theme::Red)
-                                .on_press(ConfigNodeMessage::Delete)
-                                .width(Length::Units(50))
+                            }),
+                    )
+                    .push(
+                        Row::new()
+                            .padding(5)
+                            .push(Text::new("Hidden:"))
+                            .push(Space::with_width(Length::Units(36)))
+                            .push(
+                                PickList::new(
+                                    &mut self.hide_state,
+                                    &Boolean::ALL[..],
+                                    Some(self.hide),
+                                    ConfigNodeMessage::HideChanged,
+                                )
+                                .style(Theme::Blue)
                                 .padding(10)
-                                .style(Theme::Red),
-                        ),
-                )
-                .push(
-                    Row::new()
-                        .padding(5)
-                        .push(Text::new("Hidden:"))
-                        .push(Space::with_width(Length::Units(36)))
-                        .push(
-                            PickList::new(
-                                &mut self.hide_state,
-                                &Boolean::ALL[..],
-                                Some(self.hide),
-                                ConfigNodeMessage::HideChanged,
-                            )
-                            .style(Theme::Blue)
-                            .padding(10)
-                            .width(Length::Fill),
-                        ),
-                )
-                .push(
-                    Row::new()
-                        .padding(5)
-                        .push(Text::new("X Pos (cm):"))
-                        .push(Space::with_width(Length::Units(10)))
-                        .push(
-                            TextInput::new(
-                                &mut self.x_state,
-                                "0.000",
-                                &self.x,
-                                ConfigNodeMessage::XChanged,
-                            )
-                            .style(Theme::Blue)
-                            .font(CQ_MONO)
-                            .padding(10)
-                            .max_width(400),
-                        ),
-                )
-                .push(
-                    Row::new()
-                        .padding(5)
-                        .push(Text::new("Y Pos (cm):"))
-                        .push(Space::with_width(Length::Units(10)))
-                        .push(
-                            TextInput::new(
-                                &mut self.y_state,
-                                "0.000",
-                                &self.y,
-                                ConfigNodeMessage::YChanged,
-                            )
-                            .style(Theme::Blue)
-                            .font(CQ_MONO)
-                            .padding(10)
-                            .max_width(400),
-                        ),
-                )
-                .push(
-                    Row::new()
-                        .padding(5)
-                        .push(Text::new("Z Pos (cm):"))
-                        .push(Space::with_width(Length::Units(10)))
-                        .push(
-                            TextInput::new(
-                                &mut self.z_state,
-                                "0.000",
-                                &self.z,
-                                ConfigNodeMessage::ZChanged,
-                            )
-                            .style(Theme::Blue)
-                            .font(CQ_MONO)
-                            .padding(10)
-                            .max_width(400),
-                        ),
-                )
-                .push(
-                    Row::new()
-                        .padding(5)
-                        .push(Text::new("Neighbors:"))
-                        .push(Space::with_width(Length::Units(10)))
-                        .push(
-                            Column::new()
-                                .push(
-                                    self.neighbors_pick_lists
-                                        .iter_mut()
-                                        .enumerate()
-                                        .fold(Column::new(), |col, (i, pick_list)| {
+                                .width(Length::Fill),
+                            ),
+                    )
+                    .push(
+                        Row::new()
+                            .padding(5)
+                            .push(Text::new("X Pos (cm):"))
+                            .push(Space::with_width(Length::Units(10)))
+                            .push(
+                                TextInput::new(
+                                    &mut self.x_state,
+                                    "0.000",
+                                    &self.x,
+                                    ConfigNodeMessage::XChanged,
+                                )
+                                .style(Theme::Blue)
+                                .font(CQ_MONO)
+                                .padding(10)
+                                .max_width(400),
+                            ),
+                    )
+                    .push(
+                        Row::new()
+                            .padding(5)
+                            .push(Text::new("Y Pos (cm):"))
+                            .push(Space::with_width(Length::Units(10)))
+                            .push(
+                                TextInput::new(
+                                    &mut self.y_state,
+                                    "0.000",
+                                    &self.y,
+                                    ConfigNodeMessage::YChanged,
+                                )
+                                .style(Theme::Blue)
+                                .font(CQ_MONO)
+                                .padding(10)
+                                .max_width(400),
+                            ),
+                    )
+                    .push(
+                        Row::new()
+                            .padding(5)
+                            .push(Text::new("Z Pos (cm):"))
+                            .push(Space::with_width(Length::Units(10)))
+                            .push(
+                                TextInput::new(
+                                    &mut self.z_state,
+                                    "0.000",
+                                    &self.z,
+                                    ConfigNodeMessage::ZChanged,
+                                )
+                                .style(Theme::Blue)
+                                .font(CQ_MONO)
+                                .padding(10)
+                                .max_width(400),
+                            ),
+                    )
+                    .push(
+                        Row::new()
+                            .padding(5)
+                            .push(Text::new("Neighbors:"))
+                            .push(Space::with_width(Length::Units(10)))
+                            .push(
+                                Column::new()
+                                    .max_width(400)
+                                    .push(self.neighbors_pick_lists.iter_mut().enumerate().fold(
+                                        Column::new(),
+                                        |col, (i, pick_list)| {
+                                            if i == 0 {
+                                                pick_list.disable_delete()
+                                            } else {
+                                                pick_list.enable_delete()
+                                            }
                                             col.push(pick_list.view().map(move |msg| {
                                                 ConfigNodeMessage::Neighbors(i, msg)
                                             }))
-                                        })
-                                        .push(Space::with_height(Length::Units(5)))
-                                        .push(
-                                            Button::new(
-                                                &mut self.add_neighbor_btn,
-                                                Text::new("Add Neighbor")
-                                                    .font(CQ_MONO)
-                                                    .horizontal_alignment(
-                                                        HorizontalAlignment::Center,
-                                                    )
-                                                    .font(CQ_MONO),
-                                            )
-                                            .style(Theme::Blue)
-                                            .on_press(ConfigNodeMessage::AddNeighbor)
-                                            .width(Length::Fill)
-                                            .padding(10),
-                                        ),
-                                )
-                                .max_width(400),
-                        ),
-                )
-                .into(),
+                                        },
+                                    ))
+                                    .push(Space::with_height(Length::Units(5)))
+                                    .push(
+                                        Button::new(
+                                            &mut self.add_neighbor_btn,
+                                            Text::new("Add Neighbor")
+                                                .font(CQ_MONO)
+                                                .horizontal_alignment(HorizontalAlignment::Center)
+                                                .font(CQ_MONO),
+                                        )
+                                        .style(Theme::Blue)
+                                        .on_press(ConfigNodeMessage::AddNeighbor)
+                                        .width(Length::Fill)
+                                        .padding(10),
+                                    ),
+                            ),
+                    )
+                    .into()
+            }
             ConfigNodeState::Idle => Column::new()
+                .push(if let Some(msg) = &self.error_message {
+                    Container::new(
+                        Row::with_children(vec![
+                            Space::with_width(Length::Fill).into(),
+                            Text::new(msg).into(),
+                            Space::with_width(Length::Fill).into(),
+                        ])
+                        .padding(10),
+                    )
+                    .height(Length::Units(40))
+                    .style(Theme::Red)
+                } else {
+                    Container::new(Space::with_height(Length::Units(40)))
+                })
                 .push(
                     Row::new()
                         .push(
@@ -1410,6 +1604,7 @@ struct StringPickList {
     delete_btn: button::State,
     parent: String,
     siblings: Vec<String>,
+    delete_disabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1432,7 +1627,16 @@ impl StringPickList {
             parent,
             siblings,
             delete_btn: button::State::new(),
+            delete_disabled: false,
         }
+    }
+
+    fn disable_delete(&mut self) {
+        self.delete_disabled = true;
+    }
+
+    fn enable_delete(&mut self) {
+        self.delete_disabled = false;
     }
 
     fn update(&mut self, message: StringPickListMessage) {
@@ -1470,12 +1674,27 @@ impl StringPickList {
                 .width(Length::Fill)
                 .padding(10),
             )
-            .push(
-                Button::new(&mut self.delete_btn, delete_icon())
-                    .style(Theme::Red)
-                    .on_press(StringPickListMessage::Delete)
-                    .padding(10),
-            )
+            .push(if self.delete_disabled {
+                Tooltip::new(
+                    Button::new(&mut self.delete_btn, delete_icon())
+                        .style(Theme::RedDisabled)
+                        .padding(10)
+                        .width(Length::Units(50)),
+                    "All nodes must have at least one neighbor.",
+                    tooltip::Position::FollowCursor,
+                )
+                .style(Theme::Red)
+            } else {
+                Tooltip::new(
+                    Button::new(&mut self.delete_btn, delete_icon())
+                        .style(Theme::Red)
+                        .on_press(StringPickListMessage::Delete)
+                        .padding(10)
+                        .width(Length::Units(50)),
+                    "",
+                    tooltip::Position::Top,
+                )
+            })
             .into()
     }
 }
@@ -1559,24 +1778,37 @@ impl ActionTab {
     fn update(&mut self, message: ActionTabMessage) -> Command<ActionTabMessage> {
         let mut command = Command::none();
         match message {
+            ActionTabMessage::ConfigAction(i, ConfigActionMessage::Okay) => {
+                self.save_bar.message = "Unsaved Changes!".to_string();
+                self.config_actions[i].update(ConfigActionMessage::Okay);
+            }
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::Delete) => {
                 self.config_actions.remove(i);
             }
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::NameChanged(name)) => {
-                // mark unsaved, change value in UI and modfied_nodes
-                self.unsaved = true;
-                self.unsaved_tabs
-                    .borrow_mut()
-                    .insert(TabState::Actions, true);
-                let index = self
-                    .modified_actions
-                    .borrow()
-                    .action
-                    .iter()
-                    .position(|a| a.name == self.config_actions[i].name)
-                    .unwrap();
-                self.modified_actions.borrow_mut().action[index].name = name.clone();
-                self.config_actions[i].update(ConfigActionMessage::NameChanged(name))
+                if self.config_actions.iter().any(|a| a.name == name) {
+                    self.config_actions[i].errors.names_match = true;
+                } else {
+                    if name != String::new() {
+                        self.config_actions[i].errors.clear_title();
+                    } else {
+                        self.config_actions[i].errors.name_blank = true;
+                    }
+                    // mark unsaved, change value in UI and modfied_nodes
+                    self.unsaved = true;
+                    self.unsaved_tabs
+                        .borrow_mut()
+                        .insert(TabState::Actions, true);
+                    let index = self
+                        .modified_actions
+                        .borrow()
+                        .action
+                        .iter()
+                        .position(|a| a.name == self.config_actions[i].name)
+                        .unwrap();
+                    self.modified_actions.borrow_mut().action[index].name = name.clone();
+                    self.config_actions[i].update(ConfigActionMessage::NameChanged(name))
+                }
             }
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::Edit) => {
                 for config_action in &mut self.config_actions {
@@ -1626,31 +1858,53 @@ impl ActionTab {
                     .push(ConfigAction::new(name, Vec::new()));
             }
             ActionTabMessage::SaveMessage(SaveBarMessage::Save) => {
-                let old_toml = toml::to_string_pretty(&*self.ref_actions.borrow()).unwrap();
-                let new_toml = toml::to_string_pretty(&*self.modified_actions.borrow()).unwrap();
-                fs::write("./config/actions.toml", &new_toml).expect("Unable to save Actions");
+                if self.config_actions.iter().any(|c| match c.state {
+                    ConfigActionState::Editing => true,
+                    ConfigActionState::Idle => false,
+                }) {
+                    self.save_bar.message = "'Ok' all steps before saving".to_string();
+                    for action in &mut self.config_actions {
+                        match action.state {
+                            ConfigActionState::Idle => {}
+                            ConfigActionState::Editing => action.errors.try_save_while_edit = true,
+                        }
+                    }
+                } else if self
+                    .config_actions
+                    .iter()
+                    .any(|n| n.errors.all().iter().any(|e| *e))
+                {
+                    self.save_bar.message = "Clear all errors below, and save again.".to_string();
+                } else {
+                    self.save_bar.message = "Unsaved Changed!".to_string();
+                    let old_toml = toml::to_string_pretty(&*self.ref_actions.borrow()).unwrap();
+                    let new_toml =
+                        toml::to_string_pretty(&*self.modified_actions.borrow()).unwrap();
+                    fs::write("./config/actions.toml", &new_toml).expect("Unable to save Actions");
 
-                *self.ref_actions.borrow_mut() = self.modified_actions.borrow().clone();
-                self.logger.set_log_file(format!(
-                    "{}| Advanced (Actions) - Save",
-                    Local::now().to_rfc2822()
-                ));
-                self.logger.send_line(String::new()).unwrap();
-                self.logger
-                    .send_line("Updated 'Actions' from:".to_string())
-                    .unwrap();
-                self.logger.send_line(old_toml).unwrap();
-                self.logger
-                    .send_line("\n\nUpdated 'Actions' to:".to_string())
-                    .unwrap();
-                self.logger.send_line(new_toml).unwrap();
-                command = Command::perform(do_nothing(), ActionTabMessage::Saved);
-                self.unsaved = false;
-                self.unsaved_tabs
-                    .borrow_mut()
-                    .insert(TabState::Actions, false);
+                    *self.ref_actions.borrow_mut() = self.modified_actions.borrow().clone();
+                    self.logger.set_log_file(format!(
+                        "{}| Advanced (Actions) - Save",
+                        Local::now().to_rfc2822()
+                    ));
+                    self.logger.send_line(String::new()).unwrap();
+                    self.logger
+                        .send_line("Updated 'Actions' from:".to_string())
+                        .unwrap();
+                    self.logger.send_line(old_toml).unwrap();
+                    self.logger
+                        .send_line("\n\nUpdated 'Actions' to:".to_string())
+                        .unwrap();
+                    self.logger.send_line(new_toml).unwrap();
+                    command = Command::perform(do_nothing(), ActionTabMessage::Saved);
+                    self.unsaved = false;
+                    self.unsaved_tabs
+                        .borrow_mut()
+                        .insert(TabState::Actions, false);
+                }
             }
             ActionTabMessage::SaveMessage(SaveBarMessage::Cancel) => {
+                self.save_bar.message = "Unsaved Changes!".to_string();
                 self.modified_actions = Rc::new(RefCell::new(self.ref_actions.borrow().clone()));
                 self.config_actions = Rc::clone(&self.modified_actions)
                     .borrow()
@@ -1715,6 +1969,7 @@ impl ActionTab {
 
 struct ConfigAction {
     name: String,
+    error_message: Option<String>,
     name_state: text_input::State,
     command_inputs: Vec<CommandInput>,
     add_command_btn: button::State,
@@ -1722,6 +1977,31 @@ struct ConfigAction {
     edit_btn: button::State,
     okay_btn: button::State,
     delete_btn: button::State,
+    errors: ConfigActionErrors,
+}
+
+#[derive(Debug, Clone)]
+struct ConfigActionErrors {
+    names_match: bool,
+    name_blank: bool,
+    try_save_while_edit: bool,
+}
+
+impl ConfigActionErrors {
+    fn new() -> Self {
+        ConfigActionErrors {
+            names_match: false,
+            name_blank: false,
+            try_save_while_edit: false,
+        }
+    }
+    fn clear_title(&mut self) {
+        self.names_match = false;
+        self.name_blank = false;
+    }
+    fn all(&self) -> Vec<bool> {
+        vec![self.names_match, self.name_blank, self.try_save_while_edit]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1744,6 +2024,7 @@ impl ConfigAction {
     fn new(name: String, commands: Vec<String>) -> Self {
         ConfigAction {
             name_state: text_input::State::new(),
+            error_message: None,
             command_inputs: commands.iter().fold(Vec::new(), |mut v, cmd| {
                 v.push(CommandInput::new(cmd.clone()));
                 v
@@ -1754,7 +2035,16 @@ impl ConfigAction {
             edit_btn: button::State::new(),
             okay_btn: button::State::new(),
             delete_btn: button::State::new(),
+            errors: ConfigActionErrors::new(),
         }
+    }
+
+    fn set_error(&mut self, msg: impl ToString) {
+        self.error_message = Some(msg.to_string());
+    }
+
+    fn clear_error(&mut self) {
+        self.error_message = None;
     }
 
     fn update(&mut self, message: ConfigActionMessage) {
@@ -1762,6 +2052,7 @@ impl ConfigAction {
         match message {
             ConfigActionMessage::Edit => self.state = ConfigActionState::Editing,
             ConfigActionMessage::Okay => {
+                self.errors.try_save_while_edit = false;
                 for i in (0..self.command_inputs.len()).rev() {
                     if self.command_inputs[i].value == "G-code Command".to_string() {
                         self.command_inputs.remove(i);
@@ -1782,8 +2073,31 @@ impl ConfigAction {
     }
 
     fn view(&mut self) -> Element<'_, ConfigActionMessage> {
+        if self.errors.names_match {
+            self.set_error("Names must be unique.")
+        } else if self.errors.name_blank {
+            self.set_error("Must have a name.")
+        } else if self.errors.try_save_while_edit {
+            self.set_error("Click green checkbox before saving.")
+        } else {
+            self.clear_error()
+        }
         match self.state {
             ConfigActionState::Editing => Column::new()
+                .push(if let Some(msg) = &self.error_message {
+                    Container::new(
+                        Row::with_children(vec![
+                            Space::with_width(Length::Fill).into(),
+                            Text::new(msg).into(),
+                            Space::with_width(Length::Fill).into(),
+                        ])
+                        .padding(10),
+                    )
+                    .height(Length::Units(40))
+                    .style(Theme::Red)
+                } else {
+                    Container::new(Space::with_height(Length::Units(40)))
+                })
                 .push(
                     Row::new()
                         .push(
@@ -1847,6 +2161,20 @@ impl ConfigAction {
                 )
                 .into(),
             ConfigActionState::Idle => Column::new()
+                .push(if let Some(msg) = &self.error_message {
+                    Container::new(
+                        Row::with_children(vec![
+                            Space::with_width(Length::Fill).into(),
+                            Text::new(msg).into(),
+                            Space::with_width(Length::Fill).into(),
+                        ])
+                        .padding(10),
+                    )
+                    .height(Length::Units(40))
+                    .style(Theme::Red)
+                } else {
+                    Container::new(Space::with_height(Length::Units(40)))
+                })
                 .push(
                     Row::new()
                         .push(
@@ -2233,6 +2561,7 @@ pub struct Log {
     toggle_view_btn: button::State,
     hide_gcode: bool,
     style: Theme,
+    show_checkbox: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2250,6 +2579,7 @@ impl Log {
             toggle_view_btn: button::State::new(),
             hide_gcode: true,
             style: Theme::Blue,
+            show_checkbox: false,
         }
     }
 
@@ -2263,29 +2593,23 @@ impl Log {
                 if self.opened {
                     self.opened = false;
                 } else {
+                    let content =
+                        fs::read_to_string(Path::new(&format!("{}/{}", LOGS, &self.title)))
+                            .unwrap_or(format!("Error: Unable tp read file {}!", &self.title));
+                    self.show_checkbox = content.contains("G-code");
                     match self.hide_gcode {
                         true => {
-                            self.content =
-                                fs::read_to_string(Path::new(&format!("{}/{}", LOGS, &self.title)))
-                                    .unwrap_or(format!(
-                                        "Error: Unable tp read file {}!",
-                                        &self.title
-                                    ))
-                                    .lines()
-                                    .filter(|l| !l.contains("G-code"))
-                                    .fold(String::new(), |mut s, line| {
-                                        s.push_str(line);
-                                        s.push_str("\n");
-                                        s
-                                    })
+                            self.content = content.lines().filter(|l| !l.contains("G-code")).fold(
+                                String::new(),
+                                |mut s, line| {
+                                    s.push_str(line);
+                                    s.push_str("\n");
+                                    s
+                                },
+                            )
                         }
                         false => {
-                            self.content =
-                                fs::read_to_string(Path::new(&format!("{}/{}", LOGS, &self.title)))
-                                    .unwrap_or(format!(
-                                        "Error: Unable to read file {}!",
-                                        &self.title
-                                    ))
+                            self.content = content;
                         }
                     };
 
@@ -2332,7 +2656,7 @@ impl Log {
                     .width(Length::Fill)
                     .on_press(LogMessage::ToggleView),
                 )
-                .push(
+                .push(if self.show_checkbox {
                     Row::new()
                         .push(Space::with_width(Length::Fill))
                         .push(
@@ -2344,8 +2668,10 @@ impl Log {
                             .style(Theme::Blue),
                         )
                         .padding(10)
-                        .push(Space::with_width(Length::Fill)),
-                )
+                        .push(Space::with_width(Length::Fill))
+                } else {
+                    Row::new()
+                })
                 .push(
                     Row::new()
                         .push(Text::new(&self.content).width(Length::Fill).font(CQ_MONO))
@@ -2392,4 +2718,33 @@ fn date(date_num: &str) -> String {
         &date_num[6..8],
         &date_num[0..4]
     )
+}
+fn validate_nums(node: &mut ConfigNode) -> ValidateNums {
+    let coords = vec![&node.x, &node.y, &node.z];
+    if coords.iter().any(|coord| coord.parse::<f32>().is_err()) {
+        ValidateNums::NotNums
+    } else if coords.iter().any(|coord| {
+        coord
+            .split(".")
+            .enumerate()
+            .fold(String::new(), |mut s, (i, part)| {
+                if i == 1 {
+                    s.push_str(part)
+                };
+                s
+            })
+            .len()
+            > 3
+    }) {
+        // split the decimals and count them
+        ValidateNums::TooManyDecimals
+    } else {
+        ValidateNums::Okay
+    }
+}
+
+enum ValidateNums {
+    Okay,
+    NotNums,
+    TooManyDecimals,
 }

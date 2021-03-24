@@ -563,7 +563,7 @@ pub mod style {
             fn style(&self) -> container::Style {
                 container::Style {
                     text_color: Some(Color::BLACK),
-                    background: Color::from_rgb8(220, 220, 220).into(),
+                    background: Color::from_rgb8(220, 220, 235).into(),
                     border_radius: 0.0,
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
@@ -580,7 +580,7 @@ pub mod style {
             fn style(&self) -> container::Style {
                 container::Style {
                     text_color: Some(Color::BLACK),
-                    background: Color::from_rgb8(240, 240, 240).into(),
+                    background: Color::from_rgb8(240, 240, 255).into(),
                     border_radius: 0.0,
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
