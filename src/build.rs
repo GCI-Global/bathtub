@@ -313,7 +313,8 @@ impl Build {
                 if self.modified_steps.iter().all(|s| match s.state {
                     StepState::Idle { .. } => false,
                     StepState::Editing { .. } => true,
-                }) {
+                }) && self.modified_steps.len() > 0
+                {
                     self.save_bar.message = "'Ok' all steps before saving".to_string();
                 } else {
                     self.name_entry_value = self.search_value.clone().unwrap_or(String::new());
@@ -679,17 +680,30 @@ impl Build {
         }
     }
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 // Step found in ./run.rs
 pub struct Recipe {
     pub required_inputs: Input,
     pub steps: Vec<Step>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Input {
     pub before: Vec<String>,
     pub after: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+// Step found in ./run.rs
+pub struct SaveRecipe {
+    pub required_inputs: SaveInput,
+    pub steps: Option<Vec<Step>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SaveInput {
+    pub before: Option<Vec<String>>,
+    pub after: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1661,7 +1675,26 @@ fn update_recipe(tab: &mut Build) {
         tab.search_value.as_ref().unwrap_or(&String::new())
     )) {
         Ok(toml_str) => {
-            let rec: Recipe = toml::from_str(toml_str).unwrap();
+            let save_rec: SaveRecipe = toml::from_str(toml_str).unwrap();
+            let rec = Recipe {
+                required_inputs: Input {
+                    before: if let Some(b) = save_rec.required_inputs.before {
+                        b
+                    } else {
+                        Vec::new()
+                    },
+                    after: if let Some(a) = save_rec.required_inputs.after {
+                        a
+                    } else {
+                        Vec::new()
+                    },
+                },
+                steps: if let Some(s) = save_rec.steps {
+                    s
+                } else {
+                    Vec::new()
+                },
+            };
             tab.before_inputs = rec.required_inputs.before.iter().fold(
                 Vec::with_capacity(rec.required_inputs.before.len()),
                 |mut v, input| {
@@ -1714,39 +1747,51 @@ fn save(tab: &mut Build) {
             .retain(|input| input.value != "".to_string());
         tab.modified_after_inputs
             .retain(|input| input.value != "".to_string());
-        let save_data = Recipe {
-            required_inputs: Input {
-                before: tab.modified_before_inputs.iter().fold(
-                    Vec::with_capacity(tab.modified_before_inputs.len()),
-                    |mut v, input| {
-                        v.push(input.value.clone());
-                        v
-                    },
-                ),
-                after: tab.modified_after_inputs.iter().fold(
-                    Vec::with_capacity(tab.modified_after_inputs.len()),
-                    |mut v, input| {
-                        v.push(input.value.clone());
-                        v
-                    },
-                ),
-            },
-            steps: tab.modified_steps.iter().fold(
-                Vec::with_capacity(tab.modified_steps.len()),
-                |mut v, step| {
-                    v.push(Step {
-                        step_num: step.step_num.unwrap().to_string(),
-                        selected_destination: step.selected_destination.clone().unwrap(),
-                        hover: step.hover,
-                        selected_action: step.selected_action.clone().unwrap(),
-                        secs_value: step.secs_value.clone(),
-                        mins_value: step.mins_value.clone(),
-                        hours_value: step.hours_value.clone(),
-                        wait: step.wait,
-                    });
-                    v
+        let save_data = SaveRecipe {
+            required_inputs: SaveInput {
+                before: if tab.modified_before_inputs.len() > 0 {
+                    Some(tab.modified_before_inputs.iter().fold(
+                        Vec::with_capacity(tab.modified_before_inputs.len()),
+                        |mut v, input| {
+                            v.push(input.value.clone());
+                            v
+                        },
+                    ))
+                } else {
+                    None
                 },
-            ),
+                after: if tab.modified_after_inputs.len() > 0 {
+                    Some(tab.modified_after_inputs.iter().fold(
+                        Vec::with_capacity(tab.modified_after_inputs.len()),
+                        |mut v, input| {
+                            v.push(input.value.clone());
+                            v
+                        },
+                    ))
+                } else {
+                    None
+                },
+            },
+            steps: if tab.modified_steps.len() > 0 {
+                Some(tab.modified_steps.iter().fold(
+                    Vec::with_capacity(tab.modified_steps.len()),
+                    |mut v, step| {
+                        v.push(Step {
+                            step_num: step.step_num.unwrap().to_string(),
+                            selected_destination: step.selected_destination.clone().unwrap(),
+                            hover: step.hover,
+                            selected_action: step.selected_action.clone().unwrap(),
+                            secs_value: step.secs_value.clone(),
+                            mins_value: step.mins_value.clone(),
+                            hours_value: step.hours_value.clone(),
+                            wait: step.wait,
+                        });
+                        v
+                    },
+                ))
+            } else {
+                None
+            },
         };
         // TODO: add error is unable to build toml
         let old_recipe = fs::read_to_string(Path::new(&format!(
@@ -1757,7 +1802,7 @@ fn save(tab: &mut Build) {
         let new_recipe = toml::to_string_pretty(&save_data).unwrap();
         match OpenOptions::new().write(true).open(Path::new(&format!(
             "./recipes/{}.toml",
-            &tab.name_entry_value,
+            &tab.name_entry_value.replace(" ", ""),
         ))) {
             Ok(mut file) => {
                 // file already exists, thus we need to log that recipe was changed
