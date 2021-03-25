@@ -1,5 +1,5 @@
 use super::actions::Actions;
-use super::advanced::{SaveBar, SaveBarMessage};
+use super::advanced::{validate_nums, SaveBar, SaveBarMessage, ValidateNums};
 use super::logger::Logger;
 use super::nodes::Nodes;
 use super::run::do_nothing;
@@ -8,9 +8,9 @@ use super::style::style::Theme;
 use crate::{TabState, CQ_MONO};
 use chrono::prelude::*;
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Command, Container,
-    Element, Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
-    VerticalAlignment,
+    button, pick_list, scrollable, text_input, tooltip, Align, Button, Checkbox, Column, Command,
+    Container, Element, Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text,
+    TextInput, Tooltip, VerticalAlignment,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -94,7 +94,7 @@ impl Build {
     ) -> Self {
         Build {
             unsaved: false,
-            save_bar: SaveBar::new(),
+            save_bar: SaveBar::new_as(),
             scroll: scrollable::State::new(),
             add_step: AddStep::new(1, 0, Rc::clone(&nodes_ref), Rc::clone(&actions_ref)),
             nodes_ref,
@@ -218,6 +218,8 @@ impl Build {
                     self.add_step.secs_value = "".to_string();
                     self.add_step.hover = false;
                     self.add_step.wait = false;
+                } else {
+                    self.add_step.destination_style = Theme::Red;
                 }
             }
             BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
@@ -567,16 +569,38 @@ impl Build {
                     )
                     .push(Row::with_children(vec![
                         Space::with_width(Length::Fill).into(),
-                        Button::new(
-                            &mut self.save_with_name_btn,
-                            Text::new(format!("Save as\n'{}'", self.name_entry_value))
-                                .font(CQ_MONO)
-                                .horizontal_alignment(HorizontalAlignment::Center),
-                        )
-                        .style(Theme::Green)
-                        .on_press(BuildMessage::SaveWithName)
-                        .padding(10)
-                        .width(Length::Units(200))
+                        if self.name_entry_value.is_empty() {
+                            Tooltip::new(
+                                Button::new(
+                                    &mut self.save_with_name_btn,
+                                    Text::new(format!("Save as\n'{}'", self.name_entry_value))
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .style(Theme::GreenDisabled)
+                                .padding(10)
+                                .width(Length::Units(200)),
+                                "Name Required",
+                                tooltip::Position::FollowCursor,
+                            )
+                            .style(Theme::Red)
+                            .into()
+                        } else {
+                            Tooltip::new(
+                                Button::new(
+                                    &mut self.save_with_name_btn,
+                                    Text::new(format!("Save as\n'{}'", self.name_entry_value))
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .style(Theme::Green)
+                                .on_press(BuildMessage::SaveWithName)
+                                .padding(10)
+                                .width(Length::Units(200)),
+                                "",
+                                tooltip::Position::Top,
+                            )
+                        }
                         .into(),
                         Space::with_width(Length::Units(100)).into(),
                         Button::new(
@@ -778,6 +802,28 @@ pub struct BuildStep {
     wait: bool,
     state: StepState,
     style: Theme,
+    errors: BuildStepErrors,
+    error_message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BuildStepErrors {
+    destination: bool,
+    action: bool,
+    time: bool,
+}
+
+impl BuildStepErrors {
+    fn new() -> Self {
+        BuildStepErrors {
+            destination: false,
+            action: false,
+            time: false,
+        }
+    }
+    fn all(&self) -> Vec<bool> {
+        vec![self.destination, self.action, self.time]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -840,8 +886,32 @@ impl BuildStep {
         secs_value: String,
         wait: bool,
     ) -> Self {
+        let dest_bool = !nodes_ref.borrow().node.iter().any(|n| {
+            if let Some(dest) = &selected_destination {
+                &n.name == dest
+            } else {
+                false
+            }
+        });
+        let act_bool = !actions_ref.borrow().action.iter().any(|a| {
+            if let Some(act) = &selected_action {
+                &a.name == act
+            } else {
+                false
+            }
+        });
+        let time_bool = match validate_nums(vec![&hours_value, &mins_value, &secs_value], 0) {
+            ValidateNums::Okay => false,
+            _ => true,
+        };
         BuildStep {
             step_num,
+            errors: BuildStepErrors {
+                destination: dest_bool,
+                action: act_bool,
+                time: time_bool,
+            },
+            error_message: None,
             steps_len,
             nodes_ref,
             actions_ref,
@@ -861,38 +931,89 @@ impl BuildStep {
     fn set_style(&mut self, style: Theme) {
         self.style = style;
     }
+    fn set_error(&mut self, msg: impl ToString) {
+        self.error_message = Some(msg.to_string());
+    }
+    fn clear_error(&mut self) {
+        self.error_message = None;
+    }
 
     fn update(&mut self, message: StepMessage) {
         match message {
             StepMessage::NewDestination(destination) => {
-                self.selected_destination = Some(destination)
+                self.selected_destination = Some(destination);
+                if self.nodes_ref.borrow().node.iter().any(|n| {
+                    if let Some(dest) = &self.selected_destination {
+                        &n.name == dest
+                    } else {
+                        false
+                    }
+                }) {
+                    self.errors.destination = false;
+                } else {
+                    self.errors.destination = true;
+                }
             }
-            StepMessage::NewAction(action) => self.selected_action = Some(action),
+            StepMessage::NewAction(action) => {
+                self.selected_action = Some(action);
+                if self.actions_ref.borrow().action.iter().any(|a| {
+                    if let Some(act) = &self.selected_action {
+                        &a.name == act
+                    } else {
+                        false
+                    }
+                }) {
+                    self.errors.action = false;
+                } else {
+                    self.errors.action = true;
+                }
+            }
             StepMessage::ToggleHover(b) => self.hover = b,
             StepMessage::ToggleWait(b) => self.wait = b,
             StepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
-                if hours == "".to_string() {
-                    self.hours_value = "".to_string()
+                if hours.is_empty() {
+                    self.hours_value = String::new()
                 } else if into_num.is_ok() {
                     self.hours_value = into_num.unwrap().min(99).to_string();
                 }
+                self.errors.time = match validate_nums(
+                    vec![&self.hours_value, &self.mins_value, &self.secs_value],
+                    0,
+                ) {
+                    ValidateNums::Okay => false,
+                    _ => true,
+                };
             }
             StepMessage::MinsChanged(mins) => {
                 let into_num = mins.parse::<usize>();
-                if mins == "".to_string() {
-                    self.mins_value = "".to_string()
+                if mins.is_empty() {
+                    self.mins_value = String::new()
                 } else if into_num.is_ok() {
                     self.mins_value = into_num.unwrap().min(59).to_string();
                 }
+                self.errors.time = match validate_nums(
+                    vec![&self.hours_value, &self.mins_value, &self.secs_value],
+                    0,
+                ) {
+                    ValidateNums::Okay => false,
+                    _ => true,
+                };
             }
             StepMessage::SecsChanged(secs) => {
                 let into_num = secs.parse::<usize>();
-                if secs == "".to_string() {
-                    self.secs_value = "".to_string()
+                if secs.is_empty() {
+                    self.secs_value = String::new()
                 } else if into_num.is_ok() {
                     self.secs_value = into_num.unwrap().min(59).to_string();
                 }
+                self.errors.time = match validate_nums(
+                    vec![&self.hours_value, &self.mins_value, &self.secs_value],
+                    0,
+                ) {
+                    ValidateNums::Okay => false,
+                    _ => true,
+                };
             }
             StepMessage::HoursIncrement => {
                 self.hours_value = (self.hours_value.parse::<usize>().unwrap_or(0) + 1)
@@ -965,6 +1086,23 @@ impl BuildStep {
     }
 
     fn view(&mut self) -> Element<StepMessage> {
+        if self.errors.destination {
+            if let Some(dest) = &self.selected_destination {
+                self.set_error(format!("Selected destination not found in Nodes.\nEither select another destination, or go to\nAdvanced -> Nodes and rename/add a node with the name '{}'.", dest));
+            } else {
+                self.set_error("Select a destination.");
+            }
+        } else if self.errors.action {
+            if let Some(act) = &self.selected_action {
+                self.set_error(format!("Selected action not found.\nEither select another action, or go to\nAdvanced -> Actions and rename/add an action with the name '{}'.", act));
+            } else {
+                self.set_error("Select an action.");
+            }
+        } else if self.errors.time {
+            self.set_error("Time entries must be numbers with no decimals or fractions.");
+        } else {
+            self.clear_error();
+        }
         match &mut self.state {
             StepState::Editing {
                 destination_state,
@@ -978,6 +1116,19 @@ impl BuildStep {
             } => {
                 Container::new(
                     Column::new()
+                        .push(if let Some(msg) = &self.error_message {
+                            Container::new(
+                                Row::with_children(vec![
+                                    Space::with_width(Length::Fill).into(),
+                                    Text::new(msg).into(),
+                                    Space::with_width(Length::Fill).into(),
+                                ])
+                                .padding(10),
+                            )
+                            .style(Theme::Red)
+                        } else {
+                            Container::new(Space::with_height(Length::Shrink))
+                        })
                         .push(
                             Row::new()
                                 .push(
@@ -1011,7 +1162,11 @@ impl BuildStep {
                                             self.selected_destination.clone(),
                                             StepMessage::NewDestination,
                                         )
-                                        .style(Theme::Blue)
+                                        .style(if self.errors.destination {
+                                            Theme::Red
+                                        } else {
+                                            Theme::Blue
+                                        })
                                         .padding(10)
                                         .width(Length::Shrink),
                                     ),
@@ -1033,7 +1188,11 @@ impl BuildStep {
                                                     self.selected_action.clone(),
                                                     StepMessage::NewAction,
                                                 )
-                                                .style(Theme::Blue)
+                                                .style(if self.errors.action {
+                                                    Theme::Red
+                                                } else {
+                                                    Theme::Blue
+                                                })
                                                 .padding(10)
                                                 .width(Length::Shrink),
                                             )
@@ -1045,21 +1204,29 @@ impl BuildStep {
                                                     &self.hours_value,
                                                     StepMessage::HoursChanged,
                                                 )
-                                                .style(Theme::Blue)
+                                                .style(if self.errors.time {
+                                                    Theme::Red
+                                                } else {
+                                                    Theme::Blue
+                                                })
                                                 .on_scroll_up(StepMessage::HoursIncrement)
                                                 .on_scroll_down(StepMessage::HoursDecrement)
                                                 .padding(10)
                                                 .width(Length::Fill),
                                             )
                                             .push(
-                                                (TextInput::new(
+                                                TextInput::new(
                                                     // mins
                                                     mins_input,
                                                     "Minutes",
                                                     &self.mins_value,
                                                     StepMessage::MinsChanged,
                                                 )
-                                                .style(Theme::Blue))
+                                                .style(if self.errors.time {
+                                                    Theme::Red
+                                                } else {
+                                                    Theme::Blue
+                                                })
                                                 .on_scroll_up(StepMessage::MinsIncrement)
                                                 .on_scroll_down(StepMessage::MinsDecrement)
                                                 .padding(10)
@@ -1073,7 +1240,11 @@ impl BuildStep {
                                                     &self.secs_value,
                                                     StepMessage::SecsChanged,
                                                 )
-                                                .style(Theme::Blue)
+                                                .style(if self.errors.time {
+                                                    Theme::Red
+                                                } else {
+                                                    Theme::Blue
+                                                })
                                                 .on_scroll_up(StepMessage::SecsIncrement)
                                                 .on_scroll_down(StepMessage::SecsDecrement)
                                                 .padding(10)
@@ -1129,7 +1300,11 @@ impl BuildStep {
                                 .push(Space::with_width(Length::Fill)),
                         ),
                 )
-                .style(self.style)
+                .style(if self.errors.all().iter().any(|e| *e) {
+                    Theme::Red
+                } else {
+                    self.style
+                })
                 .into()
             }
             StepState::Idle { edit_btn } => {
@@ -1283,7 +1458,11 @@ impl BuildStep {
                             .width(Length::Units(100)),
                         ),
                 )
-                .style(self.style)
+                .style(if self.errors.all().iter().any(|e| *e) {
+                    Theme::Red
+                } else {
+                    self.style
+                })
                 .into()
             }
         }
@@ -1310,6 +1489,7 @@ pub struct AddStep {
     hours_value: String,
     wait: bool,
     add_btn: button::State,
+    destination_style: Theme,
 }
 
 #[derive(Debug, Clone)]
@@ -1370,12 +1550,14 @@ impl AddStep {
             hours_value: "".to_string(),
             wait: false,
             add_btn: button::State::new(),
+            destination_style: Theme::Blue,
         }
     }
 
     fn update(&mut self, message: AddStepMessage) {
         match message {
             AddStepMessage::NewDestination(destination) => {
+                self.destination_style = Theme::Blue;
                 self.selected_destination = Some(destination)
             }
             AddStepMessage::NewAction(action) => self.selected_action = Some(action),
@@ -1499,7 +1681,7 @@ impl AddStep {
                                 self.selected_destination.clone(),
                                 AddStepMessage::NewDestination,
                             )
-                            .style(Theme::Blue)
+                            .style(self.destination_style)
                             .padding(10)
                             .width(Length::Shrink),
                         ),

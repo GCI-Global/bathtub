@@ -14,6 +14,7 @@ pub mod style {
         Red,
         RedDisabled,
         Green,
+        GreenDisabled,
         Yellow,
         YellowSelected,
         LightGray,
@@ -21,7 +22,7 @@ pub mod style {
     }
 
     impl Theme {
-        pub const ALL: [Theme; 16] = [
+        pub const ALL: [Theme; 17] = [
             Theme::Active,
             Theme::Disabled,
             Theme::Idle,
@@ -34,6 +35,7 @@ pub mod style {
             Theme::Red,
             Theme::RedDisabled,
             Theme::Green,
+            Theme::GreenDisabled,
             Theme::Yellow,
             Theme::YellowSelected,
             Theme::LightGray,
@@ -72,6 +74,7 @@ pub mod style {
                 Theme::Red => red::Button.into(),
                 Theme::RedDisabled => red_disabled::Button.into(),
                 Theme::Green => green::Button.into(),
+                Theme::GreenDisabled => green_disabled::Button.into(),
                 Theme::Yellow => yellow::Button.into(),
                 Theme::YellowSelected => yellow_selected::Button.into(),
                 _ => Default::default(),
@@ -93,6 +96,7 @@ pub mod style {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Blue => blue::PickList.into(),
+                Theme::Red => red::PickList.into(),
                 _ => Default::default(),
             }
         }
@@ -379,8 +383,31 @@ pub mod style {
         }
     }
 
+    mod green_disabled {
+        use iced::{button, Color};
+
+        pub struct Button;
+
+        impl button::StyleSheet for Button {
+            fn active(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(128, 164, 112).into(),
+                    text_color: Color::WHITE,
+                    ..button::Style::default()
+                }
+            }
+            fn hovered(&self) -> button::Style {
+                button::Style {
+                    background: Color::from_rgb8(128, 164, 112).into(),
+                    text_color: Color::WHITE,
+                    ..button::Style::default()
+                }
+            }
+        }
+    }
+
     mod red {
-        use iced::{button, container, text_input, Color};
+        use iced::{button, container, pick_list, text_input, Color};
 
         pub struct Container;
 
@@ -455,6 +482,40 @@ pub mod style {
 
             fn selection_color(&self) -> Color {
                 Color::from_rgb8(249, 40, 20)
+            }
+        }
+
+        pub struct PickList;
+
+        impl pick_list::StyleSheet for PickList {
+            fn active(&self) -> pick_list::Style {
+                pick_list::Style {
+                    text_color: Color::WHITE,
+                    background: Color::from_rgb8(229, 20, 0).into(),
+                    icon_size: 0.55,
+                    border_color: Color::from_rgb8(229, 20, 0),
+                    ..pick_list::Style::default()
+                }
+            }
+
+            fn hovered(&self) -> pick_list::Style {
+                pick_list::Style {
+                    text_color: Color::WHITE,
+                    background: Color::from_rgb8(249, 40, 20).into(),
+                    icon_size: 0.55,
+                    border_color: Color::from_rgb8(249, 40, 20),
+                    ..pick_list::Style::default()
+                }
+            }
+
+            fn menu(&self) -> pick_list::Menu {
+                pick_list::Menu {
+                    text_color: Color::WHITE,
+                    background: Color::from_rgb8(229, 20, 0).into(),
+                    selected_text_color: Color::WHITE,
+                    selected_background: Color::from_rgb8(249, 40, 20).into(),
+                    ..pick_list::Menu::default()
+                }
             }
         }
     }

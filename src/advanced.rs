@@ -389,6 +389,7 @@ impl TabBar {
 
 pub struct SaveBar {
     pub message: String,
+    save_text: String,
     save_btn: button::State,
     cancel_btn: button::State,
 }
@@ -400,11 +401,21 @@ pub enum SaveBarMessage {
 }
 
 impl SaveBar {
+    pub fn new_as() -> Self {
+        SaveBar {
+            save_btn: button::State::new(),
+            cancel_btn: button::State::new(),
+            message: "Unsaved Changes!".to_string(),
+            save_text: "Save as".to_string(),
+        }
+    }
+
     pub fn new() -> Self {
         SaveBar {
             save_btn: button::State::new(),
             cancel_btn: button::State::new(),
             message: "Unsaved Changes!".to_string(),
+            save_text: "Save".to_string(),
         }
     }
 
@@ -425,7 +436,7 @@ impl SaveBar {
                 Space::with_width(Length::Fill).into(),
                 Button::new(
                     &mut self.save_btn,
-                    Text::new("Save as")
+                    Text::new(&self.save_text)
                         .size(20)
                         .horizontal_alignment(HorizontalAlignment::Center),
                 )
@@ -1085,6 +1096,7 @@ struct ConfigNode {
 struct ConfigNodeErrors {
     names_match: bool,
     name_blank: bool,
+    number_blank: bool,
     not_numbers: bool,
     too_many_decimals: bool,
     home_required: bool,
@@ -1096,6 +1108,7 @@ impl ConfigNodeErrors {
         ConfigNodeErrors {
             names_match: false,
             name_blank: false,
+            number_blank: false,
             not_numbers: false,
             too_many_decimals: false,
             home_required: false,
@@ -1103,6 +1116,7 @@ impl ConfigNodeErrors {
         }
     }
     fn clear_nums(&mut self) {
+        self.number_blank = false;
         self.not_numbers = false;
         self.too_many_decimals = false;
     }
@@ -1117,6 +1131,7 @@ impl ConfigNodeErrors {
         vec![
             self.names_match,
             self.name_blank,
+            self.number_blank,
             self.not_numbers,
             self.too_many_decimals,
             self.home_required,
@@ -1192,14 +1207,7 @@ impl ConfigNode {
             edit_btn: button::State::new(),
             okay_btn: button::State::new(),
             delete_btn: button::State::new(),
-            errors: ConfigNodeErrors {
-                names_match: false,
-                name_blank: false,
-                not_numbers: false,
-                too_many_decimals: false,
-                home_required: false,
-                try_save_while_edit: false,
-            },
+            errors: ConfigNodeErrors::new(),
         }
     }
 
@@ -1225,35 +1233,47 @@ impl ConfigNode {
             // TODO: Highlight red if not valid f32 or more than 3 decimals
             ConfigNodeMessage::XChanged(x) => {
                 self.x = x;
-                match validate_nums(self) {
-                    ValidateNums::NotNums => self.errors.not_numbers = true,
-                    ValidateNums::TooManyDecimals => {
-                        self.errors.not_numbers = false;
-                        self.errors.too_many_decimals = true;
+                if self.x.is_empty() {
+                    self.errors.number_blank = true;
+                } else {
+                    match validate_nums(vec![&self.x, &self.y, &self.z], 3) {
+                        ValidateNums::NotNums => self.errors.not_numbers = true,
+                        ValidateNums::TooManyDecimals => {
+                            self.errors.not_numbers = false;
+                            self.errors.too_many_decimals = true;
+                        }
+                        ValidateNums::Okay => self.errors.clear_nums(),
                     }
-                    ValidateNums::Okay => self.errors.clear_nums(),
                 }
             }
             ConfigNodeMessage::YChanged(y) => {
                 self.y = y;
-                match validate_nums(self) {
-                    ValidateNums::NotNums => self.errors.not_numbers = true,
-                    ValidateNums::TooManyDecimals => {
-                        self.errors.not_numbers = false;
-                        self.errors.too_many_decimals = true;
+                if self.y.is_empty() {
+                    self.errors.number_blank = true;
+                } else {
+                    match validate_nums(vec![&self.x, &self.y, &self.z], 3) {
+                        ValidateNums::NotNums => self.errors.not_numbers = true,
+                        ValidateNums::TooManyDecimals => {
+                            self.errors.not_numbers = false;
+                            self.errors.too_many_decimals = true;
+                        }
+                        ValidateNums::Okay => self.errors.clear_nums(),
                     }
-                    ValidateNums::Okay => self.errors.clear_nums(),
                 }
             }
             ConfigNodeMessage::ZChanged(z) => {
                 self.z = z;
-                match validate_nums(self) {
-                    ValidateNums::NotNums => self.errors.not_numbers = true,
-                    ValidateNums::TooManyDecimals => {
-                        self.errors.not_numbers = false;
-                        self.errors.too_many_decimals = true;
+                if self.z.is_empty() {
+                    self.errors.number_blank = true;
+                } else {
+                    match validate_nums(vec![&self.x, &self.y, &self.z], 3) {
+                        ValidateNums::NotNums => self.errors.not_numbers = true,
+                        ValidateNums::TooManyDecimals => {
+                            self.errors.not_numbers = false;
+                            self.errors.too_many_decimals = true;
+                        }
+                        ValidateNums::Okay => self.errors.clear_nums(),
                     }
-                    ValidateNums::Okay => self.errors.clear_nums(),
                 }
             }
             ConfigNodeMessage::Neighbors(i, StringPickListMessage::Delete) => {
@@ -1335,6 +1355,8 @@ impl ConfigNode {
             self.set_error("Names must be unique.");
         } else if self.errors.not_numbers {
             self.set_error("All positions must be numbers.");
+        } else if self.errors.number_blank {
+            self.set_error("Positions cannot be empty.");
         } else if self.errors.too_many_decimals {
             self.set_error("Limit to 3 decimals.");
         } else if self.errors.try_save_while_edit {
@@ -1784,6 +1806,7 @@ impl ActionTab {
             }
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::Delete) => {
                 self.config_actions.remove(i);
+                (*self.modified_actions.borrow_mut()).action.remove(i);
             }
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::NameChanged(name)) => {
                 if self.config_actions.iter().any(|a| a.name == name) {
@@ -2719,13 +2742,17 @@ fn date(date_num: &str) -> String {
         &date_num[0..4]
     )
 }
-fn validate_nums(node: &mut ConfigNode) -> ValidateNums {
-    let coords = vec![&node.x, &node.y, &node.z];
-    if coords.iter().any(|coord| coord.parse::<f32>().is_err()) {
+pub fn validate_nums(nums: Vec<&String>, count: usize) -> ValidateNums {
+    if nums.iter().any(|num| {
+        if !num.is_empty() {
+            num.parse::<f32>().is_err()
+        } else {
+            false
+        }
+    }) {
         ValidateNums::NotNums
-    } else if coords.iter().any(|coord| {
-        coord
-            .split(".")
+    } else if nums.iter().any(|num| {
+        num.split(".")
             .enumerate()
             .fold(String::new(), |mut s, (i, part)| {
                 if i == 1 {
@@ -2734,7 +2761,7 @@ fn validate_nums(node: &mut ConfigNode) -> ValidateNums {
                 s
             })
             .len()
-            > 3
+            > count
     }) {
         // split the decimals and count them
         ValidateNums::TooManyDecimals
@@ -2743,7 +2770,7 @@ fn validate_nums(node: &mut ConfigNode) -> ValidateNums {
     }
 }
 
-enum ValidateNums {
+pub enum ValidateNums {
     Okay,
     NotNums,
     TooManyDecimals,
