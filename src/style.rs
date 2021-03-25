@@ -19,10 +19,12 @@ pub mod style {
         YellowSelected,
         LightGray,
         LighterGray,
+        LightGrayHighlight,
+        LighterGrayHighlight,
     }
 
     impl Theme {
-        pub const ALL: [Theme; 17] = [
+        pub const ALL: [Theme; 19] = [
             Theme::Active,
             Theme::Disabled,
             Theme::Idle,
@@ -40,6 +42,8 @@ pub mod style {
             Theme::YellowSelected,
             Theme::LightGray,
             Theme::LighterGray,
+            Theme::LightGrayHighlight,
+            Theme::LighterGrayHighlight,
         ];
     }
 
@@ -57,6 +61,8 @@ pub mod style {
                 Theme::Yellow => yellow::Container.into(),
                 Theme::LightGray => light_gray::Container.into(),
                 Theme::LighterGray => lighter_gray::Container.into(),
+                Theme::LightGrayHighlight => light_gray_highlight::Container.into(),
+                Theme::LighterGrayHighlight => lighter_gray_highlight::Container.into(),
                 _ => Default::default(),
             }
         }
@@ -645,6 +651,41 @@ pub mod style {
                     border_radius: 0.0,
                     border_width: 0.0,
                     border_color: Color::TRANSPARENT,
+                }
+            }
+        }
+    }
+
+    mod light_gray_highlight {
+        use iced::{container, Color};
+
+        pub struct Container;
+
+        impl container::StyleSheet for Container {
+            fn style(&self) -> container::Style {
+                container::Style {
+                    text_color: Some(Color::BLACK),
+                    background: Color::from_rgb8(220, 220, 235).into(),
+                    border_radius: 0.0,
+                    border_width: 5.0,
+                    border_color: Color::from_rgb8(37, 171, 236),
+                }
+            }
+        }
+    }
+    mod lighter_gray_highlight {
+        use iced::{container, Color};
+
+        pub struct Container;
+
+        impl container::StyleSheet for Container {
+            fn style(&self) -> container::Style {
+                container::Style {
+                    text_color: Some(Color::BLACK),
+                    background: Color::from_rgb8(240, 240, 255).into(),
+                    border_radius: 0.0,
+                    border_width: 5.0,
+                    border_color: Color::from_rgb8(37, 171, 236),
                 }
             }
         }

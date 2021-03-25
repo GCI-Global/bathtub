@@ -17,7 +17,6 @@ use grbl::{Command as Cmd, Grbl, Status};
 use logger::Logger;
 use manual::{Manual, ManualMessage};
 use nodes::{Node, Nodes};
-use regex::Regex;
 use run::Step;
 use run::{Run, RunMessage, RunState};
 use std::cell::RefCell;
@@ -59,6 +58,7 @@ struct State {
     logger: Logger,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
+    current_step: Option<mpsc::Receiver<Option<usize>>>,
 }
 
 impl State {
@@ -73,6 +73,7 @@ impl State {
         node_map: HashMap<String, usize>,
         nodes: Nodes,
         actions: Actions,
+        current_step_sender: mpsc::Sender<Option<usize>>,
     ) -> Result<(), Errors> {
         if (*current_node.lock().unwrap()).name[..] == *"HOME" {
             let state: RecipeState;
@@ -145,7 +146,14 @@ impl State {
                 thread::sleep(Duration::from_millis(1))
             }
         });
+        let mut current_step_num: Option<usize> = None;
         for step in recipie {
+            if let Some(num) = &mut current_step_num {
+                *num += 1;
+            } else {
+                current_step_num = Some(0);
+            }
+            current_step_sender.send(current_step_num).unwrap();
             grbl.clear_responses();
             let notify_user_input_recv = if step.wait {
                 logger
@@ -573,7 +581,7 @@ enum Errors {
 #[derive(Debug, Clone)]
 enum Message {
     TabBar(TabBarMessage),
-    RecipieDone(Result<(), Errors>),
+    RecipeDone(Result<(), Errors>),
     Manual(ManualMessage),
     Build(BuildMessage),
     Run(RunMessage),
@@ -681,6 +689,7 @@ impl<'a> Application for Bathtub {
                             logger: logger.clone(),
                             grbl_status: None,
                             recipe_state: Arc::clone(&recipe_state),
+                            current_step: None,
                         });
                     }
                     Message::Loaded(Err(_)) => {
@@ -747,7 +756,8 @@ impl<'a> Application for Bathtub {
                             );
                             state.logger.set_log_file(log_title.clone());
                             state.tabs.advanced.update_logs();
-
+                            let (tx, rx) = mpsc::channel();
+                            state.current_step = Some(rx);
                             command = Command::perform(
                                 State::run_recipie(
                                     state.grbl.clone(),
@@ -769,8 +779,9 @@ impl<'a> Application for Bathtub {
                                     state.node_map.clone(),
                                     state.nodes.borrow().clone(),
                                     state.actions.borrow().clone(),
+                                    tx,
                                 ),
-                                Message::RecipieDone,
+                                Message::RecipeDone,
                             );
                             *state.homing_required.borrow_mut() = false;
                         }
@@ -804,6 +815,8 @@ impl<'a> Application for Bathtub {
                             // we only update the list of logs on load, and when we create a new
                             // log file
                             state.tabs.advanced.update_logs();
+                            let (tx, rx) = mpsc::channel();
+                            state.current_step = Some(rx);
                             command = Command::perform(
                                 State::run_recipie(
                                     state.grbl.clone(),
@@ -816,8 +829,9 @@ impl<'a> Application for Bathtub {
                                     state.node_map.clone(),
                                     state.nodes.borrow().clone(),
                                     state.actions.borrow().clone(),
+                                    tx,
                                 ),
-                                Message::RecipieDone,
+                                Message::RecipeDone,
                             );
                             *state.homing_required.borrow_mut() = false;
                         }
@@ -862,7 +876,9 @@ impl<'a> Application for Bathtub {
                             RunState::Standard
                         };
                     }
-                    Message::RecipieDone(Ok(_)) => {
+                    Message::RecipeDone(Ok(_)) => {
+                        state.current_step = None;
+                        state.tabs.run.current_step = None;
                         state
                             .logger
                             .send_line(format!("{} => Done", Local::now().to_rfc2822()))
@@ -880,13 +896,20 @@ impl<'a> Application for Bathtub {
                             RunState::Standard
                         };
                     }
-                    Message::RecipieDone(Err(_err)) => {
+                    Message::RecipeDone(Err(_err)) => {
+                        state.current_step = None;
+                        state.tabs.run.current_step = None;
                         let (recipe_state, cvar) = &*state.recipe_state;
                         let mut recipe_state = recipe_state.lock().unwrap();
                         *recipe_state = RecipeState::Stopped;
                         cvar.notify_all();
                     }
                     Message::Tick => {
+                        if let Some(rx) = &state.current_step {
+                            if let Ok(num) = rx.try_recv() {
+                                state.tabs.run.current_step = num;
+                            }
+                        }
                         if state.grbl.is_ok() {
                             let stat = state.grbl.get_status();
                             if let Some(s) = stat {

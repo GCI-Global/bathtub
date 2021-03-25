@@ -47,6 +47,7 @@ pub struct Run {
     ref_nodes: Rc<RefCell<Nodes>>,
     ref_actions: Rc<RefCell<Actions>>,
     node_map: HashMap<String, usize>,
+    pub current_step: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +110,7 @@ impl Run {
             ref_nodes,
             ref_actions,
             node_map,
+            current_step: None,
         }
     }
 
@@ -163,7 +165,7 @@ impl Run {
                     || self
                         .required_before_inputs
                         .iter()
-                        .any(|input| input.input_value != "".to_string())
+                        .any(|input| !input.input_value.is_empty())
                 {
                     let log_title = format!(
                         "{}| Run - {}",
@@ -198,7 +200,7 @@ impl Run {
                     || self
                         .required_after_inputs
                         .iter()
-                        .any(|input| input.input_value != "".to_string())
+                        .any(|input| !input.input_value.is_empty())
                 {
                     self.logger
                         .send_line("--------------------".to_string())
@@ -213,7 +215,7 @@ impl Run {
                             ))
                             .unwrap();
                     }
-                    self.logger.set_log_file("".to_string());
+                    self.logger.set_log_file(String::new());
                     self.state = RunState::Standard;
                 }
             }
@@ -242,6 +244,7 @@ impl Run {
         let ref_nodes = &self.ref_nodes;
         let ref_actions = &self.ref_actions;
         let node_map = &self.node_map;
+        let current_step = &self.current_step;
         match self.state {
             RunState::Standard => {
                 let search: Element<_>;
@@ -450,11 +453,19 @@ impl Run {
                                             )
                                             .push(Space::with_height(Length::Fill)),
                                     )
-                                    .style(if i % 2 == 0 {
-                                        Theme::LightGray
-                                    } else {
-                                        Theme::LighterGray
-                                    }),
+                                    .style(
+                                        match current_step {
+                                            Some(num) if i % 2 == 0 && *num == i => {
+                                                Theme::LightGrayHighlight
+                                            }
+                                            Some(num) if i % 2 != 0 && *num == i => {
+                                                Theme::LighterGrayHighlight
+                                            }
+                                            _ if i % 2 == 0 => Theme::LightGray,
+                                            _ if i % 2 != 0 => Theme::LighterGray,
+                                            _ => Theme::LightGray,
+                                        },
+                                    ),
                                 )
                             } else {
                                 col.push(
@@ -467,11 +478,19 @@ impl Run {
                                             ))
                                             .push(Space::with_height(Length::Fill)),
                                     )
-                                    .style(if i % 2 == 0 {
-                                        Theme::LightGray
-                                    } else {
-                                        Theme::LighterGray
-                                    }),
+                                    .style(
+                                        match current_step {
+                                            Some(num) if i % 2 == 0 && *num == i => {
+                                                Theme::LightGrayHighlight
+                                            }
+                                            Some(num) if i % 2 != 0 && *num == i => {
+                                                Theme::LighterGrayHighlight
+                                            }
+                                            _ if i % 2 == 0 => Theme::LightGray,
+                                            _ if i % 2 != 0 => Theme::LighterGray,
+                                            _ => Theme::LightGray,
+                                        },
+                                    ),
                                 )
                             }
                         })
