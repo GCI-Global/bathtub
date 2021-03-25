@@ -216,7 +216,7 @@ impl State {
                             future_node.z,
                         ))
                         .unwrap();
-                    let node_paths = paths::gen_node_paths(&nodes, &cn, future_node);
+                    let node_paths = paths::gen_node_paths(&nodes, &cn, future_node).unwrap();
                     logger
                         .send_line(format!(
                             "{} => Step {}) on path {}",
@@ -650,6 +650,9 @@ impl<'a> Application for Bathtub {
                                     Arc::clone(&recipe_state),
                                     logger.clone(),
                                     homing_required.clone(),
+                                    Rc::clone(&ref_node),
+                                    Rc::clone(&ref_actions),
+                                    state.node_map.clone(),
                                 ),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
