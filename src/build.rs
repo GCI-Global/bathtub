@@ -2013,7 +2013,7 @@ fn save(tab: &mut Build) {
                 // file already exists, thus we need to log that recipe was changed
                 write!(file, "{}", new_recipe).unwrap();
                 tab.logger.set_log_file(format!(
-                    "{}| Build - Changed '{}'",
+                    "{}; Build - Changed '{}'",
                     Local::now().to_rfc2822(),
                     tab.name_entry_value,
                 ));
@@ -2039,7 +2039,7 @@ fn save(tab: &mut Build) {
                     .unwrap();
                 write!(file, "{}", new_recipe).unwrap();
                 tab.logger.set_log_file(format!(
-                    "{}| Build - Created '{}'",
+                    "{}; Build - Created '{}'",
                     Local::now().to_rfc2822(),
                     tab.name_entry_value
                 ));

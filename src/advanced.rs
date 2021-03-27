@@ -1,6 +1,6 @@
 use super::actions::{Action, Actions};
 use super::logger::Logger;
-use super::nodes::{Node, Nodes};
+use super::nodes::{Node, Nodes, get_nodemap};
 use super::run::do_nothing;
 use super::style::style::Theme;
 use crate::{TabState as ParentTabState, CQ_MONO};
@@ -71,6 +71,7 @@ impl Advanced {
         ref_nodes: Rc<RefCell<Nodes>>,
         ref_actions: Rc<RefCell<Actions>>,
         parent_unsaved_tabs: Rc<RefCell<HashMap<ParentTabState, bool>>>,
+        node_map: Rc<RefCell<HashMap<String, usize>>>
     ) -> Self {
         let mut unsaved_tabs_local = HashMap::with_capacity(3);
         unsaved_tabs_local.insert(TabState::Nodes, false);
@@ -82,7 +83,7 @@ impl Advanced {
             state: TabState::Logs,
             tab_bar: TabBar::new(unsaved_tabs.clone()),
             grbl_tab: GrblTab::new(grbl, Vec::new(), logger.clone(), unsaved_tabs.clone()),
-            nodes_tab: NodeTab::new(ref_nodes, logger.clone(), unsaved_tabs.clone()),
+            nodes_tab: NodeTab::new(ref_nodes, logger.clone(), unsaved_tabs.clone(), node_map),
             actions_tab: ActionTab::new(ref_actions, logger, unsaved_tabs.clone()),
             logs_tab: LogTab::new(),
             parent_unsaved_tabs,
@@ -151,6 +152,7 @@ impl Advanced {
                 self.tab_bar.change_state(TabState::Grbl)
             }
             AdvancedMessage::GrblTab(GrblMessage::SaveMessage(SaveBarMessage::Cancel)) => {
+                self.grbl_tab.save_bar.message = "Unsaved Changes!".to_string();
                 self.grbl_tab.modified_settings = self.grbl_tab.settings.clone();
                 self.grbl_tab
                     .unsaved_tabs
@@ -459,7 +461,7 @@ impl SaveBar {
             .height(Length::Units(50))
             .width(Length::Fill),
         )
-        .style(Theme::Yellow)
+        .style(if self.message[..] == *"Unsaved Changes!" {Theme::Yellow} else {Theme::Red})
         .into()
     }
 }
@@ -523,8 +525,46 @@ impl GrblTab {
                         &setting.text, &setting.input_value
                     )));
                 }
+                let mut error = false;
+                if let Some(final_cmd) = self.settings.last() {
+                    loop {
+                        if let Some(cmd) = self.grbl.pop_command() {
+                            if cmd.result.as_ref().unwrap_or(&String::new()).contains("error") {
+                                error = true;
+                                self.save_bar.message = format!("{} {}. Settings Reverted.", cmd.command, cmd.result.unwrap())
+                            }
+                            if cmd.command
+                                == format!("{}={}", final_cmd.text, final_cmd.input_value)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                if error {
+                    for setting in &self.settings {
+                        self.grbl.push_command(Cmd::new(format!(
+                            "{}={}",
+                            &setting.text, &setting.input_value
+                        )));
+                    }
+                    if let Some(final_cmd) = self.settings.last() {
+                        loop {
+                            if let Some(cmd) = self.grbl.pop_command() {
+                                if cmd.command
+                                    == format!("{}={}", final_cmd.text, final_cmd.input_value)
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                } else {
+                    self.save_bar.message = "Unsaved Changes!".to_string();
+                self.settings = self.modified_settings.clone();
                 self.logger.set_log_file(format!(
-                    "{}| Advanced (Grbl) - Save",
+                    "{}; Advanced (Grbl) - Save",
                     Local::now().to_rfc2822()
                 ));
                 self.logger.send_line(String::new()).unwrap();
@@ -551,20 +591,9 @@ impl GrblTab {
                         },
                     ))
                     .unwrap();
-                self.settings = self.modified_settings.clone();
-                if let Some(final_cmd) = self.settings.last() {
-                    loop {
-                        if let Some(cmd) = self.grbl.pop_command() {
-                            if cmd.command
-                                == format!("{}={}", final_cmd.text, final_cmd.input_value)
-                            {
-                                break;
-                            }
-                        }
-                    }
-                }
                 self.unsaved = false;
                 self.unsaved_tabs.borrow_mut().insert(TabState::Grbl, false);
+                }
             }
             _ => {}
         }
@@ -600,6 +629,12 @@ impl GrblTab {
                         .as_ref()
                         .unwrap_or(&"** Unavailable **".to_string()),
                 )
+                .horizontal_alignment(HorizontalAlignment::Left)
+                .size(20)
+                .width(Length::Units(505)),
+            )
+            .push(
+                Text::new("https://github.com/gnea/grbl/wiki")
                 .horizontal_alignment(HorizontalAlignment::Left)
                 .size(20)
                 .width(Length::Units(505)),
@@ -676,6 +711,7 @@ struct NodeTab {
     add_config_node_btn: button::State,
     logger: Logger,
     unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
+    node_map: Rc<RefCell<HashMap<String, usize>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -691,6 +727,7 @@ impl NodeTab {
         ref_nodes: Rc<RefCell<Nodes>>,
         logger: Logger,
         unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
+        node_map: Rc<RefCell<HashMap<String, usize>>>,
     ) -> Self {
         // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
         // nested iter if to flatten the 3d nodes
@@ -754,6 +791,7 @@ impl NodeTab {
             add_config_node_btn: button::State::new(),
             logger,
             unsaved_tabs,
+            node_map,
         }
     }
 
@@ -929,6 +967,8 @@ impl NodeTab {
                     self.save_bar.message = "Clear all errors below, and save again.".to_string();
                 } else {
                     self.save_bar.message = "Unsaved Changed!".to_string();
+                    // because this code is bad, merge the data stored in two
+                    // separate locations.
                     let mut nodes = self.modified_nodes.borrow().clone();
                     for i in 0..self.config_nodes.len() {
                         nodes.node[i].neighbors = self.config_nodes[i]
@@ -956,10 +996,13 @@ impl NodeTab {
                     })
                     .unwrap_or(String::new());
                     fs::write("./config/baths.toml", &new_toml).expect("Unable to save baths");
+                    // update application with saved data
+                    *self.node_map.borrow_mut() = get_nodemap(&nodes);
+                    (*self.ref_nodes.borrow_mut()).node = nodes.node;
 
-                    *self.ref_nodes.borrow_mut() = nodes.clone();
+                    // log the changes
                     self.logger.set_log_file(format!(
-                        "{}| Advanced (Nodes) - Save",
+                        "{}; Advanced (Nodes) - Save",
                         Local::now().to_rfc2822()
                     ));
                     self.logger.send_line(String::new()).unwrap();
@@ -1899,7 +1942,7 @@ impl ActionTab {
                 {
                     self.save_bar.message = "Clear all errors below, and save again.".to_string();
                 } else {
-                    self.save_bar.message = "Unsaved Changed!".to_string();
+                    self.save_bar.message = "Unsaved Changes!".to_string();
                     let old_toml = toml::to_string_pretty(&*self.ref_actions.borrow()).unwrap();
                     let new_toml =
                         toml::to_string_pretty(&*self.modified_actions.borrow()).unwrap();
@@ -1907,7 +1950,7 @@ impl ActionTab {
 
                     *self.ref_actions.borrow_mut() = self.modified_actions.borrow().clone();
                     self.logger.set_log_file(format!(
-                        "{}| Advanced (Actions) - Save",
+                        "{}; Advanced (Actions) - Save",
                         Local::now().to_rfc2822()
                     ));
                     self.logger.send_line(String::new()).unwrap();
@@ -2306,7 +2349,7 @@ pub enum LogTabMessage {
 
 impl LogTab {
     fn new() -> Self {
-        let date_regex = Regex::new(r"[^|]+").unwrap();
+        let date_regex = Regex::new(r"[^;]+").unwrap();
         let mut log_files: Vec<_> = fs::read_dir(Path::new(LOGS))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())

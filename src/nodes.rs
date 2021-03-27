@@ -155,10 +155,10 @@ pub fn gen_nodes() -> Result<Nodes, ()> {
     Ok(nodes)
 }
 
-pub fn get_nodemap(nodes: Nodes) -> HashMap<String, usize> {
+pub fn get_nodemap(nodes: &Nodes) -> HashMap<String, usize> {
     nodes
         .node
-        .into_iter()
+        .iter()
         .enumerate()
         .fold(HashMap::new(), |mut node_map, (i, node)| {
             node_map.insert(node.name.clone(), i);

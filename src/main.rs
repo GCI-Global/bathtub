@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
-use std::{fs, mem::discriminant, thread};
+use std::{mem::discriminant, thread};
 use style::style::Theme;
 
 use iced::{
@@ -47,7 +47,7 @@ struct State {
     tabs: Tabs,
     tab_bar: TabBar,
     nodes: Rc<RefCell<Nodes>>,
-    node_map: HashMap<String, usize>,
+    node_map: Rc<RefCell<HashMap<String, usize>>>,
     prev_node: Arc<Mutex<Option<Node>>>,
     current_node: Arc<Mutex<Node>>,
     next_nodes: Arc<Mutex<Vec<Node>>>,
@@ -642,6 +642,7 @@ impl<'a> Application for Bathtub {
                         unsaved_tabs_local.insert(TabState::Build, false);
                         unsaved_tabs_local.insert(TabState::Advanced, false);
                         let unsaved_tabs = Rc::new(RefCell::new(unsaved_tabs_local));
+                        let node_map = Rc::new(RefCell::new(state.node_map));
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
@@ -660,7 +661,7 @@ impl<'a> Application for Bathtub {
                                     homing_required.clone(),
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
-                                    state.node_map.clone(),
+                                    Rc::clone(&node_map),
                                 ),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
@@ -674,11 +675,12 @@ impl<'a> Application for Bathtub {
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
                                     unsaved_tabs.clone(),
+                                    Rc::clone(&node_map),
                                 ),
                             },
                             tab_bar: TabBar::new(unsaved_tabs),
                             nodes: Rc::clone(&ref_node),
-                            node_map: state.node_map.clone(),
+                            node_map,
                             prev_node: Arc::new(Mutex::new(None)),
                             current_node: Arc::clone(&current_node),
                             next_nodes: Arc::clone(&next_nodes),
@@ -750,7 +752,7 @@ impl<'a> Application for Bathtub {
                         if discriminant(&*recipe_state) == discriminant(&RecipeState::Stopped) {
                             *recipe_state = RecipeState::ManualRunning;
                             let log_title = format!(
-                                "{}| Manual - Going to {}",
+                                "{}; Manual - Going to {}",
                                 Local::now().to_rfc2822(),
                                 &node
                             );
@@ -776,7 +778,7 @@ impl<'a> Application for Bathtub {
                                         hover: state.tabs.manual.hover,
                                         wait: false,
                                     }],
-                                    state.node_map.clone(),
+                                    state.node_map.borrow().clone(),
                                     state.nodes.borrow().clone(),
                                     state.actions.borrow().clone(),
                                     tx,
@@ -788,7 +790,7 @@ impl<'a> Application for Bathtub {
                     }
                     Message::Manual(ManualMessage::TerminalInputSubmitted) => {
                         *state.current_node.lock().unwrap() = state.nodes.borrow().node
-                            [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
+                            [state.node_map.borrow().get(&"HOME".to_string()).unwrap().clone()]
                         .clone();
                         command = state
                             .tabs
@@ -826,7 +828,7 @@ impl<'a> Application for Bathtub {
                                     Arc::clone(&state.current_node),
                                     Arc::clone(&state.next_nodes),
                                     state.tabs.run.recipe.as_ref().unwrap().steps.clone(),
-                                    state.node_map.clone(),
+                                    state.node_map.borrow().clone(),
                                     state.nodes.borrow().clone(),
                                     state.actions.borrow().clone(),
                                     tx,
@@ -925,29 +927,29 @@ impl<'a> Application for Bathtub {
                                 let mut recipe_state = recipe_state.lock().unwrap();
                                 *recipe_state = RecipeState::Stopped;
                                 state.logger.set_log_file(format!(
-                                    "{}| GRBL Critical error! - Connection Lost",
+                                    "{}; GRBL Critical error! - Connection Lost",
                                     Local::now().to_rfc2822()
                                 ));
                                 state.logger.send_line(String::new()).unwrap();
-                                state.logger.send_line(format!("{}| More detailed information not currently logged by Bathtub.", Local::now().to_rfc2822())).unwrap();
+                                state.logger.send_line(format!("{}; More detailed information not currently logged by Bathtub.", Local::now().to_rfc2822())).unwrap();
                             }
                             state.connected = false;
                             let grbl = grbl::new();
                             thread::sleep(Duration::from_millis(100));
                             if grbl.is_ok() {
                                 state.logger.set_log_file(format!(
-                                    "{}| GRBL Connection reestablished!",
+                                    "{}; GRBL Connection reestablished!",
                                     Local::now().to_rfc2822()
                                 ));
                                 state.logger.send_line(String::new()).unwrap();
-                                state.logger.send_line(format!("{}| More detailed information not currently logged by Bathtub.", Local::now().to_rfc2822())).unwrap();
+                                state.logger.send_line(format!("{}; More detailed information not currently logged by Bathtub.", Local::now().to_rfc2822())).unwrap();
                                 *state.homing_required.borrow_mut() = true;
                                 state.connected = true;
                                 state.grbl = grbl.clone();
                                 state.tabs.manual.grbl = grbl.clone();
                                 state.tabs.advanced.grbl_tab.grbl = grbl.clone();
                                 *state.current_node.lock().unwrap() = state.nodes.borrow().node
-                                    [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
+                                    [state.node_map.borrow().get(&"HOME".to_string()).unwrap().clone()]
                                 .clone();
                             }
                             let (recipe_state, _) = &*state.recipe_state;
@@ -1144,7 +1146,7 @@ impl LoadState {
         }
         Ok(LoadState::new(
             nodes.clone(),
-            nodes::get_nodemap(nodes.clone()),
+            nodes::get_nodemap(&nodes),
             actions::gen_actions(),
         ))
     }

@@ -98,7 +98,7 @@ impl Manual {
                 Some(cmd) => self.terminal_responses.insert(
                     0,
                     format!(
-                        "{}| '{}' => {}",
+                        "{}; '{}' => {}",
                         cmd.response_time.unwrap().to_rfc2822(),
                         cmd.command,
                         cmd.result.unwrap()
@@ -114,7 +114,7 @@ impl Manual {
                     self.terminal_responses.insert(
                         0,
                         format!(
-                            "{}| => '?' Status command not available. Look at GUI above ;)",
+                            "{}; => '?' Status command not available. Look at GUI above ;)",
                             Local::now().to_rfc2822()
                         ),
                     )
@@ -127,23 +127,23 @@ impl Manual {
                     self.terminal_responses.insert(
                         0,
                         format!(
-                            "{}| '{}' => Command not supported by Bathtub.",
+                            "{}; '{}' => Command not supported by Bathtub.",
                             Local::now().to_rfc2822(),
                             val
                         ),
                     )
                 } else if &val[..] == "$$" || &val[..] == "$I" {
-                    self.terminal_responses.insert(0,format!("{}| '{}' => View and edit settings withing Bathtub! Advanced Tab => Grbl ;)", Local::now().to_rfc2822(), val))
+                    self.terminal_responses.insert(0,format!("{}; '{}' => View and edit settings withing Bathtub! Advanced Tab => Grbl ;)", Local::now().to_rfc2822(), val))
                 } else {
                     self.logger.set_log_file(format!(
-                        "{}| Manual (Terminal) - {}",
+                        "{}; Manual (Terminal) - {}",
                         Local::now().to_rfc2822(),
                         val
                     ));
                     self.logger.send_line(String::new()).unwrap();
                     self.logger
                         .send_line(format!(
-                            "{}| Manual (Terminal) - {}",
+                            "{}; Manual (Terminal) - {}",
                             Local::now().to_rfc2822(),
                             val
                         ))

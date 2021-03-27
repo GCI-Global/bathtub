@@ -46,7 +46,7 @@ pub struct Run {
     homing_required: Rc<RefCell<bool>>,
     ref_nodes: Rc<RefCell<Nodes>>,
     ref_actions: Rc<RefCell<Actions>>,
-    node_map: HashMap<String, usize>,
+    node_map: Rc<RefCell<HashMap<String, usize>>>,
     pub current_step: Option<usize>,
 }
 
@@ -82,7 +82,7 @@ impl Run {
         homing_required: Rc<RefCell<bool>>,
         ref_nodes: Rc<RefCell<Nodes>>,
         ref_actions: Rc<RefCell<Actions>>,
-        node_map: HashMap<String, usize>,
+        node_map: Rc<RefCell<HashMap<String, usize>>>,
     ) -> Self {
         Run {
             scroll: scrollable::State::new(),
@@ -168,7 +168,7 @@ impl Run {
                         .any(|input| !input.input_value.is_empty())
                 {
                     let log_title = format!(
-                        "{}| Run - {}",
+                        "{}; Run - {}",
                         Local::now().to_rfc2822(),
                         self.search_value.as_ref().unwrap()
                     );
@@ -283,7 +283,7 @@ impl Run {
                                 if let Some(recipe) = &self.recipe {
                                     Row::new().push(
                                     if recipe.steps.len() <= 1 {
-                                        start_btn("Recipes need to have mroe than 1 step.", &mut self.large_start_btn, Theme::GreenDisabled)
+                                        start_btn("Recipes need to have more than 1 step.", &mut self.large_start_btn, Theme::GreenDisabled)
                                     } else if recipe.steps.iter().any(|s| !ref_nodes.borrow().node.iter().any(|n| n.name == s.selected_destination)) {
                                         start_btn("This Recipe contains invalid destination(s)\nOpen this recipe in 'Build' tab for more information.", &mut self.large_start_btn, Theme::GreenDisabled)
                                     } else if recipe.steps.iter().any(|s| !ref_actions.borrow().action.iter().any(|n| n.name == s.selected_action)) {
@@ -292,8 +292,8 @@ impl Run {
                                         start_btn("This recipe contains invalid time(s)\nopen this recipe in 'build' tab for more information.", &mut self.large_start_btn, Theme::GreenDisabled)
                                     } else if (1..recipe.steps.len()).into_iter().any(|i|
                                                         gen_node_paths(&*ref_nodes.borrow(),
-                                                        &(*ref_nodes.borrow()).node[*node_map.get(&recipe.steps[i-1].selected_destination).unwrap()],
-                                                        &(*ref_nodes.borrow()).node[*node_map.get(&recipe.steps[i].selected_destination).unwrap()]).is_err()
+                                                        &(*ref_nodes.borrow()).node[*node_map.borrow().get(&recipe.steps[i-1].selected_destination).unwrap()],
+                                                        &(*ref_nodes.borrow()).node[*node_map.borrow().get(&recipe.steps[i].selected_destination).unwrap()]).is_err()
                                                     ) {
                                         start_btn("There is no safe path between all steps.\n\
                                                   This is an isssue with the neighbors of each node.\n\

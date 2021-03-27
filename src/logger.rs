@@ -5,7 +5,6 @@ use std::sync::mpsc::{channel, Receiver, SendError, Sender};
 use std::{fs, thread};
 
 use super::advanced::{Log, LOGS};
-use users::{get_current_uid, get_user_by_uid};
 
 #[derive(Debug, Clone)]
 pub struct Logger {
@@ -84,30 +83,13 @@ impl Logger {
 // function
 cfg_if::cfg_if! {
     if #[cfg(windows)] {
-fn get_username() -> windows::Result<String> {
-mod bindings {
-    ::windows::include_bindings!();
-}
-use bindings::windows::{
-    foundation::IReference,
-    system::{KnownUserProperties, User, UserType},
-};
-use windows::{HString, Interface};
-    windows::initialize_sta()?;
-
-    let users = User::find_all_async_by_type(UserType::LocalUser)?.get()?;
-    assert!(users.size().unwrap() >= 1);
-    let user = users.get_at(0)?;
-
-    let user_name: IReference<HString> = user
-        .get_property_async(KnownUserProperties::account_name()?)?
-        .get()?
-        .cast()?;
-    let user_name = user_name.get_string()?;
-    Ok(user_name)
+fn get_username() -> Option<String> {
+    //Some(env!("USERNAME").to_string())
+    Some("Currently unavailable on windows".to_string())
 }
 } else {
     fn get_username() -> Option<String> {
+        use users::{get_current_uid, get_user_by_uid};
         match get_user_by_uid(get_current_uid())
         .unwrap()
         .name()
