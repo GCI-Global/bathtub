@@ -10,7 +10,6 @@ edition = "2018"
 serial = "0.4"
 toml = "0.5.8"
 serde = { version = "1.0.120", features = ["derive"] }
-iced = { path = "./iced" , features = ["tokio"] }
 chrono = "0.4.19"
 regex = "1.4.3"
 csv = "1.1.5"
@@ -20,3 +19,7 @@ cfg-if = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 users = "0.11"
+iced = { path = "./iced" , features = ["tokio"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+iced = { path = "./iced" , features = ["tokio", "glow"] }
