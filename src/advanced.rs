@@ -1,6 +1,6 @@
 use super::actions::{Action, Actions};
 use super::logger::Logger;
-use super::nodes::{Node, Nodes, get_nodemap};
+use super::nodes::{get_nodemap, Node, Nodes};
 use super::run::do_nothing;
 use super::style::style::Theme;
 use crate::{TabState as ParentTabState, CQ_MONO};
@@ -71,7 +71,7 @@ impl Advanced {
         ref_nodes: Rc<RefCell<Nodes>>,
         ref_actions: Rc<RefCell<Actions>>,
         parent_unsaved_tabs: Rc<RefCell<HashMap<ParentTabState, bool>>>,
-        node_map: Rc<RefCell<HashMap<String, usize>>>
+        node_map: Rc<RefCell<HashMap<String, usize>>>,
     ) -> Self {
         let mut unsaved_tabs_local = HashMap::with_capacity(3);
         unsaved_tabs_local.insert(TabState::Nodes, false);
@@ -461,7 +461,11 @@ impl SaveBar {
             .height(Length::Units(50))
             .width(Length::Fill),
         )
-        .style(if self.message[..] == *"Unsaved Changes!" {Theme::Yellow} else {Theme::Red})
+        .style(if self.message[..] == *"Unsaved Changes!" {
+            Theme::Yellow
+        } else {
+            Theme::Red
+        })
         .into()
     }
 }
@@ -529,9 +533,18 @@ impl GrblTab {
                 if let Some(final_cmd) = self.settings.last() {
                     loop {
                         if let Some(cmd) = self.grbl.pop_command() {
-                            if cmd.result.as_ref().unwrap_or(&String::new()).contains("error") {
+                            if cmd
+                                .result
+                                .as_ref()
+                                .unwrap_or(&String::new())
+                                .contains("error")
+                            {
                                 error = true;
-                                self.save_bar.message = format!("{} {}. Settings Reverted.", cmd.command, cmd.result.unwrap())
+                                self.save_bar.message = format!(
+                                    "{} {}. Settings Reverted.",
+                                    cmd.command,
+                                    cmd.result.unwrap()
+                                )
                             }
                             if cmd.command
                                 == format!("{}={}", final_cmd.text, final_cmd.input_value)
@@ -559,40 +572,41 @@ impl GrblTab {
                             }
                         }
                     }
-                    
                 } else {
                     self.save_bar.message = "Unsaved Changes!".to_string();
-                self.settings = self.modified_settings.clone();
-                self.logger.set_log_file(format!(
-                    "{}; Advanced (Grbl) - Save",
-                    Local::now().to_rfc2822()
-                ));
-                self.logger.send_line(String::new()).unwrap();
-                self.logger
-                    .send_line("Updated 'Grbl' from:".to_string())
-                    .unwrap();
-                self.logger
-                    .send_line(self.settings.iter().fold(String::new(), |mut s, setting| {
-                        s.push_str(&format!("{} = {}\n", setting.text, setting.input_value)[..]);
-                        s
-                    }))
-                    .unwrap();
-                self.logger
-                    .send_line("\n\nUpdated 'Grbl' to:".to_string())
-                    .unwrap();
-                self.logger
-                    .send_line(self.modified_settings.iter().fold(
-                        String::new(),
-                        |mut s, setting| {
+                    self.settings = self.modified_settings.clone();
+                    self.logger.set_log_file(format!(
+                        "{}; Advanced (Grbl) - Save",
+                        Local::now().to_rfc2822()
+                    ));
+                    self.logger.send_line(String::new()).unwrap();
+                    self.logger
+                        .send_line("Updated 'Grbl' from:".to_string())
+                        .unwrap();
+                    self.logger
+                        .send_line(self.settings.iter().fold(String::new(), |mut s, setting| {
                             s.push_str(
                                 &format!("{} = {}\n", setting.text, setting.input_value)[..],
                             );
                             s
-                        },
-                    ))
-                    .unwrap();
-                self.unsaved = false;
-                self.unsaved_tabs.borrow_mut().insert(TabState::Grbl, false);
+                        }))
+                        .unwrap();
+                    self.logger
+                        .send_line("\n\nUpdated 'Grbl' to:".to_string())
+                        .unwrap();
+                    self.logger
+                        .send_line(self.modified_settings.iter().fold(
+                            String::new(),
+                            |mut s, setting| {
+                                s.push_str(
+                                    &format!("{} = {}\n", setting.text, setting.input_value)[..],
+                                );
+                                s
+                            },
+                        ))
+                        .unwrap();
+                    self.unsaved = false;
+                    self.unsaved_tabs.borrow_mut().insert(TabState::Grbl, false);
                 }
             }
             _ => {}

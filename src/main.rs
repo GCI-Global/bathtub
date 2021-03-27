@@ -789,8 +789,12 @@ impl<'a> Application for Bathtub {
                         }
                     }
                     Message::Manual(ManualMessage::TerminalInputSubmitted) => {
-                        *state.current_node.lock().unwrap() = state.nodes.borrow().node
-                            [state.node_map.borrow().get(&"HOME".to_string()).unwrap().clone()]
+                        *state.current_node.lock().unwrap() = state.nodes.borrow().node[state
+                            .node_map
+                            .borrow()
+                            .get(&"HOME".to_string())
+                            .unwrap()
+                            .clone()]
                         .clone();
                         command = state
                             .tabs
@@ -949,7 +953,12 @@ impl<'a> Application for Bathtub {
                                 state.tabs.manual.grbl = grbl.clone();
                                 state.tabs.advanced.grbl_tab.grbl = grbl.clone();
                                 *state.current_node.lock().unwrap() = state.nodes.borrow().node
-                                    [state.node_map.borrow().get(&"HOME".to_string()).unwrap().clone()]
+                                    [state
+                                        .node_map
+                                        .borrow()
+                                        .get(&"HOME".to_string())
+                                        .unwrap()
+                                        .clone()]
                                 .clone();
                             }
                             let (recipe_state, _) = &*state.recipe_state;
