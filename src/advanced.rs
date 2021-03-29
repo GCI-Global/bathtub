@@ -2372,11 +2372,11 @@ impl LogTab {
             // convert from title to sort by seconds, just sorting by name sorts by day
             let b_caps = date_regex.captures(&b[..]).unwrap();
             let a_caps = date_regex.captures(&a[..]).unwrap();
-            DateTime::parse_from_rfc2822(&b_caps[0])
+            DateTime::parse_from_rfc2822(&b_caps[0].replace("_", ":"))
                 .unwrap()
                 .timestamp()
                 .cmp(
-                    &DateTime::parse_from_rfc2822(&a_caps[0])
+                    &DateTime::parse_from_rfc2822(&a_caps[0].replace("_", ":"))
                         .unwrap()
                         .timestamp(),
                 )
@@ -2400,11 +2400,11 @@ impl LogTab {
             // convert from title to sort by seconds, just sorting by name sorts by day
             let b_caps = self.date_regex.captures(&b[..]).unwrap();
             let a_caps = self.date_regex.captures(&a[..]).unwrap();
-            DateTime::parse_from_rfc2822(&b_caps[0])
+            DateTime::parse_from_rfc2822(&b_caps[0].replace("_", ":"))
                 .unwrap()
                 .timestamp()
                 .cmp(
-                    &DateTime::parse_from_rfc2822(&a_caps[0])
+                    &DateTime::parse_from_rfc2822(&a_caps[0].replace("_", ":"))
                         .unwrap()
                         .timestamp(),
                 )

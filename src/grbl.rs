@@ -1,14 +1,12 @@
-extern crate serial;
 use itertools::Itertools;
 use regex::Regex;
-use serial::prelude::*;
-use serial::SystemPort;
 use std::io::Write;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{str, thread};
 
 use chrono::prelude::*;
+use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 use std::io::BufRead;
 use std::io::BufReader;
 
@@ -66,31 +64,9 @@ impl Grbl {
             None
         }
     }
-    pub fn revive(&mut self) -> Result<(), ()> {
-        if self.is_ok() {
-            return Err(());
-        }
-        let grbl = new();
-        thread::sleep(Duration::from_millis(50));
-        if grbl.is_ok() {
-            self.command_buffer = grbl.command_buffer;
-            self.response_buffer = grbl.response_buffer;
-            self.mutex_status = grbl.mutex_status;
-            self.ok_tx = grbl.ok_tx;
-            Ok(())
-        } else {
-            Err(())
-        }
-    }
     pub fn is_ok(&self) -> bool {
         self.ok_tx.send(()).is_ok()
     }
-    /*
-    pub fn clear_queue(&self) {
-        let mut cb = self.command_buffer.lock().unwrap();
-        *cb = Vec::new();
-    }
-    */
     pub fn get_status(&self) -> Option<Status> {
         self.mutex_status.lock().unwrap().clone()
     }
@@ -164,113 +140,68 @@ pub fn new() -> Grbl {
 }
 
 // used by new() to get the usb serial connection
-fn get_port() -> SystemPort {
-    let port_type = if cfg!(windows) { "COM" } else { "/dev/ttyUSB" };
-    let mut try_port = serial::open(&format!("{}0", port_type));
-    if try_port.is_err() {
-        let mut i = 0;
-        while try_port.is_err() && i < 1000 {
-            try_port = serial::open(&format!("{}{}", port_type, i));
-            i += 1;
-        }
-        if i == 1000 {
-            panic!("unable to find USB port");
+fn get_port() -> Box<dyn SerialPort> {
+    let ports = serialport::available_ports().expect("no ports available");
+    for p in ports {
+        if let Ok(mut port) = serialport::new(p.port_name, 115_200)
+            //.timeout(Duration::from_secs(60))
+            .open()
+        {
+            port.set_timeout(Duration::from_secs(60)).unwrap();
+            port.set_parity(Parity::None).unwrap();
+            port.set_data_bits(DataBits::Eight).unwrap();
+            port.set_stop_bits(StopBits::One).unwrap();
+            port.set_flow_control(FlowControl::None).unwrap();
+            return port;
         }
     }
-    let mut port = try_port.expect("port error");
-    // default port settings for grbl, maybe should be configurable?
-    port.reconfigure(&|settings| {
-        settings.set_baud_rate(serial::Baud115200).unwrap();
-        settings.set_char_size(serial::Bits8);
-        settings.set_parity(serial::ParityNone);
-        settings.set_stop_bits(serial::Stop1);
-        settings.set_flow_control(serial::FlowNone);
-
-        Ok(())
-    })
-    .unwrap();
-    port.set_timeout(Duration::from_secs(60)).unwrap();
-    port
+    panic!("unable to get port!");
 }
 
 // used by the new() thread to send to grbl and parse response
-pub fn send(port: &mut SystemPort, command: &mut Command) {
+pub fn send(port: &mut Box<dyn SerialPort>, command: &mut Command) {
     port.flush().unwrap();
-    let mut buf = format!("{}\n", command.command).as_bytes().to_owned();
+    let buf = format!("{}\n", command.command).as_bytes().to_owned();
     port.write(&buf[..]).unwrap();
-    let mut reader = BufReader::new(port);
-    let mut line: String;
-    let mut output: Vec<String> = Vec::new();
-    buf = Vec::new();
-    if command.command == "$$".to_string() {
-        loop {
-            reader.read_until(0xD, &mut buf).unwrap();
-            line = str::from_utf8(&buf).unwrap().to_string();
-            if line.contains("ok") || line.contains("$132=") {
-                output.push(line);
+    //let mut reader = BufReader::new(port);
+    loop {
+        // read until caridge return kek from grbl
+        match read_until(0xA, port) {
+            //reader.read_until(0xD, &mut read_buf) {
+            Ok(line) => {
                 command.response_time = Some(Local::now());
-                // update result, requires filtering because I can't figure out how to read the
-                // serial output correctly
-                command.result = Some(
-                    output
-                        .into_iter()
-                        .fold(String::new(), |s, part| format!("{}{}{}", s, part, "\n\r"))
-                        .split("\r")
-                        .unique()
-                        .collect::<String>(),
-                );
+                match &command.command[..] {
+                    "$$" => command.result = Some(line),
+                    _ => command.result = Some(line.replace("\n", "").replace("\r", "")),
+                }
                 break;
             }
-            output.push(line);
+            Err(err) => panic!("{}", err),
         }
-    } else {
-        loop {
-            // read until caridge return kek from grbl
-            match reader.read_until(0xD, &mut buf) {
-                Ok(num_of_chars_read) => {
-                    if num_of_chars_read == 0 {
-                        panic!("Connection likely lost")
+    }
+}
+
+fn read_until(c: u8, port: &mut Box<dyn SerialPort>) -> Result<String, std::io::Error> {
+    let mut reader = BufReader::new(port);
+    let mut buf: Vec<u8> = Vec::new();
+    let mut len: usize;
+    loop {
+        match reader.fill_buf() {
+            Ok(data) => {
+                len = data.len();
+                if data.len() > 0 {
+                    buf.extend_from_slice(&data[..]);
+                    if buf.last().unwrap_or(&0) == &c {
+                        return Ok(str::from_utf8(&buf[..]).unwrap().to_string());
                     }
-                    line = str::from_utf8(&buf).unwrap().to_string();
-                    // the first reponse from grbl initializing the connection is a bit weird, it has multiple
-                    // caridge returns, lockily it is the only one with a unicode 'null' char. GRBL doesnt do
-                    // anything with this first command, so we can mostly ignore it.
-                    if line.contains("\u{0}\r") {
-                        command.response_time = Some(Local::now());
-                        command.result = Some("init".to_string());
-                        break;
-                    }
-                    // filter errors explicitly
-                    if line.contains("error") {
-                        line = line.split("\n").last().unwrap().to_string();
-                    }
-                    // my code does not perfectly 1 to 1 grab location from '?', so filter out
-                    // occasional extras
-                    if line.ends_with("\r\nok\r\nok\r") || line.contains("\n[VER:") {
-                        line = "ok\r".to_string()
-                    }
-                    if command.command != "?".to_string() && line.contains("<") {
-                        line = "".to_string();
-                    }
-                    // we now have a full command,
-                    if line.contains("\r") {
-                        output.push(line.replace("\r", "").replace("\n", ""));
-                        command.response_time = Some(Local::now());
-                        command.result =
-                            Some(output.into_iter().fold(String::new(), |mut string, part| {
-                                string.push_str(&part[..]);
-                                string
-                            }));
-                        break;
-                    }
-                    if command.command == "?".to_string() && line.contains("<") {
-                        output.push(line);
-                    } else if command.command != "?".to_string() && !line.contains("<") {
-                        output.push(line);
-                    }
+                } else {
+                    return Ok(str::from_utf8(&buf[..]).unwrap().to_string());
                 }
-                Err(err) => panic!("{}", err),
+            }
+            Err(err) => {
+                return Err(err);
             }
         }
+        reader.consume(len);
     }
 }

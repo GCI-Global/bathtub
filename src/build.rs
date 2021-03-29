@@ -1,6 +1,6 @@
 use super::actions::Actions;
 use super::advanced::{validate_nums, SaveBar, SaveBarMessage, ValidateNums};
-use super::logger::{Logger, replace_os_char};
+use super::logger::{replace_os_char, Logger};
 use super::nodes::Nodes;
 use super::run::do_nothing;
 use super::run::Step;

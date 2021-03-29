@@ -91,11 +91,11 @@ impl State {
             loop {
                 if grbl.is_ok() {
                     if let Some(cmd) = grbl.pop_command() {
-                        if cmd.command[..] == *"test" {
+                        if cmd.command[..] == *"HomingWait" {
                             break;
                         } else {
-                            grbl.push_command(Cmd::new("test".to_string()));
-                            thread::sleep(Duration::from_millis(100))
+                            grbl.push_command(Cmd::new("HomingWait".to_string()));
+                            thread::sleep(Duration::from_secs(1))
                         }
                     }
                 } else {
@@ -365,10 +365,10 @@ impl State {
                         logger
                             .send_line(format!(
                                 "{} => Step {}) G-code '{}' responded '{}'",
-                                response.response_time.unwrap().to_rfc2822(),
+                                response.response_time.as_ref().unwrap().to_rfc2822(),
                                 step.step_num,
                                 response.command,
-                                response.result.unwrap()
+                                response.result.unwrap(),
                             ))
                             .unwrap();
                     }
