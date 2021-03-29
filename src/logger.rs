@@ -6,6 +6,8 @@ use std::{fs, thread};
 
 use super::advanced::{Log, LOGS};
 
+const WIN_CHARS: [&str; 9] = ["<", ">", ":", "\"", "/", "\\", "|", "?", "*"];
+
 #[derive(Debug, Clone)]
 pub struct Logger {
     sender: Sender<String>,
@@ -16,7 +18,8 @@ impl Logger {
         let (tx, rx): (Sender<String>, Receiver<String>) = channel();
         let mut file_name = String::new();
         thread::spawn(move || loop {
-            if let Ok(line) = rx.recv() {
+            if let Ok(mut line) = rx.recv() {
+                line = replace_os_char(line);
                 if line.ends_with("\n\rset_log_file") {
                     file_name = line.replace("\n\rset_log_file", "");
                 } else {
@@ -99,4 +102,17 @@ fn get_username() -> Option<String> {
         }
     }
 }
+}
+
+pub fn replace_os_char(mut s: String) -> String {
+    if cfg!(windows) {
+        for c in &WIN_CHARS {
+            s = s.replace(c, "_");
+        }
+    } else if cfg!(linux) {
+        s = s.replace("/", "_");
+    } else if cfg!(mac) {
+        s = s.replace(":", "_");
+    }
+    s
 }

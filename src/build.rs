@@ -1,6 +1,6 @@
 use super::actions::Actions;
 use super::advanced::{validate_nums, SaveBar, SaveBarMessage, ValidateNums};
-use super::logger::Logger;
+use super::logger::{Logger, replace_os_char};
 use super::nodes::Nodes;
 use super::run::do_nothing;
 use super::run::Step;
@@ -2004,6 +2004,7 @@ fn save(tab: &mut Build) {
             &tab.search_value.as_ref().unwrap_or(&String::new()),
         )))
         .unwrap_or(format!("No old recipie '{}' is new", tab.name_entry_value));
+        tab.name_entry_value = replace_os_char(tab.name_entry_value.clone());
         let new_recipe = toml::to_string_pretty(&save_data).unwrap();
         match OpenOptions::new().write(true).open(Path::new(&format!(
             "./recipes/{}.toml",
