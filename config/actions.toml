@@ -1,13 +1,11 @@
-# These are actions for the GRBL controller
-# Commands must be written in the GRBL jogging syntax
-#
-# There are also the added 'WAIT' command. This command is not recognized by GRBL. It is specific to this application.
-# 'WAIT' meaning to spend the rest of the specified recipie step not moving
+[[action]]
+name = 'Rest'
+commands = ['WAIT']
 
 [[action]]
-name = "Rest"
-commands = ["WAIT"]
-
-[[action]]
-name = "Swish"
-commands = ["$J=G91 Y0.3 F250", "$J=G91 Y-0.6 F250", "$J=G91 Y0.3 F250"]
+name = 'Swish'
+commands = [
+    '$J=G91 Y0.3 F250',
+    '$J=G91 Y-0.6 F250',
+    '$J=G91 Y0.3 F250',
+]

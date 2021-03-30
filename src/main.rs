@@ -8,15 +8,15 @@ mod manual;
 mod nodes;
 mod paths;
 mod run;
+mod style;
 use actions::Actions;
-use advanced::{Advanced, AdvancedMessage};
+use advanced::{Advanced, AdvancedMessage, NodeTabMessage};
 use build::{Build, BuildMessage};
 use chrono::prelude::*;
 use grbl::{Command as Cmd, Grbl, Status};
 use logger::Logger;
 use manual::{Manual, ManualMessage};
-use nodes::{Node, NodeGrid2d, Nodes};
-use regex::Regex;
+use nodes::{Node, Nodes};
 use run::Step;
 use run::{Run, RunMessage, RunState};
 use std::cell::RefCell;
@@ -24,10 +24,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
-use std::{fs, mem::discriminant, thread};
+use std::{mem::discriminant, thread};
+use style::style::Theme;
 
 use iced::{
-    button, time, Align, Application, Button, Column, Command, Container, Element, Font,
+    button, time, Align, Application, Button, Clipboard, Column, Command, Container, Element, Font,
     HorizontalAlignment, Length, Row, Settings, Space, Subscription, Text,
 };
 
@@ -46,17 +47,18 @@ struct State {
     tabs: Tabs,
     tab_bar: TabBar,
     nodes: Rc<RefCell<Nodes>>,
-    node_map: HashMap<String, usize>,
+    node_map: Rc<RefCell<HashMap<String, usize>>>,
     prev_node: Arc<Mutex<Option<Node>>>,
     current_node: Arc<Mutex<Node>>,
     next_nodes: Arc<Mutex<Vec<Node>>>,
     actions: Rc<RefCell<Actions>>,
+    homing_required: Rc<RefCell<bool>>,
     grbl: Grbl,
-    logger: Logger,
     connected: bool,
-    recipe_regex: Regex,
+    logger: Logger,
     grbl_status: Option<Arc<Mutex<Option<Status>>>>,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
+    current_step: Option<mpsc::Receiver<Option<usize>>>,
 }
 
 impl State {
@@ -71,17 +73,40 @@ impl State {
         node_map: HashMap<String, usize>,
         nodes: Nodes,
         actions: Actions,
+        current_step_sender: mpsc::Sender<Option<usize>>,
     ) -> Result<(), Errors> {
-        if let Some(s) = grbl.get_status() {
-            if s.status == "Alarm".to_string() {
-                grbl.push_command(Cmd::new("$H".to_string()));
+        if (*current_node.lock().unwrap()).name[..] == *"HOME" {
+            let state: RecipeState;
+            {
+                let (recipe_state, _) = &*recipe_state;
+                let mut recipe_state = recipe_state.lock().unwrap();
+                state = *recipe_state;
+                *recipe_state = match state {
+                    RecipeState::RecipeRunning => RecipeState::HomingRun,
+                    _ => RecipeState::HomingManual,
+                };
             }
-        }
-        // wait for homing to finish
-        loop {
-            if let Some(s) = grbl.get_status() {
-                if s.status == "Idle".to_string() {
+            grbl.push_command(Cmd::new("$H".to_string()));
+            // wait for homing to finish
+            loop {
+                if grbl.is_ok() {
+                    if let Some(cmd) = grbl.pop_command() {
+                        if cmd.command[..] == *"HomingWait" {
+                            break;
+                        } else {
+                            grbl.push_command(Cmd::new("HomingWait".to_string()));
+                            thread::sleep(Duration::from_secs(1))
+                        }
+                    }
+                } else {
                     break;
+                }
+            }
+            {
+                let (recipe_state, _) = &*recipe_state;
+                let mut recipe_state = recipe_state.lock().unwrap();
+                if discriminant(&*recipe_state) != discriminant(&RecipeState::Stopped) {
+                    *recipe_state = state;
                 }
             }
         }
@@ -121,7 +146,14 @@ impl State {
                 thread::sleep(Duration::from_millis(1))
             }
         });
+        let mut current_step_num: Option<usize> = None;
         for step in recipie {
+            if let Some(num) = &mut current_step_num {
+                *num += 1;
+            } else {
+                current_step_num = Some(0);
+            }
+            current_step_sender.send(current_step_num).unwrap();
             grbl.clear_responses();
             let notify_user_input_recv = if step.wait {
                 logger
@@ -192,7 +224,7 @@ impl State {
                             future_node.z,
                         ))
                         .unwrap();
-                    let node_paths = paths::gen_node_paths(&nodes, &cn, future_node);
+                    let node_paths = paths::gen_node_paths(&nodes, &cn, future_node).unwrap();
                     logger
                         .send_line(format!(
                             "{} => Step {}) on path {}",
@@ -333,10 +365,10 @@ impl State {
                         logger
                             .send_line(format!(
                                 "{} => Step {}) G-code '{}' responded '{}'",
-                                response.response_time.unwrap().to_rfc2822(),
+                                response.response_time.as_ref().unwrap().to_rfc2822(),
                                 step.step_num,
                                 response.command,
-                                response.result.unwrap()
+                                response.result.unwrap(),
                             ))
                             .unwrap();
                     }
@@ -370,13 +402,15 @@ impl State {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum RecipeState {
     Stopped,
     ManualRunning,
     RecipeRunning,
     RecipePaused,
     RequireInput,
+    HomingManual,
+    HomingRun,
 }
 
 struct Tabs {
@@ -391,6 +425,8 @@ struct TabBar {
     build_btn: button::State,
     run_btn: button::State,
     advanced_btn: button::State,
+    current_tab: TabState,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -402,13 +438,19 @@ enum TabBarMessage {
 }
 
 impl TabBar {
-    fn new() -> Self {
+    fn new(unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>) -> Self {
         TabBar {
             manual_btn: button::State::new(),
             run_btn: button::State::new(),
             build_btn: button::State::new(),
             advanced_btn: button::State::new(),
+            current_tab: TabState::Manual,
+            unsaved_tabs,
         }
+    }
+
+    fn change_state(&mut self, tab_state: TabState) {
+        self.current_tab = tab_state;
     }
 
     fn view(&mut self) -> Element<TabBarMessage> {
@@ -421,6 +463,10 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Manual => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .width(Length::Fill)
                 .padding(20)
                 .on_press(TabBarMessage::Manual),
@@ -433,6 +479,10 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Run => Theme::TabSelected,
+                    _ => Theme::Blue,
+                })
                 .width(Length::Fill)
                 .padding(20)
                 .on_press(TabBarMessage::Run),
@@ -445,6 +495,22 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Build => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Build).unwrap() {
+                            Theme::YellowSelected
+                        } else {
+                            Theme::TabSelected
+                        }
+                    }
+                    _ => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Build).unwrap() {
+                            Theme::Yellow
+                        } else {
+                            Theme::Blue
+                        }
+                    }
+                })
                 .width(Length::Fill)
                 .padding(20)
                 .on_press(TabBarMessage::Build),
@@ -457,6 +523,22 @@ impl TabBar {
                         .size(30)
                         .font(CQ_MONO),
                 )
+                .style(match self.current_tab {
+                    TabState::Advanced => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Advanced).unwrap() {
+                            Theme::YellowSelected
+                        } else {
+                            Theme::TabSelected
+                        }
+                    }
+                    _ => {
+                        if *self.unsaved_tabs.borrow().get(&TabState::Advanced).unwrap() {
+                            Theme::Yellow
+                        } else {
+                            Theme::Blue
+                        }
+                    }
+                })
                 .width(Length::Fill)
                 .padding(20)
                 .on_press(TabBarMessage::Advanced),
@@ -465,18 +547,24 @@ impl TabBar {
     }
 }
 
-enum TabState {
+#[derive(Hash)]
+pub enum TabState {
     Manual,
     Run,
     Build,
     Advanced,
 }
+impl PartialEq for TabState {
+    fn eq(&self, other: &Self) -> bool {
+        discriminant(self) == discriminant(other)
+    }
+}
+impl Eq for TabState {}
 
 #[derive(Debug, Clone)]
 struct LoadState {
     nodes: Nodes,
     node_map: HashMap<String, usize>,
-    node_grid2d: NodeGrid2d,
     actions: Actions,
 }
 
@@ -493,7 +581,7 @@ enum Errors {
 #[derive(Debug, Clone)]
 enum Message {
     TabBar(TabBarMessage),
-    RecipieDone(Result<(), Errors>),
+    RecipeDone(Result<(), Errors>),
     Manual(ManualMessage),
     Build(BuildMessage),
     Run(RunMessage),
@@ -521,66 +609,91 @@ impl<'a> Application for Bathtub {
     fn subscription(&self) -> Subscription<Message> {
         match self {
             Bathtub::Loaded(state) => {
-                if state.connected {
-                    return time::every(std::time::Duration::from_millis(50))
-                        .map(|_| Message::Tick);
+                if state.grbl.is_ok() {
+                    return time::every(Duration::from_millis(50)).map(|_| Message::Tick);
                 } else {
-                    return Subscription::none();
+                    return time::every(Duration::from_secs(3)).map(|_| Message::Tick);
                 }
             }
             _ => Subscription::none(),
         }
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    fn update(&mut self, message: Message, _clipboard: &mut Clipboard) -> Command<Message> {
         let mut command = Command::none(); // setup to allow nested match statements to return different command
         match self {
             Bathtub::Loading => {
                 match message {
                     Message::Loaded(Ok(state)) => {
-                        let ref_node = Rc::new(RefCell::new(state.nodes.clone()));
-                        let ref_actions = Rc::new(RefCell::new(state.actions));
-                        let recipe_state =
-                            Arc::new((Mutex::new(RecipeState::Stopped), Condvar::new()));
                         let current_node = Arc::new(Mutex::new(
                             state.nodes.node
                                 [state.node_map.get(&"HOME".to_string()).unwrap().clone()]
                             .clone(),
                         ));
+                        let ref_node = Rc::new(RefCell::new(state.nodes));
+                        let ref_actions = Rc::new(RefCell::new(state.actions));
+                        let recipe_state =
+                            Arc::new((Mutex::new(RecipeState::Stopped), Condvar::new()));
                         let next_nodes = Arc::new(Mutex::new(Vec::new()));
                         let grbl = grbl::new();
                         let logger = Logger::new();
+                        let homing_required = Rc::new(RefCell::new(true));
+                        let mut unsaved_tabs_local = HashMap::with_capacity(2);
+                        unsaved_tabs_local.insert(TabState::Build, false);
+                        unsaved_tabs_local.insert(TabState::Advanced, false);
+                        let unsaved_tabs = Rc::new(RefCell::new(unsaved_tabs_local));
+                        let node_map = Rc::new(RefCell::new(state.node_map));
                         *self = Bathtub::Loaded(State {
                             //status: "Click any button\nto start homing cycle".to_string(),
                             state: TabState::Manual,
                             tabs: Tabs {
-                                manual: Manual::new(state.node_grid2d, grbl.clone()),
-                                run: Run::new(Arc::clone(&recipe_state), logger.clone()),
+                                manual: Manual::new(
+                                    Rc::clone(&ref_node),
+                                    grbl.clone(),
+                                    logger.clone(),
+                                    homing_required.clone(),
+                                    Arc::clone(&recipe_state),
+                                    Arc::clone(&current_node),
+                                ),
+                                run: Run::new(
+                                    Arc::clone(&recipe_state),
+                                    logger.clone(),
+                                    homing_required.clone(),
+                                    Rc::clone(&ref_node),
+                                    Rc::clone(&ref_actions),
+                                    Rc::clone(&node_map),
+                                ),
                                 build: Build::new(
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
                                     logger.clone(),
+                                    unsaved_tabs.clone(),
                                 ),
                                 advanced: Advanced::new(
                                     grbl.clone(),
                                     logger.clone(),
                                     Rc::clone(&ref_node),
                                     Rc::clone(&ref_actions),
+                                    unsaved_tabs.clone(),
+                                    Rc::clone(&node_map),
+                                    Rc::clone(&homing_required),
+                                    Arc::clone(&current_node),
                                 ),
                             },
-                            tab_bar: TabBar::new(),
+                            tab_bar: TabBar::new(unsaved_tabs),
                             nodes: Rc::clone(&ref_node),
-                            node_map: state.node_map.clone(),
+                            node_map,
                             prev_node: Arc::new(Mutex::new(None)),
                             current_node: Arc::clone(&current_node),
                             next_nodes: Arc::clone(&next_nodes),
                             actions: Rc::clone(&ref_actions),
-                            connected: false,
+                            homing_required,
                             grbl: grbl.clone(),
+                            connected: true,
                             logger: logger.clone(),
                             grbl_status: None,
-                            recipe_regex: Regex::new(r"^[^.]+").unwrap(),
                             recipe_state: Arc::clone(&recipe_state),
+                            current_step: None,
                         });
                     }
                     Message::Loaded(Err(_)) => {
@@ -595,76 +708,104 @@ impl<'a> Application for Bathtub {
             }
             Bathtub::Loaded(state) => {
                 match message {
-                    Message::TabBar(TabBarMessage::Manual) => state.state = TabState::Manual,
-                    Message::TabBar(TabBarMessage::Build) => state.state = TabState::Build,
+                    Message::TabBar(TabBarMessage::Manual) => {
+                        state.state = TabState::Manual;
+                        state.tab_bar.change_state(TabState::Manual);
+                    }
+                    Message::TabBar(TabBarMessage::Build) => {
+                        state.tabs.build.update(BuildMessage::UpdateSearch);
+                        state.state = TabState::Build;
+                        state.tab_bar.change_state(TabState::Build);
+                    }
                     Message::TabBar(TabBarMessage::Advanced) => {
                         state.state = TabState::Advanced;
+                        state.tab_bar.change_state(TabState::Advanced)
                     }
                     Message::TabBar(TabBarMessage::Run) => {
-                        state.tabs.run.search =
-                            fs::read_dir("./recipes")
-                                .unwrap()
-                                .fold(Vec::new(), |mut rec, file| {
-                                    if let Some(caps) = state
-                                        .recipe_regex
-                                        .captures(&file.unwrap().file_name().to_str().unwrap())
-                                    {
-                                        rec.push(caps[0].to_string());
-                                    }
-                                    rec
-                                });
-                        state.tabs.run.search.sort();
-                        state.tabs.run.update(RunMessage::TabActive);
-                        state.state = TabState::Run
+                        state.tabs.run.update(RunMessage::UpdateSearch);
+                        state.state = TabState::Run;
+                        state.tab_bar.change_state(TabState::Run);
                     }
                     Message::Manual(ManualMessage::Stop) => {
-                        {
-                            let (recipe_state, cvar) = &*state.recipe_state;
-                            let mut recipe_state = recipe_state.lock().unwrap();
-                            *recipe_state = RecipeState::Stopped;
-                            cvar.notify_all();
+                        let (recipe_state, cvar) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        match *recipe_state {
+                            RecipeState::HomingManual => {}
+                            RecipeState::HomingRun => {}
+                            _ => {
+                                *recipe_state = RecipeState::Stopped;
+                                cvar.notify_all();
+                                state.grbl.push_command(Cmd::new("\u{85}".to_string()));
+                                set_pause_node(
+                                    Arc::clone(&state.current_node),
+                                    Arc::clone(&state.next_nodes),
+                                    state.grbl.clone(),
+                                );
+                            }
                         }
-                        state.grbl.push_command(Cmd::new("\u{85}".to_string()));
-                        set_pause_node(
-                            Arc::clone(&state.current_node),
-                            Arc::clone(&state.next_nodes),
-                            state.grbl.clone(),
-                        );
+                    }
+                    Message::Manual(ManualMessage::ThankYou(cmd)) => {
+                        state.tabs.advanced.update_logs();
+                        state.tabs.manual.update(ManualMessage::ThankYou(cmd));
                     }
                     Message::Manual(ManualMessage::ButtonPressed(node)) => {
                         let (recipe_state, _) = &*state.recipe_state;
                         let mut recipe_state = recipe_state.lock().unwrap();
-                        *recipe_state = RecipeState::ManualRunning;
-                        state.connected = true;
-                        let log_title =
-                            format!("{}| Manual - Going to {}", Local::now().to_rfc2822(), &node);
-                        state.logger.set_log_file(log_title.clone());
-                        state.tabs.advanced.update_logs();
-
-                        command = Command::perform(
-                            State::run_recipie(
-                                state.grbl.clone(),
-                                state.logger.clone(),
-                                Arc::clone(&state.recipe_state),
-                                Arc::clone(&state.prev_node),
-                                Arc::clone(&state.current_node),
-                                Arc::clone(&state.next_nodes),
-                                vec![Step {
-                                    step_num: 0.to_string(),
-                                    selected_destination: node,
-                                    selected_action: "Rest".to_string(),
-                                    secs_value: 0.to_string(),
-                                    mins_value: 0.to_string(),
-                                    hours_value: 0.to_string(),
-                                    hover: state.tabs.manual.hover,
-                                    wait: false,
-                                }],
-                                state.node_map.clone(),
-                                state.nodes.borrow().clone(),
-                                state.actions.borrow().clone(),
-                            ),
-                            Message::RecipieDone,
-                        )
+                        if discriminant(&*recipe_state) == discriminant(&RecipeState::Stopped) {
+                            *recipe_state = RecipeState::ManualRunning;
+                            let log_title = format!(
+                                "{}; Manual - Going to {}",
+                                Local::now().to_rfc2822(),
+                                &node
+                            );
+                            state.logger.set_log_file(log_title.clone());
+                            state.tabs.advanced.update_logs();
+                            let (tx, rx) = mpsc::channel();
+                            state.current_step = Some(rx);
+                            command = Command::perform(
+                                State::run_recipie(
+                                    state.grbl.clone(),
+                                    state.logger.clone(),
+                                    Arc::clone(&state.recipe_state),
+                                    Arc::clone(&state.prev_node),
+                                    Arc::clone(&state.current_node),
+                                    Arc::clone(&state.next_nodes),
+                                    vec![Step {
+                                        step_num: 0.to_string(),
+                                        selected_destination: node,
+                                        selected_action: "Rest".to_string(),
+                                        secs_value: 0.to_string(),
+                                        mins_value: 0.to_string(),
+                                        hours_value: 0.to_string(),
+                                        hover: state.tabs.manual.hover,
+                                        wait: false,
+                                    }],
+                                    state.node_map.borrow().clone(),
+                                    state.nodes.borrow().clone(),
+                                    state.actions.borrow().clone(),
+                                    tx,
+                                ),
+                                Message::RecipeDone,
+                            );
+                            *state.homing_required.borrow_mut() = false;
+                        }
+                    }
+                    Message::Manual(ManualMessage::TerminalInputSubmitted) => {
+                        *state.current_node.lock().unwrap() = state.nodes.borrow().node[state
+                            .node_map
+                            .borrow()
+                            .get(&"HOME".to_string())
+                            .unwrap()
+                            .clone()]
+                        .clone();
+                        command = state
+                            .tabs
+                            .manual
+                            .update(ManualMessage::TerminalInputSubmitted)
+                            .map(move |msg| Message::Manual(msg));
+                        let (recipe_state, _) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        *recipe_state = RecipeState::Stopped;
                     }
                     Message::Run(RunMessage::Run(_)) => {
                         let rs: RecipeState;
@@ -679,10 +820,11 @@ impl<'a> Application for Bathtub {
                                 *recipe_state = RecipeState::RecipeRunning;
                                 cvar.notify_all();
                             }
-                            state.connected = true;
                             // we only update the list of logs on load, and when we create a new
                             // log file
                             state.tabs.advanced.update_logs();
+                            let (tx, rx) = mpsc::channel();
+                            state.current_step = Some(rx);
                             command = Command::perform(
                                 State::run_recipie(
                                     state.grbl.clone(),
@@ -692,15 +834,17 @@ impl<'a> Application for Bathtub {
                                     Arc::clone(&state.current_node),
                                     Arc::clone(&state.next_nodes),
                                     state.tabs.run.recipe.as_ref().unwrap().steps.clone(),
-                                    state.node_map.clone(),
+                                    state.node_map.borrow().clone(),
                                     state.nodes.borrow().clone(),
                                     state.actions.borrow().clone(),
+                                    tx,
                                 ),
-                                Message::RecipieDone,
+                                Message::RecipeDone,
                             );
+                            *state.homing_required.borrow_mut() = false;
                         }
                     }
-                    Message::Run(RunMessage::Pause) => {
+                    Message::Run(RunMessage::Pause(_)) => {
                         state
                             .logger
                             .send_line(format!("{} => Paused by user", Local::now().to_rfc2822()))
@@ -734,9 +878,15 @@ impl<'a> Application for Bathtub {
                             Arc::clone(&state.next_nodes),
                             state.grbl.clone(),
                         );
-                        state.tabs.run.state = RunState::AfterRequiredInput;
+                        state.tabs.run.state = if state.tabs.run.required_after_inputs.len() > 0 {
+                            RunState::AfterRequiredInput
+                        } else {
+                            RunState::Standard
+                        };
                     }
-                    Message::RecipieDone(Ok(_)) => {
+                    Message::RecipeDone(Ok(_)) => {
+                        state.current_step = None;
+                        state.tabs.run.current_step = None;
                         state
                             .logger
                             .send_line(format!("{} => Done", Local::now().to_rfc2822()))
@@ -748,25 +898,77 @@ impl<'a> Application for Bathtub {
                             *recipe_state = RecipeState::Stopped;
                             cvar.notify_all();
                         }
-                        state.tabs.run.state = RunState::AfterRequiredInput;
-                        state.connected = true;
+                        state.tabs.run.state = if state.tabs.run.required_after_inputs.len() > 0 {
+                            RunState::AfterRequiredInput
+                        } else {
+                            RunState::Standard
+                        };
+                        state.tabs.advanced.update_logs();
                     }
-                    Message::RecipieDone(Err(_err)) => {
-                        {
-                            let (recipe_state, cvar) = &*state.recipe_state;
-                            let mut recipe_state = recipe_state.lock().unwrap();
-                            *recipe_state = RecipeState::Stopped;
-                            cvar.notify_all();
-                        }
-                        state.connected = false
+                    Message::RecipeDone(Err(_err)) => {
+                        state.current_step = None;
+                        state.tabs.run.current_step = None;
+                        let (recipe_state, cvar) = &*state.recipe_state;
+                        let mut recipe_state = recipe_state.lock().unwrap();
+                        *recipe_state = RecipeState::Stopped;
+                        cvar.notify_all();
+                        state.tabs.advanced.update_logs();
                     }
                     Message::Tick => {
-                        let stat = state.grbl.get_status();
-                        if let Some(s) = stat {
-                            state.tabs.manual.status = format!(
-                                "{} state at\n({:.3}, {:.3}, {:.3})",
-                                &s.status, &s.x, &s.y, &s.z
-                            )
+                        if let Some(rx) = &state.current_step {
+                            if let Ok(num) = rx.try_recv() {
+                                state.tabs.run.current_step = num;
+                            }
+                        }
+                        if state.grbl.is_ok() {
+                            let stat = state.grbl.get_status();
+                            if let Some(s) = stat {
+                                state.tabs.manual.status = format!(
+                                    "{} state at\n({:.3}, {:.3}, {:.3})",
+                                    &s.status, &s.x, &s.y, &s.z
+                                )
+                            }
+                        } else {
+                            if state.connected {
+                                // ony run these on the first time grbl loses connection
+                                let (recipe_state, _) = &*state.recipe_state;
+                                let mut recipe_state = recipe_state.lock().unwrap();
+                                *recipe_state = RecipeState::Stopped;
+                                state.logger.set_log_file(format!(
+                                    "{}; GRBL Critical error! - Connection Lost",
+                                    Local::now().to_rfc2822()
+                                ));
+                                state.logger.send_line(String::new()).unwrap();
+                                state.logger.send_line(format!("{}; More detailed information not currently logged by Bathtub.", Local::now().to_rfc2822())).unwrap();
+                            }
+                            state.connected = false;
+                            let grbl = grbl::new();
+                            thread::sleep(Duration::from_millis(100));
+                            if grbl.is_ok() {
+                                state.logger.set_log_file(format!(
+                                    "{}; GRBL Connection reestablished!",
+                                    Local::now().to_rfc2822()
+                                ));
+                                state.logger.send_line(String::new()).unwrap();
+                                state.logger.send_line(format!("{}; More detailed information not currently logged by Bathtub.", Local::now().to_rfc2822())).unwrap();
+                                *state.homing_required.borrow_mut() = true;
+                                state.connected = true;
+                                state.grbl = grbl.clone();
+                                state.tabs.manual.grbl = grbl.clone();
+                                state.tabs.advanced.grbl_tab.grbl = grbl.clone();
+                                *state.current_node.lock().unwrap() = state.nodes.borrow().node
+                                    [state
+                                        .node_map
+                                        .borrow()
+                                        .get(&"HOME".to_string())
+                                        .unwrap()
+                                        .clone()]
+                                .clone();
+                            }
+                            let (recipe_state, _) = &*state.recipe_state;
+                            let mut recipe_state = recipe_state.lock().unwrap();
+                            *recipe_state = RecipeState::Stopped;
+                            state.tabs.advanced.update_logs();
                         }
                     }
                     Message::Manual(msg) => {
@@ -776,9 +978,24 @@ impl<'a> Application for Bathtub {
                             .update(msg)
                             .map(move |msg| Message::Manual(msg))
                     }
-                    Message::Build(msg) => state.tabs.build.update(msg),
+                    Message::Build(BuildMessage::Saved(_)) => state.tabs.advanced.update_logs(),
+                    Message::Build(msg) => {
+                        command = state
+                            .tabs
+                            .build
+                            .update(msg)
+                            .map(move |msg| Message::Build(msg))
+                    }
                     Message::Run(msg) => {
                         command = state.tabs.run.update(msg).map(move |msg| Message::Run(msg));
+                    }
+                    Message::Advanced(AdvancedMessage::NodesTab(NodeTabMessage::Saved(_))) => {
+                        state.tabs.manual.update_grid();
+                        command = state
+                            .tabs
+                            .advanced
+                            .update(AdvancedMessage::NodesTab(NodeTabMessage::Saved(())))
+                            .map(move |msg| Message::Advanced(msg));
                     }
                     Message::Advanced(msg) => {
                         command = state
@@ -802,8 +1019,35 @@ impl<'a> Application for Bathtub {
                 tabs,
                 tab_bar,
                 recipe_state,
+                connected,
                 ..
             }) => match state {
+                _ if !*connected => Row::with_children(vec![
+                    Space::with_width(Length::Fill).into(),
+                    Column::with_children(vec![
+                        Text::new("Unable to connect to GRBL.")
+                            .font(CQ_MONO)
+                            .size(50)
+                            .into(),
+                        Text::new("Here are some things to check:").size(25).into(),
+                        Text::new("1) GRBL is powered on.").size(25).into(),
+                        Text::new("2) The USB cable is connected between this computer and GRBL.")
+                            .size(25)
+                            .into(),
+                        Text::new(
+                            "3) There are no other GRBL realted applications open on this PC.",
+                        )
+                        .size(25)
+                        .into(),
+                        Text::new("4) You have asked GRBL to please work.")
+                            .size(25)
+                            .into(),
+                    ])
+                    .into(),
+                    Space::with_width(Length::Fill).into(),
+                ])
+                .padding(30)
+                .into(),
                 TabState::Manual => {
                     let content =
                         Column::new().push(tab_bar.view().map(move |msg| Message::TabBar(msg)));
@@ -814,11 +1058,12 @@ impl<'a> Application for Bathtub {
                     }
                     if discriminant(&rs) == discriminant(&RecipeState::RecipeRunning)
                         || discriminant(&rs) == discriminant(&RecipeState::RecipePaused)
+                        || discriminant(&rs) == discriminant(&RecipeState::HomingRun)
                     {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
-                                Text::new("Unavailable while running recipie")
+                                Text::new("Unavailable while running recipe")
                                     .size(50)
                                     .font(CQ_MONO),
                             )
@@ -838,7 +1083,9 @@ impl<'a> Application for Bathtub {
                         let (recipe_state, _) = &**recipe_state;
                         rs = *recipe_state.lock().unwrap();
                     }
-                    if discriminant(&rs) == discriminant(&RecipeState::ManualRunning) {
+                    if discriminant(&rs) == discriminant(&RecipeState::ManualRunning)
+                        || discriminant(&rs) == discriminant(&RecipeState::HomingManual)
+                    {
                         content
                             .push(Space::with_height(Length::Units(100)))
                             .push(
@@ -888,16 +1135,10 @@ impl<'a> Application for Bathtub {
 }
 
 impl LoadState {
-    fn new(
-        nodes: Nodes,
-        node_map: HashMap<String, usize>,
-        node_grid2d: NodeGrid2d,
-        actions: Actions,
-    ) -> LoadState {
+    fn new(nodes: Nodes, node_map: HashMap<String, usize>, actions: Actions) -> LoadState {
         LoadState {
             nodes,
             node_map,
-            node_grid2d,
             actions,
         }
     }
@@ -908,15 +1149,17 @@ impl LoadState {
         let mut nodes = Nodes { node: Vec::new() };
         for i in 0..3 {
             match nodes::gen_nodes() {
-                Ok(n) => nodes = n,
+                Ok(n) => {
+                    nodes = n;
+                    break;
+                }
                 Err(_err) if i == 2 => return Err(LoadError::Nodes),
                 Err(_) => thread::sleep(Duration::from_millis(50)),
             };
         }
         Ok(LoadState::new(
             nodes.clone(),
-            nodes::get_nodemap(nodes.clone()),
-            NodeGrid2d::from_nodes(nodes),
+            nodes::get_nodemap(&nodes),
             actions::gen_actions(),
         ))
     }

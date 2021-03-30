@@ -8,12 +8,12 @@ struct NodeDistance {
     visited: bool,
 }
 
-pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
+pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Result<Nodes, ()> {
     // return start node if start == stop
     if start.name == stop.name {
-        return Nodes {
+        return Ok(Nodes {
             node: vec![start.clone()],
-        };
+        });
     }
 
     // Assign relevant nodes a distance from the start node
@@ -111,6 +111,9 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
         println!("{}", node.node.name);
     }
     */
+    if distance_nodes.len() == 0 {
+        return Err(());
+    }
     loop {
         let mut no_match: bool = true;
         while no_match {
@@ -154,7 +157,7 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Nodes {
         println!("{}", &node.name);
     }
     */
-    path_nodes
+    Ok(path_nodes)
 }
 
 /*

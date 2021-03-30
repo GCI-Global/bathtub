@@ -1,17 +1,25 @@
 use super::actions::Actions;
-use super::advanced::{SaveBar, SaveBarMessage};
-use super::logger::Logger;
+use super::advanced::{validate_nums, SaveBar, SaveBarMessage, ValidateNums};
+use super::logger::{replace_os_char, Logger};
 use super::nodes::Nodes;
+use super::run::do_nothing;
 use super::run::Step;
-use crate::CQ_MONO;
+use super::style::style::Theme;
+use crate::{TabState, CQ_MONO};
+use chrono::prelude::*;
 use iced::{
-    button, pick_list, scrollable, text_input, Align, Button, Checkbox, Column, Container, Element,
-    Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text, TextInput,
-    VerticalAlignment,
+    button, pick_list, scrollable, text_input, tooltip, Align, Button, Checkbox, Column, Command,
+    Container, Element, Font, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text,
+    TextInput, Tooltip, VerticalAlignment,
 };
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::Path;
 use std::rc::Rc;
 
 pub struct Build {
@@ -27,19 +35,32 @@ pub struct Build {
     modified_before_inputs: Vec<RequiredInput>,
     modified_after_inputs: Vec<RequiredInput>,
     add_step: AddStep,
-    recipe_name: text_input::State,
-    recipe_name_value: String,
+    search_options: Vec<String>,
+    search_state: pick_list::State<String>,
+    search_value: Option<String>,
     required_input_tab_btn: button::State,
     steps_tab_btn: button::State,
     add_input_before_btn: button::State,
     add_input_after_btn: button::State,
+    cancel_btn: button::State,
+    overwrite_confirmed_btn: button::State,
+    delete_confirmed_btn: button::State,
+    confirm_delete_btn: button::State,
+    save_with_name_btn: button::State,
+    name_entry_value: String,
+    name_entry_state: text_input::State,
     state: BuildState,
     logger: Logger,
+    unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
+    recipe_regex: Regex,
 }
 
 enum BuildState {
     Steps,
     RequiredInput,
+    DeleteConfirm,
+    EnterName,
+    OverwriteConfirm,
 }
 
 #[derive(Debug, Clone)]
@@ -48,12 +69,20 @@ pub enum BuildMessage {
     BeforeRequiredInputMessage(usize, RequiredInputMessage),
     AfterRequiredInputMessage(usize, RequiredInputMessage),
     AddStepMessage(AddStepMessage),
-    UserChangedName(String),
+    SearchChanged(String),
+    UpdateSearch,
     SaveMessage(SaveBarMessage),
     StepsTab,
     RequiredInputTab,
     AddInputBefore,
     AddInputAfter,
+    Saved(()),
+    Cancel,
+    ConfirmOverWrite,
+    DeleteConfirmed,
+    ConfirmDelete,
+    SaveWithName,
+    NameEntryChanged(String),
 }
 
 impl Build {
@@ -61,20 +90,29 @@ impl Build {
         nodes_ref: Rc<RefCell<Nodes>>,
         actions_ref: Rc<RefCell<Actions>>,
         logger: Logger,
+        unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
     ) -> Self {
         Build {
             unsaved: false,
-            save_bar: SaveBar::new(),
+            save_bar: SaveBar::new_as(),
             scroll: scrollable::State::new(),
             add_step: AddStep::new(1, 0, Rc::clone(&nodes_ref), Rc::clone(&actions_ref)),
             nodes_ref,
             actions_ref,
-            recipe_name: text_input::State::new(),
-            recipe_name_value: "".to_string(),
+            search_options: Vec::new(),
+            search_state: pick_list::State::default(),
+            search_value: None,
             required_input_tab_btn: button::State::new(),
             steps_tab_btn: button::State::new(),
             add_input_before_btn: button::State::new(),
             add_input_after_btn: button::State::new(),
+            cancel_btn: button::State::new(),
+            save_with_name_btn: button::State::new(),
+            confirm_delete_btn: button::State::new(),
+            delete_confirmed_btn: button::State::new(),
+            overwrite_confirmed_btn: button::State::new(),
+            name_entry_state: text_input::State::new(),
+            name_entry_value: String::new(),
             steps: Vec::new(),
             before_inputs: Vec::new(),
             after_inputs: Vec::new(),
@@ -83,11 +121,18 @@ impl Build {
             modified_after_inputs: Vec::new(),
             state: BuildState::Steps,
             logger,
+            unsaved_tabs,
+            recipe_regex: Regex::new(r"^[^.]+").unwrap(),
         }
     }
 
-    pub fn update(&mut self, message: BuildMessage) {
+    pub fn update(&mut self, message: BuildMessage) -> Command<BuildMessage> {
+        let mut command = Command::none();
         match message {
+            BuildMessage::Cancel => {
+                self.name_entry_value = String::new();
+                self.state = BuildState::Steps;
+            }
             BuildMessage::StepMessage(i, StepMessage::Delete) => {
                 self.modified_steps.remove(i);
                 for i in 0..self.modified_steps.len() {
@@ -117,6 +162,7 @@ impl Build {
             }
             BuildMessage::StepMessage(i, StepMessage::Edit) => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 // reset all to idle so ony one can be edited at a time
                 for step in &mut self.modified_steps {
                     step.update(StepMessage::Okay)
@@ -140,6 +186,7 @@ impl Build {
             )) => {
                 if let Some(d) = dest {
                     self.unsaved = true;
+                    self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                     for i in nodes.unwrap() - 1..self.modified_steps.len() {
                         self.modified_steps[i].step_num =
                             Some(self.modified_steps[i].step_num.unwrap() + 1);
@@ -171,6 +218,8 @@ impl Build {
                     self.add_step.secs_value = "".to_string();
                     self.add_step.hover = false;
                     self.add_step.wait = false;
+                } else {
+                    self.add_step.destination_style = Theme::Red;
                 }
             }
             BuildMessage::AddStepMessage(msg) => self.add_step.update(msg),
@@ -178,6 +227,7 @@ impl Build {
             BuildMessage::StepsTab => self.state = BuildState::Steps,
             BuildMessage::BeforeRequiredInputMessage(i, RequiredInputMessage::Delete) => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 self.modified_before_inputs.remove(i);
             }
             BuildMessage::BeforeRequiredInputMessage(i, msg) => {
@@ -185,11 +235,13 @@ impl Build {
             }
             BuildMessage::AddInputBefore => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 self.modified_before_inputs
                     .push(RequiredInput::new("".to_string()));
             }
             BuildMessage::AfterRequiredInputMessage(i, RequiredInputMessage::Delete) => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 self.modified_after_inputs.remove(i);
             }
             BuildMessage::AfterRequiredInputMessage(i, msg) => {
@@ -197,74 +249,95 @@ impl Build {
             }
             BuildMessage::AddInputAfter => {
                 self.unsaved = true;
+                self.unsaved_tabs.borrow_mut().insert(TabState::Build, true);
                 self.modified_after_inputs
                     .push(RequiredInput::new("".to_string()));
             }
-            BuildMessage::UserChangedName(new_name) => self.recipe_name_value = new_name,
+            BuildMessage::SearchChanged(recipe) => {
+                if self.unsaved {
+                    self.save_bar.message = "Save or Cancel before changing recipe!".to_string();
+                } else {
+                    self.search_value = Some(recipe);
+                    update_recipe(self);
+                }
+            }
+            BuildMessage::ConfirmDelete => {
+                self.state = BuildState::DeleteConfirm;
+            }
+            BuildMessage::DeleteConfirmed => {
+                std::fs::remove_file(format!(
+                    "./recipes/{}.toml",
+                    self.search_value.take().unwrap()
+                ))
+                .unwrap();
+                update_search(self);
+                update_recipe(self);
+                self.state = BuildState::Steps;
+            }
+            BuildMessage::UpdateSearch => {
+                // check for and update with new recipe files
+                update_search(self);
+                // update the ui with recipie if it was changed
+                if let Some(selection) = self.search_value.as_ref() {
+                    if self.search_options.iter().any(|o| o == selection) {
+                        update_recipe(self);
+                    }
+                } else {
+                    self.steps = Vec::new();
+                    self.before_inputs = Vec::new();
+                    self.after_inputs = Vec::new();
+                    self.modified_steps = Vec::new();
+                    self.modified_before_inputs = Vec::new();
+                    self.modified_after_inputs = Vec::new();
+                }
+            }
             BuildMessage::SaveMessage(SaveBarMessage::Cancel) => {
+                self.save_bar.message = "Unsaved Changes!".to_string();
                 self.modified_steps = self.steps.clone();
                 self.modified_before_inputs = self.before_inputs.clone();
                 self.modified_after_inputs = self.after_inputs.clone();
                 self.unsaved = false;
+                self.unsaved_tabs
+                    .borrow_mut()
+                    .insert(TabState::Build, false);
             }
-            BuildMessage::SaveMessage(SaveBarMessage::Save) => {
-                if self.recipe_name_value != "".to_string() {
-                    self.modified_before_inputs
-                        .retain(|input| input.value != "".to_string());
-                    self.modified_after_inputs
-                        .retain(|input| input.value != "".to_string());
-                    let save_data = Recipe {
-                        required_inputs: Input {
-                            before: self.modified_before_inputs.iter().fold(
-                                Vec::with_capacity(self.modified_before_inputs.len()),
-                                |mut v, input| {
-                                    v.push(input.value.clone());
-                                    v
-                                },
-                            ),
-                            after: self.modified_after_inputs.iter().fold(
-                                Vec::with_capacity(self.modified_after_inputs.len()),
-                                |mut v, input| {
-                                    v.push(input.value.clone());
-                                    v
-                                },
-                            ),
-                        },
-                        steps: self.modified_steps.iter().fold(
-                            Vec::with_capacity(self.modified_steps.len()),
-                            |mut v, step| {
-                                v.push(Step {
-                                    step_num: step.step_num.unwrap().to_string(),
-                                    selected_destination: step
-                                        .selected_destination
-                                        .clone()
-                                        .unwrap(),
-                                    hover: step.hover,
-                                    selected_action: step.selected_action.clone().unwrap(),
-                                    secs_value: step.secs_value.clone(),
-                                    mins_value: step.mins_value.clone(),
-                                    hours_value: step.hours_value.clone(),
-                                    wait: step.wait,
-                                });
-                                v
-                            },
-                        ),
-                    };
-                    // TODO: add error is unable to build toml
-                    let save_toml = toml::to_string_pretty(&save_data).unwrap();
-                    fs::write(
-                        format!("./recipes/{}.toml", &self.recipe_name_value),
-                        save_toml,
-                    )
-                    .expect("unable to save file");
-                    self.steps = self.modified_steps.clone();
-                    self.before_inputs = self.modified_before_inputs.clone();
-                    self.after_inputs = self.modified_after_inputs.clone();
-                    self.unsaved = false;
-                    // TODO: Have errors show to user if unable to save
+            BuildMessage::NameEntryChanged(val) => {
+                // unsfe windows chars
+                if ![r"/", r"\", r":", r"*", r"?", "\"", r"<", r">", r"|"]
+                    .iter()
+                    .any(|c| val.contains(c))
+                {
+                    self.name_entry_value = val
                 }
             }
+            BuildMessage::SaveMessage(SaveBarMessage::Save) => {
+                if self.modified_steps.iter().any(|s| match s.state {
+                    StepState::Idle { .. } => false,
+                    StepState::Editing { .. } => true,
+                }) && self.modified_steps.len() > 0
+                {
+                    self.save_bar.message = "'Ok' all steps before saving".to_string();
+                } else {
+                    self.save_bar.message = "Unsaved Changes!".to_string();
+                    self.name_entry_value = self.search_value.clone().unwrap_or(String::new());
+                    self.state = BuildState::EnterName;
+                }
+            }
+            BuildMessage::ConfirmOverWrite => {
+                save(self);
+                command = Command::perform(do_nothing(), BuildMessage::Saved);
+            }
+            BuildMessage::SaveWithName => {
+                if !Path::new(&format!("./recipes/{}.toml", self.name_entry_value)).exists() {
+                    save(self);
+                    command = Command::perform(do_nothing(), BuildMessage::Saved);
+                } else {
+                    self.state = BuildState::OverwriteConfirm
+                }
+            }
+            _ => {}
         }
+        command
     }
     pub fn view(&mut self) -> Element<BuildMessage> {
         let save_bar = match self.unsaved {
@@ -277,6 +350,30 @@ impl Build {
                 .align_items(Align::Center)
                 .push(Space::with_height(Length::Units(50))),
         };
+        let search = Row::new()
+            .height(Length::Units(40))
+            .push(
+                PickList::new(
+                    &mut self.search_state,
+                    &self.search_options[..],
+                    self.search_value.clone(),
+                    BuildMessage::SearchChanged,
+                )
+                .style(Theme::Blue)
+                .padding(10)
+                .width(Length::Fill),
+            )
+            .push(match self.search_value {
+                Some(_) => Row::with_children(vec![Button::new(
+                    &mut self.confirm_delete_btn,
+                    Text::new("Delete Recipe").font(CQ_MONO).size(20),
+                )
+                .padding(10)
+                .style(Theme::Red)
+                .on_press(BuildMessage::ConfirmDelete)
+                .into()]),
+                None => Row::new(),
+            });
         let tab_btns = Column::new().align_items(Align::Center).push(
             Row::new()
                 .push(Space::with_width(Length::Fill))
@@ -287,6 +384,10 @@ impl Build {
                             .font(CQ_MONO)
                             .horizontal_alignment(HorizontalAlignment::Center),
                     )
+                    .style(match self.state {
+                        BuildState::Steps => Theme::BlueBorderOnly,
+                        _ => Theme::Blue,
+                    })
                     .padding(10)
                     .on_press(BuildMessage::StepsTab)
                     .width(Length::Units(200)),
@@ -298,21 +399,15 @@ impl Build {
                             .font(CQ_MONO)
                             .horizontal_alignment(HorizontalAlignment::Center),
                     )
+                    .style(match self.state {
+                        BuildState::RequiredInput => Theme::BlueBorderOnly,
+                        _ => Theme::Blue,
+                    })
                     .padding(10)
                     .on_press(BuildMessage::RequiredInputTab)
                     .width(Length::Units(200)),
                 )
                 .push(Space::with_width(Length::Fill)),
-        );
-        let search = Row::new().height(Length::Units(40)).push(
-            TextInput::new(
-                &mut self.recipe_name,
-                "Recipie Name",
-                &self.recipe_name_value,
-                BuildMessage::UserChangedName,
-            )
-            .padding(10)
-            .width(Length::Fill),
         );
         match self.state {
             BuildState::Steps => {
@@ -335,7 +430,12 @@ impl Build {
                     .modified_steps
                     .iter_mut()
                     .enumerate()
-                    .fold(Column::new().spacing(15), |column, (i, step)| {
+                    .fold(Column::new(), |column, (i, step)| {
+                        step.set_style(if i % 2 == 0 {
+                            Theme::LightGray
+                        } else {
+                            Theme::LighterGray
+                        });
                         column.push(
                             step.view()
                                 .map(move |msg| BuildMessage::StepMessage(i, msg)),
@@ -360,6 +460,7 @@ impl Build {
             }
             BuildState::RequiredInput => {
                 let before_title = Text::new("Before Run")
+                    .horizontal_alignment(HorizontalAlignment::Center)
                     .font(CQ_MONO)
                     .size(40)
                     .width(Length::Fill);
@@ -383,12 +484,14 @@ impl Build {
                                 .font(CQ_MONO)
                                 .horizontal_alignment(HorizontalAlignment::Center),
                         )
+                        .style(Theme::Blue)
                         .on_press(BuildMessage::AddInputBefore)
                         .padding(10)
                         .width(Length::Units(400)),
                     )
                     .push(Space::with_width(Length::Fill));
                 let after_title = Text::new("After Run")
+                    .horizontal_alignment(HorizontalAlignment::Center)
                     .font(CQ_MONO)
                     .size(40)
                     .width(Length::Fill);
@@ -411,6 +514,7 @@ impl Build {
                                 .font(CQ_MONO)
                                 .horizontal_alignment(HorizontalAlignment::Center),
                         )
+                        .style(Theme::Blue)
                         .on_press(BuildMessage::AddInputAfter)
                         .padding(10)
                         .width(Length::Units(400)),
@@ -443,20 +547,192 @@ impl Build {
                     .push(Container::new(content).width(Length::Fill).center_x())
                     .into()
             }
+            BuildState::EnterName => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(Text::new("SAVE").font(CQ_MONO).size(40))
+                    .push(
+                        Text::new("What should this recipe be saved as?")
+                            .horizontal_alignment(HorizontalAlignment::Center)
+                            .size(30),
+                    )
+                    .push(
+                        TextInput::new(
+                            &mut self.name_entry_state,
+                            "Name (Required)",
+                            &self.name_entry_value,
+                            BuildMessage::NameEntryChanged,
+                        )
+                        .padding(10),
+                    )
+                    .push(Row::with_children(vec![
+                        Space::with_width(Length::Fill).into(),
+                        if self.name_entry_value.is_empty() {
+                            Tooltip::new(
+                                Button::new(
+                                    &mut self.save_with_name_btn,
+                                    Text::new(format!("Save as\n'{}'", self.name_entry_value))
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .style(Theme::GreenDisabled)
+                                .padding(10)
+                                .width(Length::Units(200)),
+                                "Name Required",
+                                tooltip::Position::FollowCursor,
+                            )
+                            .style(Theme::Red)
+                            .into()
+                        } else {
+                            Tooltip::new(
+                                Button::new(
+                                    &mut self.save_with_name_btn,
+                                    Text::new(format!("Save as\n'{}'", self.name_entry_value))
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                )
+                                .style(Theme::Green)
+                                .on_press(BuildMessage::SaveWithName)
+                                .padding(10)
+                                .width(Length::Units(200)),
+                                "",
+                                tooltip::Position::Top,
+                            )
+                        }
+                        .into(),
+                        Space::with_width(Length::Units(100)).into(),
+                        Button::new(
+                            &mut self.cancel_btn,
+                            Text::new("No.\nDon't save.")
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .style(Theme::Red)
+                        .on_press(BuildMessage::Cancel)
+                        .width(Length::Units(200))
+                        .padding(10)
+                        .into(),
+                        Space::with_width(Length::Fill).into(),
+                    ]));
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            BuildState::DeleteConfirm => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(Text::new("DELETE").font(CQ_MONO).size(40))
+                    .push(
+                        Text::new(format!(
+                            "Delete '{}'?\nThis CANNOT be undone!",
+                            self.search_value.as_ref().unwrap_or(&String::new())
+                        ))
+                        .horizontal_alignment(HorizontalAlignment::Center)
+                        .size(30),
+                    )
+                    .push(Row::with_children(vec![
+                        Space::with_width(Length::Fill).into(),
+                        Button::new(
+                            &mut self.delete_confirmed_btn,
+                            Text::new(format!("DELETE"))
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .style(Theme::Red)
+                        .on_press(BuildMessage::DeleteConfirmed)
+                        .padding(10)
+                        .width(Length::Units(200))
+                        .into(),
+                        Space::with_width(Length::Units(100)).into(),
+                        Button::new(
+                            &mut self.cancel_btn,
+                            Text::new("Cancel")
+                                .font(CQ_MONO)
+                                .horizontal_alignment(HorizontalAlignment::Center),
+                        )
+                        .style(Theme::Blue)
+                        .on_press(BuildMessage::Cancel)
+                        .width(Length::Units(200))
+                        .padding(10)
+                        .into(),
+                        Space::with_width(Length::Fill).into(),
+                    ]));
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
+            BuildState::OverwriteConfirm => {
+                let content = Column::new()
+                    .max_width(800)
+                    .spacing(20)
+                    .align_items(Align::Center)
+                    .push(
+                        Text::new(format!("'{}' already exists!", self.name_entry_value)).font(CQ_MONO).size(40)    
+                    )
+                    .push(Text::new(format!("This will delete the old '{}' and replace it with the new one.\nThis CANNOT be undone!", self.search_value.as_ref().unwrap_or(&String::new()))).horizontal_alignment(HorizontalAlignment::Center).size(30))
+                            .push(Row::with_children(vec![
+                                Space::with_width(Length::Fill).into(),
+                                Button::new(
+                                    &mut self.overwrite_confirmed_btn,
+                                    Text::new(format!("Yes, replace\n'{}'", self.name_entry_value))
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                ).style(Theme::Red)
+                                .on_press(BuildMessage::ConfirmOverWrite)
+                                .padding(10)
+                                .width(Length::Units(200))
+                                .into(),
+                                Space::with_width(Length::Units(100)).into(),
+                                Button::new(
+                                    &mut self.cancel_btn,
+                                    Text::new("Cancel\n ")
+                                        .font(CQ_MONO)
+                                        .horizontal_alignment(HorizontalAlignment::Center),
+                                ).style(Theme::Blue)
+                                .on_press(BuildMessage::Cancel)
+                                .width(Length::Units(200))
+                                .padding(10)
+                                .into(),
+                                Space::with_width(Length::Fill).into(),
+                            ]));
+                Scrollable::new(&mut self.scroll)
+                    .padding(40)
+                    .push(Container::new(content).width(Length::Fill).center_x())
+                    .into()
+            }
         }
     }
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 // Step found in ./run.rs
 pub struct Recipe {
     pub required_inputs: Input,
     pub steps: Vec<Step>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Input {
     pub before: Vec<String>,
     pub after: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+// Step found in ./run.rs
+pub struct SaveRecipe {
+    pub required_inputs: SaveInput,
+    pub steps: Option<Vec<Step>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SaveInput {
+    pub before: Option<Vec<String>>,
+    pub after: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -497,13 +773,15 @@ impl RequiredInput {
                     &self.value[..],
                     RequiredInputMessage::InputChanged,
                 )
+                .style(Theme::Blue)
                 .padding(10),
             )
             .push(
                 Button::new(&mut self.delete_btn, delete_icon())
                     .width(Length::Units(50))
                     .padding(10)
-                    .on_press(RequiredInputMessage::Delete),
+                    .on_press(RequiredInputMessage::Delete)
+                    .style(Theme::Red),
             )
             .into()
     }
@@ -523,6 +801,29 @@ pub struct BuildStep {
     hours_value: String,
     wait: bool,
     state: StepState,
+    style: Theme,
+    errors: BuildStepErrors,
+    error_message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BuildStepErrors {
+    destination: bool,
+    action: bool,
+    time: bool,
+}
+
+impl BuildStepErrors {
+    fn new() -> Self {
+        BuildStepErrors {
+            destination: false,
+            action: false,
+            time: false,
+        }
+    }
+    fn all(&self) -> Vec<bool> {
+        vec![self.destination, self.action, self.time]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -585,8 +886,32 @@ impl BuildStep {
         secs_value: String,
         wait: bool,
     ) -> Self {
+        let dest_bool = !nodes_ref.borrow().node.iter().any(|n| {
+            if let Some(dest) = &selected_destination {
+                &n.name == dest
+            } else {
+                false
+            }
+        });
+        let act_bool = !actions_ref.borrow().action.iter().any(|a| {
+            if let Some(act) = &selected_action {
+                &a.name == act
+            } else {
+                false
+            }
+        });
+        let time_bool = match validate_nums(vec![&hours_value, &mins_value, &secs_value], 0) {
+            ValidateNums::Okay => false,
+            _ => true,
+        };
         BuildStep {
             step_num,
+            errors: BuildStepErrors {
+                destination: dest_bool,
+                action: act_bool,
+                time: time_bool,
+            },
+            error_message: None,
             steps_len,
             nodes_ref,
             actions_ref,
@@ -600,40 +925,95 @@ impl BuildStep {
             state: StepState::Idle {
                 edit_btn: button::State::new(),
             },
+            style: Theme::LightGray,
         }
+    }
+    fn set_style(&mut self, style: Theme) {
+        self.style = style;
+    }
+    fn set_error(&mut self, msg: impl ToString) {
+        self.error_message = Some(msg.to_string());
+    }
+    fn clear_error(&mut self) {
+        self.error_message = None;
     }
 
     fn update(&mut self, message: StepMessage) {
         match message {
             StepMessage::NewDestination(destination) => {
-                self.selected_destination = Some(destination)
+                self.selected_destination = Some(destination);
+                if self.nodes_ref.borrow().node.iter().any(|n| {
+                    if let Some(dest) = &self.selected_destination {
+                        &n.name == dest
+                    } else {
+                        false
+                    }
+                }) {
+                    self.errors.destination = false;
+                } else {
+                    self.errors.destination = true;
+                }
             }
-            StepMessage::NewAction(action) => self.selected_action = Some(action),
+            StepMessage::NewAction(action) => {
+                self.selected_action = Some(action);
+                if self.actions_ref.borrow().action.iter().any(|a| {
+                    if let Some(act) = &self.selected_action {
+                        &a.name == act
+                    } else {
+                        false
+                    }
+                }) {
+                    self.errors.action = false;
+                } else {
+                    self.errors.action = true;
+                }
+            }
             StepMessage::ToggleHover(b) => self.hover = b,
             StepMessage::ToggleWait(b) => self.wait = b,
             StepMessage::HoursChanged(hours) => {
                 let into_num = hours.parse::<usize>();
-                if hours == "".to_string() {
-                    self.hours_value = "".to_string()
+                if hours.is_empty() {
+                    self.hours_value = String::new()
                 } else if into_num.is_ok() {
                     self.hours_value = into_num.unwrap().min(99).to_string();
                 }
+                self.errors.time = match validate_nums(
+                    vec![&self.hours_value, &self.mins_value, &self.secs_value],
+                    0,
+                ) {
+                    ValidateNums::Okay => false,
+                    _ => true,
+                };
             }
             StepMessage::MinsChanged(mins) => {
                 let into_num = mins.parse::<usize>();
-                if mins == "".to_string() {
-                    self.mins_value = "".to_string()
+                if mins.is_empty() {
+                    self.mins_value = String::new()
                 } else if into_num.is_ok() {
                     self.mins_value = into_num.unwrap().min(59).to_string();
                 }
+                self.errors.time = match validate_nums(
+                    vec![&self.hours_value, &self.mins_value, &self.secs_value],
+                    0,
+                ) {
+                    ValidateNums::Okay => false,
+                    _ => true,
+                };
             }
             StepMessage::SecsChanged(secs) => {
                 let into_num = secs.parse::<usize>();
-                if secs == "".to_string() {
-                    self.secs_value = "".to_string()
+                if secs.is_empty() {
+                    self.secs_value = String::new()
                 } else if into_num.is_ok() {
                     self.secs_value = into_num.unwrap().min(59).to_string();
                 }
+                self.errors.time = match validate_nums(
+                    vec![&self.hours_value, &self.mins_value, &self.secs_value],
+                    0,
+                ) {
+                    ValidateNums::Okay => false,
+                    _ => true,
+                };
             }
             StepMessage::HoursIncrement => {
                 self.hours_value = (self.hours_value.parse::<usize>().unwrap_or(0) + 1)
@@ -706,6 +1086,23 @@ impl BuildStep {
     }
 
     fn view(&mut self) -> Element<StepMessage> {
+        if self.errors.destination {
+            if let Some(dest) = &self.selected_destination {
+                self.set_error(format!("Selected destination not found in Nodes.\nEither select another destination, or go to\nAdvanced -> Nodes and rename/add a node with the name '{}'.", dest));
+            } else {
+                self.set_error("Select a destination.");
+            }
+        } else if self.errors.action {
+            if let Some(act) = &self.selected_action {
+                self.set_error(format!("Selected action not found.\nEither select another action, or go to\nAdvanced -> Actions and rename/add an action with the name '{}'.", act));
+            } else {
+                self.set_error("Select an action.");
+            }
+        } else if self.errors.time {
+            self.set_error("Time entries must be numbers with no decimals or fractions.");
+        } else {
+            self.clear_error();
+        }
         match &mut self.state {
             StepState::Editing {
                 destination_state,
@@ -717,144 +1114,198 @@ impl BuildStep {
                 mins_input,
                 hours_input,
             } => {
-                Column::new()
-                    .push(
-                        Row::new()
-                            .push(
-                                // Step num
-                                Column::new().push(
-                                    PickList::new(
-                                        step_num_state,
-                                        (1..self.steps_len + 1).collect::<Vec<usize>>(),
-                                        self.step_num,
-                                        StepMessage::NewNum,
-                                    )
-                                    .padding(10)
-                                    .width(Length::Shrink),
-                                ),
+                Container::new(
+                    Column::new()
+                        .push(if let Some(msg) = &self.error_message {
+                            Container::new(
+                                Row::with_children(vec![
+                                    Space::with_width(Length::Fill).into(),
+                                    Text::new(msg).into(),
+                                    Space::with_width(Length::Fill).into(),
+                                ])
+                                .padding(10),
                             )
-                            .push(
-                                // Destination
-                                Column::new().push(
-                                    PickList::new(
-                                        destination_state,
-                                        self.nodes_ref
-                                            .borrow()
-                                            .node
-                                            .iter()
-                                            .filter(|n| !n.name.contains("_hover") && !n.hide)
-                                            .fold(Vec::new(), |mut v, n| {
-                                                v.push(n.name.clone());
-                                                v
-                                            }),
-                                        self.selected_destination.clone(),
-                                        StepMessage::NewDestination,
-                                    )
-                                    .padding(10)
-                                    .width(Length::Shrink),
-                                ),
-                            )
-                            .push(
-                                // actions
-                                Column::new().push(
-                                    Row::new()
-                                        .push(
-                                            PickList::new(
-                                                actions_state,
-                                                self.actions_ref.borrow().action.iter().fold(
-                                                    Vec::new(),
-                                                    |mut v, a| {
-                                                        v.push(a.name.clone());
-                                                        v
-                                                    },
-                                                ),
-                                                self.selected_action.clone(),
-                                                StepMessage::NewAction,
-                                            )
-                                            .padding(10)
-                                            .width(Length::Shrink),
+                            .style(Theme::Red)
+                        } else {
+                            Container::new(Space::with_height(Length::Shrink))
+                        })
+                        .push(
+                            Row::new()
+                                .push(
+                                    // Step num
+                                    Column::new().push(
+                                        PickList::new(
+                                            step_num_state,
+                                            (1..self.steps_len + 1).collect::<Vec<usize>>(),
+                                            self.step_num,
+                                            StepMessage::NewNum,
                                         )
-                                        .push(
-                                            TextInput::new(
-                                                // hours
-                                                hours_input,
-                                                "Hours",
-                                                &self.hours_value,
-                                                StepMessage::HoursChanged,
-                                            )
-                                            .on_scroll_up(StepMessage::HoursIncrement)
-                                            .on_scroll_down(StepMessage::HoursDecrement)
-                                            .padding(10)
-                                            .width(Length::Fill),
+                                        .style(Theme::Blue)
+                                        .padding(10)
+                                        .width(Length::Shrink),
+                                    ),
+                                )
+                                .push(
+                                    // Destination
+                                    Column::new().push(
+                                        PickList::new(
+                                            destination_state,
+                                            self.nodes_ref
+                                                .borrow()
+                                                .node
+                                                .iter()
+                                                .filter(|n| !n.name.contains("_hover") && !n.hide)
+                                                .fold(Vec::new(), |mut v, n| {
+                                                    v.push(n.name.clone());
+                                                    v
+                                                }),
+                                            self.selected_destination.clone(),
+                                            StepMessage::NewDestination,
                                         )
-                                        .push(
-                                            (TextInput::new(
-                                                // mins
-                                                mins_input,
-                                                "Minutes",
-                                                &self.mins_value,
-                                                StepMessage::MinsChanged,
-                                            ))
-                                            .on_scroll_up(StepMessage::MinsIncrement)
-                                            .on_scroll_down(StepMessage::MinsDecrement)
-                                            .padding(10)
-                                            .width(Length::Fill),
-                                        )
-                                        .push(
-                                            TextInput::new(
-                                                // secs
-                                                secs_input,
-                                                "Seconds",
-                                                &self.secs_value,
-                                                StepMessage::SecsChanged,
-                                            )
-                                            .on_scroll_up(StepMessage::SecsIncrement)
-                                            .on_scroll_down(StepMessage::SecsDecrement)
-                                            .padding(10)
-                                            .width(Length::Fill),
-                                        )
-                                        .push(
-                                            Button::new(okay_btn, okay_icon())
-                                                .on_press(StepMessage::Okay)
+                                        .style(if self.errors.destination {
+                                            Theme::Red
+                                        } else {
+                                            Theme::Blue
+                                        })
+                                        .padding(10)
+                                        .width(Length::Shrink),
+                                    ),
+                                )
+                                .push(
+                                    // actions
+                                    Column::new().push(
+                                        Row::new()
+                                            .push(
+                                                PickList::new(
+                                                    actions_state,
+                                                    self.actions_ref.borrow().action.iter().fold(
+                                                        Vec::new(),
+                                                        |mut v, a| {
+                                                            v.push(a.name.clone());
+                                                            v
+                                                        },
+                                                    ),
+                                                    self.selected_action.clone(),
+                                                    StepMessage::NewAction,
+                                                )
+                                                .style(if self.errors.action {
+                                                    Theme::Red
+                                                } else {
+                                                    Theme::Blue
+                                                })
                                                 .padding(10)
-                                                .width(Length::Units(50)),
-                                        )
-                                        .push(
-                                            Button::new(delete_btn, delete_icon())
-                                                .on_press(StepMessage::Delete)
+                                                .width(Length::Shrink),
+                                            )
+                                            .push(
+                                                TextInput::new(
+                                                    // hours
+                                                    hours_input,
+                                                    "Hours",
+                                                    &self.hours_value,
+                                                    StepMessage::HoursChanged,
+                                                )
+                                                .style(if self.errors.time {
+                                                    Theme::Red
+                                                } else {
+                                                    Theme::Blue
+                                                })
+                                                .on_scroll_up(StepMessage::HoursIncrement)
+                                                .on_scroll_down(StepMessage::HoursDecrement)
                                                 .padding(10)
-                                                .width(Length::Units(50)),
-                                        ),
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                TextInput::new(
+                                                    // mins
+                                                    mins_input,
+                                                    "Minutes",
+                                                    &self.mins_value,
+                                                    StepMessage::MinsChanged,
+                                                )
+                                                .style(if self.errors.time {
+                                                    Theme::Red
+                                                } else {
+                                                    Theme::Blue
+                                                })
+                                                .on_scroll_up(StepMessage::MinsIncrement)
+                                                .on_scroll_down(StepMessage::MinsDecrement)
+                                                .padding(10)
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                TextInput::new(
+                                                    // secs
+                                                    secs_input,
+                                                    "Seconds",
+                                                    &self.secs_value,
+                                                    StepMessage::SecsChanged,
+                                                )
+                                                .style(if self.errors.time {
+                                                    Theme::Red
+                                                } else {
+                                                    Theme::Blue
+                                                })
+                                                .on_scroll_up(StepMessage::SecsIncrement)
+                                                .on_scroll_down(StepMessage::SecsDecrement)
+                                                .padding(10)
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                Button::new(okay_btn, okay_icon())
+                                                    .on_press(StepMessage::Okay)
+                                                    .padding(10)
+                                                    .width(Length::Units(50))
+                                                    .style(Theme::Green),
+                                            )
+                                            .push(
+                                                Button::new(delete_btn, delete_icon())
+                                                    .on_press(StepMessage::Delete)
+                                                    .padding(10)
+                                                    .width(Length::Units(50))
+                                                    .style(Theme::Red),
+                                            ),
+                                    ),
                                 ),
-                            ),
-                    )
-                    .push(
-                        Row::new()
-                            .push(Space::with_width(Length::Fill))
-                            .push(
-                                Column::new()
-                                    .push(Checkbox::new(
-                                        self.hover,
-                                        "Hover Above",
-                                        StepMessage::ToggleHover,
-                                    ))
-                                    .padding(4)
-                                    .width(Length::Shrink),
-                            )
-                            .push(Space::with_width(Length::Units(25)))
-                            .push(
-                                Column::new()
-                                    .push(Checkbox::new(
-                                        self.wait,
-                                        "Require Input",
-                                        StepMessage::ToggleWait,
-                                    ))
-                                    .padding(4)
-                                    .width(Length::Shrink),
-                            )
-                            .push(Space::with_width(Length::Fill)),
-                    )
-                    .into()
+                        )
+                        .push(
+                            Row::new()
+                                .push(Space::with_width(Length::Fill))
+                                .push(
+                                    Column::new()
+                                        .push(
+                                            Checkbox::new(
+                                                self.hover,
+                                                "Hover Above",
+                                                StepMessage::ToggleHover,
+                                            )
+                                            .style(Theme::Blue),
+                                        )
+                                        .padding(4)
+                                        .width(Length::Shrink),
+                                )
+                                .push(Space::with_width(Length::Units(25)))
+                                .push(
+                                    Column::new()
+                                        .push(
+                                            Checkbox::new(
+                                                self.wait,
+                                                "Require Input",
+                                                StepMessage::ToggleWait,
+                                            )
+                                            .style(Theme::Blue),
+                                        )
+                                        .padding(4)
+                                        .width(Length::Shrink),
+                                )
+                                .push(Space::with_width(Length::Fill)),
+                        ),
+                )
+                .style(if self.errors.all().iter().any(|e| *e) {
+                    Theme::Red
+                } else {
+                    self.style
+                })
+                .into()
             }
             StepState::Idle { edit_btn } => {
                 let e = "".to_string(); //empty
@@ -956,55 +1407,63 @@ impl BuildStep {
                         ns(&s)
                     ),
                 };
-                Row::new()
-                    .align_items(Align::Center)
-                    .push(
-                        Text::new(format!("{}", self.step_num.unwrap()))
-                            .width(Length::Units(75))
-                            .horizontal_alignment(HorizontalAlignment::Center)
-                            .font(CQ_MONO),
-                    )
-                    .push(
-                        // Destination
-                        Column::new().push(
-                            Text::new(format!(
-                                "{}{}",
-                                hover,
-                                self.selected_destination
-                                    .as_ref()
-                                    .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
-                            ))
-                            .font(CQ_MONO)
-                            .width(Length::Units(120))
-                            .vertical_alignment(VerticalAlignment::Center),
-                        ),
-                    )
-                    .push(
-                        // action
-                        Column::new()
-                            .push(
-                                Text::new(step_time_text)
-                                    .vertical_alignment(VerticalAlignment::Center)
-                                    .font(CQ_MONO),
-                            )
-                            .width(Length::Fill)
-                            .align_items(Align::Start),
-                    )
-                    .push(
-                        // edit button
-                        Button::new(
-                            edit_btn,
-                            Text::new("Edit")
-                                .vertical_alignment(VerticalAlignment::Center)
+                Container::new(
+                    Row::new()
+                        .align_items(Align::Center)
+                        .push(
+                            Text::new(format!("{}", self.step_num.unwrap()))
+                                .width(Length::Units(75))
                                 .horizontal_alignment(HorizontalAlignment::Center)
                                 .font(CQ_MONO),
                         )
-                        .padding(10)
-                        .on_press(StepMessage::Edit)
-                        //.height(Length::Units(75))
-                        .width(Length::Units(100)),
-                    )
-                    .into()
+                        .push(
+                            // Destination
+                            Column::new().push(
+                                Text::new(format!(
+                                    "{}{}",
+                                    hover,
+                                    self.selected_destination
+                                        .as_ref()
+                                        .unwrap_or(&"*𝘚𝘵𝘦𝘱 𝘌𝘙𝘙𝘖𝘙*".to_string()),
+                                ))
+                                .font(CQ_MONO)
+                                .width(Length::Units(120))
+                                .vertical_alignment(VerticalAlignment::Center),
+                            ),
+                        )
+                        .push(
+                            // action
+                            Column::new()
+                                .push(
+                                    Text::new(step_time_text)
+                                        .vertical_alignment(VerticalAlignment::Center)
+                                        .font(CQ_MONO),
+                                )
+                                .width(Length::Fill)
+                                .align_items(Align::Start),
+                        )
+                        .push(
+                            // edit button
+                            Button::new(
+                                edit_btn,
+                                Text::new("Edit")
+                                    .vertical_alignment(VerticalAlignment::Center)
+                                    .horizontal_alignment(HorizontalAlignment::Center)
+                                    .font(CQ_MONO),
+                            )
+                            .style(Theme::Blue)
+                            .padding(15)
+                            .on_press(StepMessage::Edit)
+                            //.height(Length::Units(75))
+                            .width(Length::Units(100)),
+                        ),
+                )
+                .style(if self.errors.all().iter().any(|e| *e) {
+                    Theme::Red
+                } else {
+                    self.style
+                })
+                .into()
             }
         }
     }
@@ -1030,6 +1489,7 @@ pub struct AddStep {
     hours_value: String,
     wait: bool,
     add_btn: button::State,
+    destination_style: Theme,
 }
 
 #[derive(Debug, Clone)]
@@ -1090,12 +1550,14 @@ impl AddStep {
             hours_value: "".to_string(),
             wait: false,
             add_btn: button::State::new(),
+            destination_style: Theme::Blue,
         }
     }
 
     fn update(&mut self, message: AddStepMessage) {
         match message {
             AddStepMessage::NewDestination(destination) => {
+                self.destination_style = Theme::Blue;
                 self.selected_destination = Some(destination)
             }
             AddStepMessage::NewAction(action) => self.selected_action = Some(action),
@@ -1197,6 +1659,7 @@ impl AddStep {
                                 self.step_num,
                                 AddStepMessage::NewNum,
                             )
+                            .style(Theme::Blue)
                             .padding(10)
                             .width(Length::Shrink),
                         ),
@@ -1218,6 +1681,7 @@ impl AddStep {
                                 self.selected_destination.clone(),
                                 AddStepMessage::NewDestination,
                             )
+                            .style(self.destination_style)
                             .padding(10)
                             .width(Length::Shrink),
                         ),
@@ -1239,6 +1703,7 @@ impl AddStep {
                                         self.selected_action.clone(),
                                         AddStepMessage::NewAction,
                                     )
+                                    .style(Theme::Blue)
                                     .padding(10)
                                     .width(Length::Shrink),
                                 )
@@ -1250,6 +1715,7 @@ impl AddStep {
                                         &self.hours_value,
                                         AddStepMessage::HoursChanged,
                                     )
+                                    .style(Theme::Blue)
                                     .on_scroll_up(AddStepMessage::HoursIncrement)
                                     .on_scroll_down(AddStepMessage::HoursDecrement)
                                     .padding(10)
@@ -1262,7 +1728,8 @@ impl AddStep {
                                         "Minutes",
                                         &self.mins_value,
                                         AddStepMessage::MinsChanged,
-                                    ))
+                                    )
+                                    .style(Theme::Blue))
                                     .on_scroll_up(AddStepMessage::MinsIncrement)
                                     .on_scroll_down(AddStepMessage::MinsDecrement)
                                     .padding(10)
@@ -1276,6 +1743,7 @@ impl AddStep {
                                         &self.secs_value,
                                         AddStepMessage::SecsChanged,
                                     )
+                                    .style(Theme::Blue)
                                     .on_scroll_up(AddStepMessage::SecsIncrement)
                                     .on_scroll_down(AddStepMessage::SecsDecrement)
                                     .padding(10)
@@ -1288,6 +1756,7 @@ impl AddStep {
                                             .horizontal_alignment(HorizontalAlignment::Center)
                                             .font(CQ_MONO),
                                     )
+                                    .style(Theme::Blue)
                                     .on_press(AddStepMessage::Add(
                                         self.selected_destination.clone(),
                                         self.hover,
@@ -1309,22 +1778,28 @@ impl AddStep {
                     .push(Space::with_width(Length::Fill))
                     .push(
                         Column::new()
-                            .push(Checkbox::new(
-                                self.hover,
-                                "Hover Above",
-                                AddStepMessage::ToggleHover,
-                            ))
+                            .push(
+                                Checkbox::new(
+                                    self.hover,
+                                    "Hover Above",
+                                    AddStepMessage::ToggleHover,
+                                )
+                                .style(Theme::Blue),
+                            )
                             .padding(4)
                             .width(Length::Shrink),
                     )
                     .push(Space::with_width(Length::Units(25)))
                     .push(
                         Column::new()
-                            .push(Checkbox::new(
-                                self.wait,
-                                "Wait for User",
-                                AddStepMessage::ToggleWait,
-                            ))
+                            .push(
+                                Checkbox::new(
+                                    self.wait,
+                                    "Wait for User",
+                                    AddStepMessage::ToggleWait,
+                                )
+                                .style(Theme::Blue),
+                            )
                             .padding(4)
                             .width(Length::Shrink),
                     )
@@ -1391,4 +1866,224 @@ pub fn down_icon() -> Text {
 
 pub fn right_icon() -> Text {
     icon('\u{E803}')
+}
+fn update_recipe(tab: &mut Build) {
+    match &fs::read_to_string(format!(
+        "./recipes/{}.toml",
+        tab.search_value.as_ref().unwrap_or(&String::new())
+    )) {
+        Ok(toml_str) => {
+            let save_rec: SaveRecipe = toml::from_str(toml_str).unwrap();
+            let rec = Recipe {
+                required_inputs: Input {
+                    before: if let Some(b) = save_rec.required_inputs.before {
+                        b
+                    } else {
+                        Vec::new()
+                    },
+                    after: if let Some(a) = save_rec.required_inputs.after {
+                        a
+                    } else {
+                        Vec::new()
+                    },
+                },
+                steps: if let Some(s) = save_rec.steps {
+                    s
+                } else {
+                    Vec::new()
+                },
+            };
+            tab.before_inputs = rec.required_inputs.before.iter().fold(
+                Vec::with_capacity(rec.required_inputs.before.len()),
+                |mut v, input| {
+                    v.push(RequiredInput::new(input.clone()));
+                    v
+                },
+            );
+            tab.after_inputs = rec.required_inputs.after.iter().fold(
+                Vec::with_capacity(rec.required_inputs.after.len()),
+                |mut v, input| {
+                    v.push(RequiredInput::new(input.clone()));
+                    v
+                },
+            );
+            let steps_len = rec.steps.len();
+            tab.steps = rec.steps.into_iter().enumerate().fold(
+                Vec::with_capacity(steps_len),
+                |mut v, (i, step)| {
+                    v.push(BuildStep::new(
+                        Some(i + 1),
+                        steps_len,
+                        Rc::clone(&tab.nodes_ref),
+                        Rc::clone(&tab.actions_ref),
+                        Some(step.selected_destination),
+                        step.hover,
+                        Some(step.selected_action),
+                        step.hours_value,
+                        step.mins_value,
+                        step.secs_value,
+                        step.wait,
+                    ));
+                    v
+                },
+            );
+            tab.add_step.step_num = Some(steps_len + 1);
+            tab.add_step.steps_len = steps_len;
+            tab.modified_steps = tab.steps.clone();
+            tab.modified_after_inputs = tab.after_inputs.clone();
+            tab.modified_before_inputs = tab.before_inputs.clone();
+        }
+        // TODO: Display Error when unable to read file
+        Err(_err) => {
+            tab.modified_steps = Vec::new();
+            tab.modified_before_inputs = Vec::new();
+            tab.modified_after_inputs = Vec::new();
+            tab.steps = Vec::new();
+            tab.before_inputs = Vec::new();
+            tab.after_inputs = Vec::new();
+        }
+    }
+}
+
+fn save(tab: &mut Build) {
+    tab.save_bar.message = "Unsaved Changes!".to_string();
+    if tab.name_entry_value != String::new() {
+        tab.modified_before_inputs
+            .retain(|input| input.value != "".to_string());
+        tab.modified_after_inputs
+            .retain(|input| input.value != "".to_string());
+        let save_data = SaveRecipe {
+            required_inputs: SaveInput {
+                before: if tab.modified_before_inputs.len() > 0 {
+                    Some(tab.modified_before_inputs.iter().fold(
+                        Vec::with_capacity(tab.modified_before_inputs.len()),
+                        |mut v, input| {
+                            v.push(input.value.clone());
+                            v
+                        },
+                    ))
+                } else {
+                    None
+                },
+                after: if tab.modified_after_inputs.len() > 0 {
+                    Some(tab.modified_after_inputs.iter().fold(
+                        Vec::with_capacity(tab.modified_after_inputs.len()),
+                        |mut v, input| {
+                            v.push(input.value.clone());
+                            v
+                        },
+                    ))
+                } else {
+                    None
+                },
+            },
+            steps: if tab.modified_steps.len() > 0 {
+                Some(tab.modified_steps.iter().fold(
+                    Vec::with_capacity(tab.modified_steps.len()),
+                    |mut v, step| {
+                        v.push(Step {
+                            step_num: step.step_num.unwrap().to_string(),
+                            selected_destination: step.selected_destination.clone().unwrap(),
+                            hover: step.hover,
+                            selected_action: step.selected_action.clone().unwrap(),
+                            secs_value: step.secs_value.clone(),
+                            mins_value: step.mins_value.clone(),
+                            hours_value: step.hours_value.clone(),
+                            wait: step.wait,
+                        });
+                        v
+                    },
+                ))
+            } else {
+                None
+            },
+        };
+        // TODO: add error is unable to build toml
+        let old_recipe = fs::read_to_string(Path::new(&format!(
+            "./recipes/{}.toml",
+            &tab.search_value.as_ref().unwrap_or(&String::new()),
+        )))
+        .unwrap_or(format!("No old recipie '{}' is new", tab.name_entry_value));
+        tab.name_entry_value = replace_os_char(tab.name_entry_value.clone());
+        let new_recipe = toml::to_string_pretty(&save_data).unwrap();
+        match OpenOptions::new().write(true).open(Path::new(&format!(
+            "./recipes/{}.toml",
+            &tab.name_entry_value.replace(" ", ""),
+        ))) {
+            Ok(mut file) => {
+                // file already exists, thus we need to log that recipe was changed
+                write!(file, "{}", new_recipe).unwrap();
+                tab.logger.set_log_file(format!(
+                    "{}; Build - Changed '{}'",
+                    Local::now().to_rfc2822(),
+                    tab.name_entry_value,
+                ));
+                tab.logger.send_line(String::new()).unwrap();
+                tab.logger
+                    .send_line("Recipe changed from:".to_string())
+                    .unwrap();
+                tab.logger.send_line(old_recipe).unwrap();
+                tab.logger
+                    .send_line("\n\n\nRecipe changed to:".to_string())
+                    .unwrap();
+                tab.logger.send_line(new_recipe).unwrap();
+            }
+            Err(_) => {
+                // new file thus new recipie, log should state created recipe
+                let mut file = OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(Path::new(&format!(
+                        "./recipes/{}.toml",
+                        &tab.name_entry_value
+                    )))
+                    .unwrap();
+                write!(file, "{}", new_recipe).unwrap();
+                tab.logger.set_log_file(format!(
+                    "{}; Build - Created '{}'",
+                    Local::now().to_rfc2822(),
+                    tab.name_entry_value
+                ));
+                tab.logger.send_line(String::new()).unwrap();
+                tab.logger
+                    .send_line(format!("Created Recipe '{}' as:", tab.name_entry_value))
+                    .unwrap();
+                tab.logger.send_line(new_recipe).unwrap();
+            }
+        }
+        tab.steps = tab.modified_steps.clone();
+        tab.before_inputs = tab.modified_before_inputs.clone();
+        tab.after_inputs = tab.modified_after_inputs.clone();
+        tab.unsaved = false;
+        tab.unsaved_tabs.borrow_mut().insert(TabState::Build, false);
+        tab.search_value = Some(tab.name_entry_value.clone());
+        update_search(tab);
+        update_recipe(tab);
+        tab.state = BuildState::Steps;
+        // TODO: Have errors show to user if unable to save
+    } else {
+        tab.name_entry_value = String::new();
+        tab.steps = Vec::new();
+        tab.before_inputs = Vec::new();
+        tab.after_inputs = Vec::new();
+        tab.modified_steps = Vec::new();
+        tab.modified_before_inputs = Vec::new();
+        tab.modified_after_inputs = Vec::new();
+        update_search(tab);
+        update_recipe(tab);
+    }
+}
+fn update_search(tab: &mut Build) {
+    tab.search_options = fs::read_dir("./recipes")
+        .unwrap()
+        .fold(Vec::new(), |mut rec, file| {
+            if let Some(caps) = tab
+                .recipe_regex
+                .captures(&file.unwrap().file_name().to_str().unwrap())
+            {
+                rec.push(caps[0].to_string());
+            }
+            rec
+        });
+    tab.search_options.sort();
 }
