@@ -676,6 +676,8 @@ impl<'a> Application for Bathtub {
                                     Rc::clone(&ref_actions),
                                     unsaved_tabs.clone(),
                                     Rc::clone(&node_map),
+                                    Rc::clone(&homing_required),
+                                    Arc::clone(&current_node),
                                 ),
                             },
                             tab_bar: TabBar::new(unsaved_tabs),
@@ -901,6 +903,7 @@ impl<'a> Application for Bathtub {
                         } else {
                             RunState::Standard
                         };
+                        state.tabs.advanced.update_logs();
                     }
                     Message::RecipeDone(Err(_err)) => {
                         state.current_step = None;
@@ -909,6 +912,7 @@ impl<'a> Application for Bathtub {
                         let mut recipe_state = recipe_state.lock().unwrap();
                         *recipe_state = RecipeState::Stopped;
                         cvar.notify_all();
+                        state.tabs.advanced.update_logs();
                     }
                     Message::Tick => {
                         if let Some(rx) = &state.current_step {

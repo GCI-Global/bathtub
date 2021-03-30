@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use regex::Regex;
 use std::io::Write;
 use std::sync::{mpsc, Arc, Mutex};
@@ -6,6 +5,7 @@ use std::time::{Duration, Instant};
 use std::{str, thread};
 
 use chrono::prelude::*;
+use futures::future::result;
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 use std::io::BufRead;
 use std::io::BufReader;
@@ -63,6 +63,12 @@ impl Grbl {
         } else {
             None
         }
+    }
+    pub fn clear_all(&mut self) {
+        let mut rb = self.response_buffer.lock().unwrap();
+        let mut cb = self.command_buffer.lock().unwrap();
+        *rb = Vec::new();
+        *cb = Vec::new();
     }
     pub fn is_ok(&self) -> bool {
         self.ok_tx.send(()).is_ok()
@@ -144,14 +150,17 @@ fn get_port() -> Box<dyn SerialPort> {
     let ports = serialport::available_ports().expect("no ports available");
     for p in ports {
         if let Ok(mut port) = serialport::new(p.port_name, 115_200)
-            //.timeout(Duration::from_secs(60))
+            .parity(Parity::None)
+            .data_bits(DataBits::Eight)
+            .stop_bits(StopBits::One)
+            .flow_control(FlowControl::None)
+            .timeout(if cfg!(windows) {
+                Duration::from_millis(50)
+            } else {
+                Duration::from_secs(60)
+            })
             .open()
         {
-            port.set_timeout(Duration::from_secs(60)).unwrap();
-            port.set_parity(Parity::None).unwrap();
-            port.set_data_bits(DataBits::Eight).unwrap();
-            port.set_stop_bits(StopBits::One).unwrap();
-            port.set_flow_control(FlowControl::None).unwrap();
             return port;
         }
     }
@@ -160,18 +169,15 @@ fn get_port() -> Box<dyn SerialPort> {
 
 // used by the new() thread to send to grbl and parse response
 pub fn send(port: &mut Box<dyn SerialPort>, command: &mut Command) {
-    port.flush().unwrap();
     let buf = format!("{}\n", command.command).as_bytes().to_owned();
     port.write(&buf[..]).unwrap();
-    //let mut reader = BufReader::new(port);
     loop {
-        // read until caridge return kek from grbl
         match read_until(0xA, port) {
-            //reader.read_until(0xD, &mut read_buf) {
             Ok(line) => {
                 command.response_time = Some(Local::now());
                 match &command.command[..] {
                     "$$" => command.result = Some(line),
+                    "$N" => command.result = Some(line),
                     _ => command.result = Some(line.replace("\n", "").replace("\r", "")),
                 }
                 break;
@@ -180,7 +186,36 @@ pub fn send(port: &mut Box<dyn SerialPort>, command: &mut Command) {
         }
     }
 }
-
+cfg_if::cfg_if! {
+if #[cfg(windows)] {
+fn read_until(c: u8, port: &mut Box<dyn SerialPort>) -> Result<String, std::io::Error> {
+    //let mut reader = BufReader::new(port);
+    let mut buf: Vec<u8> = vec![0;32];
+    let mut result_buf: Vec<u8> = Vec::new();
+    let mut cont = true;
+    while cont {
+        match port.read(&mut buf) {
+            Ok(num) => {
+                result_buf.extend_from_slice(&buf[..]);
+                if result_buf[0] != 0x24 {
+                    result_buf = result_buf.into_iter().take_while(|u| *u != 0xA).collect();
+                } else {
+                    let len1 = result_buf.len();
+                    result_buf = result_buf.into_iter().take_while(|u| *u != 0x6F).collect();
+                    let len2 = result_buf.len();
+                    if len1 != len2 {result_buf.pop();}
+                }
+            }
+            Err(err) => {
+                if **result_buf.last().as_ref().unwrap_or(&&0x1) == 0xD ||
+                    **result_buf.last().as_ref().unwrap_or(&&0x1) == 0x47 ||
+                    **result_buf.first().as_ref().unwrap_or(&&0x1) == 0x0 {cont = false}
+            },
+        }
+    }
+    Ok(str::from_utf8(&result_buf[..]).unwrap().to_string())
+}
+} else {
 fn read_until(c: u8, port: &mut Box<dyn SerialPort>) -> Result<String, std::io::Error> {
     let mut reader = BufReader::new(port);
     let mut buf: Vec<u8> = Vec::new();
@@ -204,4 +239,6 @@ fn read_until(c: u8, port: &mut Box<dyn SerialPort>) -> Result<String, std::io::
         }
         reader.consume(len);
     }
+}
+}
 }

@@ -1,6 +1,7 @@
 use super::grbl::{Command as Cmd, Grbl};
 use super::logger::Logger;
 use super::nodes::{Node, Nodes};
+use super::paths::gen_node_paths;
 use super::style::style::Theme;
 use crate::{RecipeState, CQ_MONO};
 use chrono::prelude::*;
@@ -12,6 +13,8 @@ use regex::Regex;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::Duration;
 
 pub struct Manual {
     pub scroll: scrollable::State,
@@ -121,7 +124,6 @@ impl Manual {
                 } else if val.contains("M")
                     || val.contains("P")
                     || val.contains("C")
-                    || val.contains("N")
                     || val == "$G".to_string()
                 {
                     self.terminal_responses.insert(
@@ -209,9 +211,35 @@ impl Manual {
                 )
                 .push(Space::with_width(Length::Fill)),
         );
-
+        let paths_r_safe: bool;
+        {
+            paths_r_safe = !ref_nodes.node.iter().any(|n| {
+                if &n.name[..] == "HOME" {
+                    false
+                } else {
+                    gen_node_paths(&*ref_nodes, &*current_node, n).is_err()
+                }
+            });
+        }
         match self.state {
             ManualState::Grid => {
+                let paths_warning = Container::new(
+                    Row::with_children(vec![
+                        Space::with_width(Length::Fill).into(),
+                        Text::new(
+                            "Not all paths from the current node are safe!\n\
+                      This is an isssue with the neighbors of each node.\n\
+                      Neighbors are configurable one way safe paths between nodes.\n\
+                      Paths are built while the recipe is running,\n\
+                      and will traverse the fewest neighbors between steps.\n\
+                      Change the neighbors in 'Advanced' -> 'Nodes'",
+                        )
+                        .into(),
+                        Space::with_width(Length::Fill).into(),
+                    ])
+                    .padding(10),
+                )
+                .style(Theme::Red);
                 let button_grid = self
                     .bath_btns
                     .iter_mut()
@@ -320,13 +348,23 @@ impl Manual {
                         }),
                     );
 
-                let content = Column::new()
-                    .max_width(800)
-                    .spacing(20)
-                    .push(title)
-                    .push(tab_btns)
-                    .push(button_grid)
-                    .push(modifiers);
+                let content = if paths_r_safe {
+                    Column::new()
+                        .max_width(800)
+                        .spacing(20)
+                        .push(title)
+                        .push(tab_btns)
+                        .push(button_grid)
+                        .push(modifiers)
+                } else {
+                    Column::new()
+                        .max_width(800)
+                        .spacing(20)
+                        .push(title)
+                        .push(tab_btns)
+                        .push(paths_warning)
+                        .push(modifiers)
+                };
 
                 Scrollable::new(&mut self.scroll)
                     .padding(40)
@@ -374,6 +412,7 @@ impl Manual {
 }
 
 async fn command_please(grbl: Grbl) -> Option<Cmd> {
+    thread::sleep(Duration::from_secs(1));
     grbl.pop_command()
 }
 

@@ -22,6 +22,7 @@ use std::fs;
 use std::mem::discriminant;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 pub const LOGS: &str = "./logs";
 pub const LOG_MAX: usize = 100; // max number of logs to show
@@ -72,6 +73,8 @@ impl Advanced {
         ref_actions: Rc<RefCell<Actions>>,
         parent_unsaved_tabs: Rc<RefCell<HashMap<ParentTabState, bool>>>,
         node_map: Rc<RefCell<HashMap<String, usize>>>,
+        homing_required: Rc<RefCell<bool>>,
+        current_node: Arc<Mutex<Node>>,
     ) -> Self {
         let mut unsaved_tabs_local = HashMap::with_capacity(3);
         unsaved_tabs_local.insert(TabState::Nodes, false);
@@ -83,7 +86,14 @@ impl Advanced {
             state: TabState::Logs,
             tab_bar: TabBar::new(unsaved_tabs.clone()),
             grbl_tab: GrblTab::new(grbl, Vec::new(), logger.clone(), unsaved_tabs.clone()),
-            nodes_tab: NodeTab::new(ref_nodes, logger.clone(), unsaved_tabs.clone(), node_map),
+            nodes_tab: NodeTab::new(
+                ref_nodes,
+                logger.clone(),
+                unsaved_tabs.clone(),
+                node_map,
+                homing_required,
+                current_node,
+            ),
             actions_tab: ActionTab::new(ref_actions, logger, unsaved_tabs.clone()),
             logs_tab: LogTab::new(),
             parent_unsaved_tabs,
@@ -103,6 +113,7 @@ impl Advanced {
                         }
                         if let Some(cmd) = self.grbl_tab.grbl.safe_pop() {
                             if cmd.command == "$I".to_string() {
+                                self.grbl_tab.grbl.clear_all();
                                 let r = Regex::new(r"[0-9]*\.+[0-9]*[a-z]*").unwrap();
                                 let r2 = Regex::new(r"[0-9]{8}").unwrap();
                                 if let Some(caps) = r.captures(&(cmd.result.as_ref().unwrap()[..]))
@@ -126,6 +137,7 @@ impl Advanced {
                         }
                         if let Some(cmd) = self.grbl_tab.grbl.safe_pop() {
                             if cmd.command == "$$".to_string() {
+                                self.grbl_tab.grbl.clear_all();
                                 self.grbl_tab.modified_settings = cmd.result.unwrap().lines().fold(
                                     Vec::new(),
                                     |mut v, response| {
@@ -544,11 +556,10 @@ impl GrblTab {
                                     "{} {}. Settings Reverted.",
                                     cmd.command,
                                     cmd.result.unwrap()
-                                )
+                                );
+                                self.modified_settings = self.settings.clone();
                             }
-                            if cmd.command
-                                == format!("{}={}", final_cmd.text, final_cmd.input_value)
-                            {
+                            if self.grbl.response_buffer.lock().unwrap().len() == 0 {
                                 break;
                             }
                         }
@@ -726,6 +737,8 @@ struct NodeTab {
     logger: Logger,
     unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
     node_map: Rc<RefCell<HashMap<String, usize>>>,
+    homing_required: Rc<RefCell<bool>>,
+    current_node: Arc<Mutex<Node>>,
 }
 
 #[derive(Debug, Clone)]
@@ -742,6 +755,8 @@ impl NodeTab {
         logger: Logger,
         unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
         node_map: Rc<RefCell<HashMap<String, usize>>>,
+        homing_required: Rc<RefCell<bool>>,
+        current_node: Arc<Mutex<Node>>,
     ) -> Self {
         // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
         // nested iter if to flatten the 3d nodes
@@ -806,6 +821,8 @@ impl NodeTab {
             logger,
             unsaved_tabs,
             node_map,
+            homing_required,
+            current_node,
         }
     }
 
@@ -980,7 +997,7 @@ impl NodeTab {
                 {
                     self.save_bar.message = "Clear all errors below, and save again.".to_string();
                 } else {
-                    self.save_bar.message = "Unsaved Changed!".to_string();
+                    self.save_bar.message = "Unsaved Changes!".to_string();
                     // because this code is bad, merge the data stored in two
                     // separate locations.
                     let mut nodes = self.modified_nodes.borrow().clone();
@@ -1012,6 +1029,14 @@ impl NodeTab {
                     fs::write("./config/baths.toml", &new_toml).expect("Unable to save baths");
                     // update application with saved data
                     *self.node_map.borrow_mut() = get_nodemap(&nodes);
+                    *self.homing_required.borrow_mut() = true;
+                    *self.current_node.lock().unwrap() = nodes.node[self
+                        .node_map
+                        .borrow()
+                        .get(&"HOME".to_string())
+                        .unwrap()
+                        .clone()]
+                    .clone();
                     (*self.ref_nodes.borrow_mut()).node = nodes.node;
 
                     // log the changes
@@ -2515,11 +2540,11 @@ impl LogTab {
             // convert from title to sort by seconds, just sorting by name sorts by day
             let b_caps = date_regex.captures(&b.title[..]).unwrap();
             let a_caps = date_regex.captures(&a.title[..]).unwrap();
-            DateTime::parse_from_rfc2822(&b_caps[0])
+            DateTime::parse_from_rfc2822(&b_caps[0].replace("_", ":"))
                 .unwrap()
                 .timestamp()
                 .cmp(
-                    &DateTime::parse_from_rfc2822(&a_caps[0])
+                    &DateTime::parse_from_rfc2822(&a_caps[0].replace("_", ":"))
                         .unwrap()
                         .timestamp(),
                 )

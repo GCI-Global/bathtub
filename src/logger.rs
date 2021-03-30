@@ -87,8 +87,7 @@ impl Logger {
 cfg_if::cfg_if! {
     if #[cfg(windows)] {
 fn get_username() -> Option<String> {
-    //Some(env!("USERNAME").to_string())
-    Some("Currently unavailable on windows".to_string())
+    Some(env!("USERNAME").to_string())
 }
 } else {
     fn get_username() -> Option<String> {
