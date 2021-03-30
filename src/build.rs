@@ -814,13 +814,6 @@ struct BuildStepErrors {
 }
 
 impl BuildStepErrors {
-    fn new() -> Self {
-        BuildStepErrors {
-            destination: false,
-            action: false,
-            time: false,
-        }
-    }
     fn all(&self) -> Vec<bool> {
         vec![self.destination, self.action, self.time]
     }
@@ -1087,14 +1080,14 @@ impl BuildStep {
 
     fn view(&mut self) -> Element<StepMessage> {
         if self.errors.destination {
-            if let Some(dest) = &self.selected_destination {
-                self.set_error(format!("Selected destination not found in Nodes.\nEither select another destination, or go to\nAdvanced -> Nodes and rename/add a node with the name '{}'.", dest));
+            if let Some(_dest) = &self.selected_destination {
+                self.set_error(format!("Selected destination not found in Nodes.\nEither select another destination, or go to\nAdvanced -> Nodes and rename/add a node with the name '{}'.", self.selected_destination.as_ref().unwrap()));
             } else {
                 self.set_error("Select a destination.");
             }
         } else if self.errors.action {
-            if let Some(act) = &self.selected_action {
-                self.set_error(format!("Selected action not found.\nEither select another action, or go to\nAdvanced -> Actions and rename/add an action with the name '{}'.", act));
+            if let Some(_act) = &self.selected_action {
+                self.set_error(format!("Selected action not found.\nEither select another action, or go to\nAdvanced -> Actions and rename/add an action with the name '{}'.", self.selected_action.as_ref().unwrap()));
             } else {
                 self.set_error("Select an action.");
             }
@@ -1850,14 +1843,6 @@ pub fn pause_icon() -> Text {
 
 pub fn attention_icon() -> Text {
     icon('\u{E806}')
-}
-
-pub fn close_icon() -> Text {
-    icon('\u{E807}')
-}
-
-pub fn edit_icon() -> Text {
-    icon('\u{E808}')
 }
 
 pub fn down_icon() -> Text {

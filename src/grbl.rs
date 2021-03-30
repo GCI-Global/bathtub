@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 use std::{str, thread};
 
 use chrono::prelude::*;
-use futures::future::result;
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 use std::io::BufRead;
 use std::io::BufReader;
@@ -149,7 +148,7 @@ pub fn new() -> Grbl {
 fn get_port() -> Box<dyn SerialPort> {
     let ports = serialport::available_ports().expect("no ports available");
     for p in ports {
-        if let Ok(mut port) = serialport::new(p.port_name, 115_200)
+        if let Ok(port) = serialport::new(p.port_name, 115_200)
             .parity(Parity::None)
             .data_bits(DataBits::Eight)
             .stop_bits(StopBits::One)

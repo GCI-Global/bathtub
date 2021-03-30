@@ -13,7 +13,7 @@ use actions::Actions;
 use advanced::{Advanced, AdvancedMessage, NodeTabMessage};
 use build::{Build, BuildMessage};
 use chrono::prelude::*;
-use grbl::{Command as Cmd, Grbl, Status};
+use grbl::{Command as Cmd, Grbl};
 use logger::Logger;
 use manual::{Manual, ManualMessage};
 use nodes::{Node, Nodes};
@@ -56,7 +56,6 @@ struct State {
     grbl: Grbl,
     connected: bool,
     logger: Logger,
-    grbl_status: Option<Arc<Mutex<Option<Status>>>>,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
     current_step: Option<mpsc::Receiver<Option<usize>>>,
 }
@@ -74,7 +73,7 @@ impl State {
         nodes: Nodes,
         actions: Actions,
         current_step_sender: mpsc::Sender<Option<usize>>,
-    ) -> Result<(), Errors> {
+    ) -> Result<(), ()> {
         if (*current_node.lock().unwrap()).name[..] == *"HOME" {
             let state: RecipeState;
             {
@@ -574,14 +573,9 @@ enum LoadError {
 }
 
 #[derive(Debug, Clone)]
-enum Errors {
-    GRBLError,
-}
-
-#[derive(Debug, Clone)]
 enum Message {
     TabBar(TabBarMessage),
-    RecipeDone(Result<(), Errors>),
+    RecipeDone(Result<(), ()>),
     Manual(ManualMessage),
     Build(BuildMessage),
     Run(RunMessage),
@@ -691,7 +685,6 @@ impl<'a> Application for Bathtub {
                             grbl: grbl.clone(),
                             connected: true,
                             logger: logger.clone(),
-                            grbl_status: None,
                             recipe_state: Arc::clone(&recipe_state),
                             current_step: None,
                         });
@@ -891,7 +884,6 @@ impl<'a> Application for Bathtub {
                             .logger
                             .send_line(format!("{} => Done", Local::now().to_rfc2822()))
                             .unwrap();
-                        state.grbl_status = Some(Arc::clone(&state.grbl.mutex_status));
                         {
                             let (recipe_state, cvar) = &*state.recipe_state;
                             let mut recipe_state = recipe_state.lock().unwrap();

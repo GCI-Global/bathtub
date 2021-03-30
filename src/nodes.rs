@@ -31,11 +31,6 @@ pub struct Nodes {
     pub node: Vec<Node>,
 }
 
-#[derive(Debug, Clone)]
-pub struct NodeGrid2d {
-    pub grid: Vec<Vec<Option<Node>>>,
-}
-
 impl Nodes {
     pub fn new() -> Nodes {
         Nodes { node: vec![] }
@@ -85,67 +80,6 @@ impl Nodes {
             })
         }
         self.node = new_nodes;
-    }
-}
-
-// A 2d positioning relative grid split on the y axis where:
-// vec![Node Node None Node]
-// vec![None None Node Node]
-impl NodeGrid2d {
-    fn new(grid: Vec<Vec<Option<Node>>>) -> NodeGrid2d {
-        NodeGrid2d { grid }
-    }
-    pub fn from_nodes(nodes: Nodes) -> NodeGrid2d {
-        let mut node_vec = nodes.node.clone();
-        // sort by y
-        node_vec.retain(|n| !n.name.contains("_hover"));
-        node_vec.sort_by(|a, b| (b.y).total_cmp(&a.y));
-        // split into many y vecs
-        let mut test_value: f32 = node_vec[0].y;
-        let mut push_vec: usize = 0;
-        let mut build_grid: Vec<Vec<Node>> = vec![Vec::new()];
-        for node in node_vec {
-            if (node.y - test_value).abs() < 1.0 {
-                build_grid[push_vec].push(node);
-            } else {
-                push_vec += 1;
-                test_value = node.y;
-                build_grid.push(Vec::new());
-                build_grid[push_vec].push(node);
-            }
-        }
-        for i in 0..build_grid.len() {
-            build_grid[i].sort_by(|a, b| (b.x).total_cmp(&a.x));
-        }
-        // find index of longest axis
-        let longest_axis = build_grid
-            .clone()
-            .into_iter()
-            .max_by(|x, y| x.len().cmp(&y.len()))
-            .unwrap();
-
-        // normalize row lengths with 'None' values
-        let mut relative_grid: Vec<Vec<Option<Node>>> =
-            build_grid
-                .clone()
-                .into_iter()
-                .fold(Vec::new(), |mut row, axis_vec| {
-                    row.push(axis_vec.into_iter().fold(Vec::new(), |mut axis, node| {
-                        axis.push(Some(node));
-                        axis
-                    }));
-                    row
-                });
-        for i in 0..build_grid.len() {
-            for j in 0..longest_axis.len() {
-                if j == relative_grid[i].len()
-                    || longest_axis[j].x - relative_grid[i][j].clone().unwrap().x > 1.0
-                {
-                    relative_grid[i].insert(j, None)
-                }
-            }
-        }
-        NodeGrid2d::new(relative_grid)
     }
 }
 

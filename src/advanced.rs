@@ -542,7 +542,6 @@ impl GrblTab {
                     )));
                 }
                 let mut error = false;
-                if let Some(final_cmd) = self.settings.last() {
                     loop {
                         if let Some(cmd) = self.grbl.pop_command() {
                             if cmd
@@ -564,7 +563,6 @@ impl GrblTab {
                             }
                         }
                     }
-                }
                 if error {
                     for setting in &self.settings {
                         self.grbl.push_command(Cmd::new(format!(
