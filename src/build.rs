@@ -2,8 +2,7 @@ use super::actions::Actions;
 use super::advanced::{validate_nums, SaveBar, SaveBarMessage, ValidateNums};
 use super::logger::{replace_os_char, Logger};
 use super::nodes::Nodes;
-use super::run::do_nothing;
-use super::run::Step;
+use super::run::{do_nothing, Step};
 use super::style::style::Theme;
 use crate::{TabState, CQ_MONO};
 use chrono::prelude::*;
@@ -21,6 +20,8 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
+//use std::thread;
+//use std::time::Duration;
 
 pub struct Build {
     unsaved: bool,
@@ -1988,16 +1989,24 @@ fn save(tab: &mut Build) {
             "./recipes/{}.toml",
             &tab.search_value.as_ref().unwrap_or(&String::new()),
         )))
-        .unwrap_or(format!("No old recipie '{}' is new", tab.name_entry_value));
+        .unwrap_or(format!("No old recipe '{}' is new", tab.name_entry_value));
         tab.name_entry_value = replace_os_char(tab.name_entry_value.clone());
         let new_recipe = toml::to_string_pretty(&save_data).unwrap();
         match OpenOptions::new().write(true).open(Path::new(&format!(
             "./recipes/{}.toml",
             &tab.name_entry_value.replace(" ", ""),
         ))) {
-            Ok(mut file) => {
+            Ok(_file) => {
                 // file already exists, thus we need to log that recipe was changed
-                write!(file, "{}", new_recipe).unwrap();
+                // write!(file, "{}", new_recipe).unwrap();
+                fs::write(
+                    format!(
+                        "./recipes/{}.toml",
+                        replace_os_char(tab.name_entry_value.clone())
+                    ),
+                    new_recipe.clone(),
+                )
+                .unwrap();
                 tab.logger.set_log_file(format!(
                     "{}; Build - Changed '{}'",
                     Local::now().to_rfc2822(),
@@ -2014,7 +2023,7 @@ fn save(tab: &mut Build) {
                 tab.logger.send_line(new_recipe).unwrap();
             }
             Err(_) => {
-                // new file thus new recipie, log should state created recipe
+                // new file thus new recip/e, log should state created recipe
                 let mut file = OpenOptions::new()
                     .create(true)
                     .write(true)

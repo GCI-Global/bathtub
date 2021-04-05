@@ -1,63 +1,63 @@
 [[node]]
 name = 'MCL-16'
-x = -1.1
+x = -1.0
 y = -0.3
-z = -10.1
+z = -10.552
 hide = false
 neighbors = ['Rinse 1']
 
 [[node]]
-name = 'HNO₃'
-x = -11.2
+name = 'HNO3'
+x = -11.3
 y = -0.3
-z = -10.4
+z = -10.552
 hide = false
 neighbors = ['Rinse 2']
 
 [[node]]
 name = 'Zn'
-x = -21.2
+x = -21.4
 y = -0.3
-z = -10.3
+z = -10.552
 hide = false
 neighbors = ['Rinse 3']
 
 [[node]]
 name = 'HF'
-x = -31.3
+x = -31.448
 y = -0.3
-z = -10.6
+z = -10.552
 hide = false
 neighbors = ['Rinse 4']
 
 [[node]]
 name = 'Ni'
-x = -41.3
+x = -41.548
 y = -0.3
-z = -10.5
+z = -10.552
 hide = false
 neighbors = ['Rinse 5']
 
 [[node]]
 name = 'Pd'
-x = -51.4
+x = -51.6
 y = -0.3
-z = -10.4
+z = -10.552
 hide = false
 neighbors = ['Rinse 6']
 
 [[node]]
 name = 'Au'
-x = -61.5
+x = -61.748
 y = -0.3
-z = -10.2
+z = -10.552
 hide = false
 neighbors = ['Rinse 7']
 
 [[node]]
 name = 'HOME'
 x = -1.0
-y = -14.5
+y = -14.3
 z = -1.0
 hide = true
 neighbors = ['Rinse 1']
@@ -66,7 +66,7 @@ neighbors = ['Rinse 1']
 name = 'Rinse 1'
 x = -1.0
 y = -13.1
-z = -10.0
+z = -10.952
 hide = false
 neighbors = [
     'MCL-16',
@@ -75,21 +75,21 @@ neighbors = [
 
 [[node]]
 name = 'Rinse 2'
-x = -11.1
+x = -11.3
 y = -13.1
-z = -10.0
+z = -10.952
 hide = false
 neighbors = [
-    'HNO₃',
+    'HNO3',
     'Rinse 1',
     'Rinse 3',
 ]
 
 [[node]]
 name = 'Rinse 3'
-x = -21.1
+x = -21.4
 y = -13.1
-z = -10.0
+z = -10.952
 hide = false
 neighbors = [
     'Zn',
@@ -99,9 +99,9 @@ neighbors = [
 
 [[node]]
 name = 'Rinse 4'
-x = -31.2
+x = -31.448
 y = -13.1
-z = -10.0
+z = -10.952
 hide = false
 neighbors = [
     'HF',
@@ -111,9 +111,9 @@ neighbors = [
 
 [[node]]
 name = 'Rinse 5'
-x = -41.3
+x = -41.548
 y = -13.1
-z = -10.0
+z = -10.3
 hide = false
 neighbors = [
     'Ni',
@@ -123,9 +123,9 @@ neighbors = [
 
 [[node]]
 name = 'Rinse 6'
-x = -51.4
+x = -51.6
 y = -13.1
-z = -10.0
+z = -10.952
 hide = false
 neighbors = [
     'Pd',
@@ -135,11 +135,19 @@ neighbors = [
 
 [[node]]
 name = 'Rinse 7'
-x = -61.5
+x = -61.748
 y = -13.1
-z = -10.0
+z = -10.952
 hide = false
 neighbors = [
     'Au',
     'Rinse 6',
 ]
+
+[[node]]
+name = 'HOME 2'
+x = -1.0
+y = -13.1
+z = -1.0
+hide = true
+neighbors = ['Rinse 1']

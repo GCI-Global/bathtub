@@ -3,7 +3,7 @@ use super::logger::Logger;
 use super::nodes::{get_nodemap, Node, Nodes};
 use super::run::do_nothing;
 use super::style::style::Theme;
-use crate::{TabState as ParentTabState, CQ_MONO};
+use crate::{NodeTracker, TabState as ParentTabState, CQ_MONO};
 use iced::{
     button, pick_list, scrollable, text_input, tooltip, Align, Button, Checkbox, Column, Command,
     Container, Element, HorizontalAlignment, Length, PickList, Row, Scrollable, Space, Text,
@@ -74,7 +74,7 @@ impl Advanced {
         parent_unsaved_tabs: Rc<RefCell<HashMap<ParentTabState, bool>>>,
         node_map: Rc<RefCell<HashMap<String, usize>>>,
         homing_required: Rc<RefCell<bool>>,
-        current_node: Arc<Mutex<Node>>,
+        node_tracker: Arc<Mutex<NodeTracker>>,
     ) -> Self {
         let mut unsaved_tabs_local = HashMap::with_capacity(3);
         unsaved_tabs_local.insert(TabState::Nodes, false);
@@ -92,7 +92,7 @@ impl Advanced {
                 unsaved_tabs.clone(),
                 node_map,
                 homing_required,
-                current_node,
+                node_tracker,
             ),
             actions_tab: ActionTab::new(ref_actions, logger, unsaved_tabs.clone()),
             logs_tab: LogTab::new(),
@@ -108,8 +108,10 @@ impl Advanced {
                 if !self.grbl_tab.unsaved {
                     self.grbl_tab.grbl.push_command(Cmd::new("$I".to_string()));
                     loop {
-                        if self.grbl_tab.grbl.queue_len() < 2 {
-                            self.grbl_tab.grbl.push_command(Cmd::new("$I".to_string()));
+                        if let Some(num) = self.grbl_tab.grbl.queue_len() {
+                            if num < 2 {
+                                self.grbl_tab.grbl.push_command(Cmd::new("$I".to_string()));
+                            }
                         }
                         if let Some(cmd) = self.grbl_tab.grbl.safe_pop() {
                             if cmd.command == "$I".to_string() {
@@ -132,8 +134,10 @@ impl Advanced {
                     }
                     self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
                     loop {
-                        if self.grbl_tab.grbl.queue_len() < 2 {
-                            self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
+                        if let Some(num) = self.grbl_tab.grbl.queue_len() {
+                            if num < 2 {
+                                self.grbl_tab.grbl.push_command(Cmd::new("$$".to_string()));
+                            }
                         }
                         if let Some(cmd) = self.grbl_tab.grbl.safe_pop() {
                             if cmd.command == "$$".to_string() {
@@ -542,27 +546,29 @@ impl GrblTab {
                     )));
                 }
                 let mut error = false;
-                    loop {
-                        if let Some(cmd) = self.grbl.pop_command() {
-                            if cmd
-                                .result
-                                .as_ref()
-                                .unwrap_or(&String::new())
-                                .contains("error")
-                            {
-                                error = true;
-                                self.save_bar.message = format!(
-                                    "{} {}. Settings Reverted.",
-                                    cmd.command,
-                                    cmd.result.unwrap()
-                                );
-                                self.modified_settings = self.settings.clone();
-                            }
-                            if self.grbl.response_buffer.lock().unwrap().len() == 0 {
+                loop {
+                    if let Some(cmd) = self.grbl.pop_command() {
+                        if cmd
+                            .result
+                            .as_ref()
+                            .unwrap_or(&String::new())
+                            .contains("error")
+                        {
+                            error = true;
+                            self.save_bar.message = format!(
+                                "{} {}. Settings Reverted.",
+                                cmd.command,
+                                cmd.result.unwrap()
+                            );
+                            self.modified_settings = self.settings.clone();
+                        }
+                        if let Some(num) = self.grbl.recv_queue_len() {
+                            if num == 0 {
                                 break;
                             }
                         }
                     }
+                }
                 if error {
                     for setting in &self.settings {
                         self.grbl.push_command(Cmd::new(format!(
@@ -736,7 +742,7 @@ struct NodeTab {
     unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
     node_map: Rc<RefCell<HashMap<String, usize>>>,
     homing_required: Rc<RefCell<bool>>,
-    current_node: Arc<Mutex<Node>>,
+    node_tracker: Arc<Mutex<NodeTracker>>,
 }
 
 #[derive(Debug, Clone)]
@@ -754,7 +760,7 @@ impl NodeTab {
         unsaved_tabs: Rc<RefCell<HashMap<TabState, bool>>>,
         node_map: Rc<RefCell<HashMap<String, usize>>>,
         homing_required: Rc<RefCell<bool>>,
-        current_node: Arc<Mutex<Node>>,
+        node_tracker: Arc<Mutex<NodeTracker>>,
     ) -> Self {
         // for abstraction purposes, UI interaction is 2d, but data storage is 3d, this
         // nested iter if to flatten the 3d nodes
@@ -820,7 +826,7 @@ impl NodeTab {
             unsaved_tabs,
             node_map,
             homing_required,
-            current_node,
+            node_tracker,
         }
     }
 
@@ -1028,7 +1034,7 @@ impl NodeTab {
                     // update application with saved data
                     *self.node_map.borrow_mut() = get_nodemap(&nodes);
                     *self.homing_required.borrow_mut() = true;
-                    *self.current_node.lock().unwrap() = nodes.node[self
+                    self.node_tracker.lock().unwrap().current = nodes.node[self
                         .node_map
                         .borrow()
                         .get(&"HOME".to_string())

@@ -6,8 +6,6 @@ use std::{str, thread};
 
 use chrono::prelude::*;
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
-use std::io::BufRead;
-use std::io::BufReader;
 
 // used to clean up code when this file is imporded into another
 #[derive(Debug, Clone)]
@@ -52,38 +50,57 @@ impl Grbl {
         cb.insert(0, command)
     }
     pub fn pop_command(&self) -> Option<Command> {
-        let mut rb = self.response_buffer.lock().unwrap();
-        rb.pop()
-    }
-    pub fn safe_pop(&self) -> Option<Command> {
-        let mut rb = self.response_buffer.lock().unwrap();
-        if rb.len() > 0 {
+        if let Ok(mut rb) = self.response_buffer.try_lock() {
             rb.pop()
         } else {
             None
         }
     }
-    pub fn clear_all(&mut self) {
+    pub fn safe_pop(&self) -> Option<Command> {
+        if let Ok(mut rb) = self.response_buffer.try_lock() {
+            if rb.len() > 0 {
+                rb.pop()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+    pub fn clear_all(&self) {
         let mut rb = self.response_buffer.lock().unwrap();
         let mut cb = self.command_buffer.lock().unwrap();
-        *rb = Vec::new();
-        *cb = Vec::new();
+        rb.clear();
+        cb.clear();
     }
     pub fn is_ok(&self) -> bool {
         self.ok_tx.send(()).is_ok()
     }
     pub fn get_status(&self) -> Option<Status> {
-        self.mutex_status.lock().unwrap().clone()
+        if let Ok(status) = self.mutex_status.try_lock() {
+            status.clone()
+        } else {
+            None
+        }
     }
     pub fn clear_responses(&self) -> Vec<Command> {
         let mut rb = self.response_buffer.lock().unwrap();
         let rb_c = rb.clone();
-        *rb = Vec::new();
+        rb.clear();
         rb_c
     }
-    pub fn queue_len(&self) -> usize {
-        let cb = self.command_buffer.lock().unwrap();
-        cb.len()
+    pub fn queue_len(&self) -> Option<usize> {
+        match self.command_buffer.lock() {
+            Ok(cb) => return Some(cb.len()),
+            Err(_) => None,
+        }
+    }
+    pub fn recv_queue_len(&self) -> Option<usize> {
+        if let Ok(rb) = self.response_buffer.try_lock() {
+            Some(rb.len())
+        } else {
+            None
+        }
     }
 }
 
@@ -108,7 +125,13 @@ pub fn new() -> Grbl {
             match ok_rx.try_recv() {
                 _ => {}
             };
-            if now.elapsed().as_millis() >= 100 && cb_c.lock().unwrap().len() == 0 {
+            if now.elapsed().as_millis() >= 100
+                && if let Ok(cb) = cb_c.try_lock() {
+                    cb.len() == 0
+                } else {
+                    false
+                }
+            {
                 now = Instant::now();
                 port.flush().unwrap();
                 send(&mut port, &mut current_status);
@@ -122,16 +145,17 @@ pub fn new() -> Grbl {
                     current_status.response_time = None;
                     current_status.result = None;
                     port.flush().unwrap();
-                    let mut lctn = status.lock().unwrap();
-                    *lctn = Some(loc);
+                    if let Ok(mut lctn) = status.try_lock() {
+                        *lctn = Some(loc);
+                    }
                 }
             } else {
-                let mut cb = cb_c.lock().unwrap();
-                //while cb.len() > 0 {
-                if let Some(mut cmd) = cb.pop() {
-                    let mut rb = rb_c.lock().unwrap();
-                    send(&mut port, &mut cmd);
-                    rb.push(cmd);
+                if let Ok(mut cb) = cb_c.try_lock() {
+                    if let Some(mut cmd) = cb.pop() {
+                        send(&mut port, &mut cmd);
+                        let mut rb = rb_c.lock().unwrap();
+                        rb.push(cmd);
+                    }
                 }
             }
         }
@@ -169,7 +193,7 @@ fn get_port() -> Box<dyn SerialPort> {
 // used by the new() thread to send to grbl and parse response
 pub fn send(port: &mut Box<dyn SerialPort>, command: &mut Command) {
     let buf = format!("{}\n", command.command).as_bytes().to_owned();
-    port.write(&buf[..]).unwrap();
+    port.write_all(&buf[..]).unwrap();
     loop {
         match read_until(0xA, port) {
             Ok(line) => {
@@ -187,35 +211,41 @@ pub fn send(port: &mut Box<dyn SerialPort>, command: &mut Command) {
 }
 cfg_if::cfg_if! {
 if #[cfg(windows)] {
-fn read_until(c: u8, port: &mut Box<dyn SerialPort>) -> Result<String, std::io::Error> {
+fn read_until(_c: u8, port: &mut Box<dyn SerialPort>) -> Result<String, std::io::Error> {
     //let mut reader = BufReader::new(port);
     let mut buf: Vec<u8> = vec![0;32];
     let mut result_buf: Vec<u8> = Vec::new();
     let mut cont = true;
     while cont {
+        println!("{}", buf.len());
         match port.read(&mut buf) {
-            Ok(num) => {
+            Ok(_num) => {
                 result_buf.extend_from_slice(&buf[..]);
                 if result_buf[0] != 0x24 {
                     result_buf = result_buf.into_iter().take_while(|u| *u != 0xA).collect();
                 } else {
                     let len1 = result_buf.len();
-                    result_buf = result_buf.into_iter().take_while(|u| *u != 0x6F).collect();
+                    result_buf = result_buf.into_iter().take_while(|b| *b != 0x6F).collect();
                     let len2 = result_buf.len();
                     if len1 != len2 {result_buf.pop();}
                 }
             }
-            Err(err) => {
+            Err(_err) => {
+                result_buf = result_buf.into_iter().filter(|b| *b != 0x0).collect::<Vec<u8>>();
                 if **result_buf.last().as_ref().unwrap_or(&&0x1) == 0xD ||
                     **result_buf.last().as_ref().unwrap_or(&&0x1) == 0x47 ||
-                    **result_buf.first().as_ref().unwrap_or(&&0x1) == 0x0 {cont = false}
+                    **result_buf.first().as_ref().unwrap_or(&&0x1) == 0x0 {
+                        cont = false;
+                    }
             },
         }
     }
-    Ok(str::from_utf8(&result_buf[..]).unwrap().to_string())
+    Ok(str::from_utf8(&result_buf[..]).unwrap_or("**Parsing reponse failed**").to_string())
 }
 } else {
 fn read_until(c: u8, port: &mut Box<dyn SerialPort>) -> Result<String, std::io::Error> {
+    use std::io::BufRead;
+use std::io::BufReader;
     let mut reader = BufReader::new(port);
     let mut buf: Vec<u8> = Vec::new();
     let mut len: usize;

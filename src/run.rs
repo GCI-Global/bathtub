@@ -17,9 +17,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fs;
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex};
-use std::{fs, mem::discriminant};
 
 pub struct Run {
     scroll: scrollable::State,
@@ -37,7 +37,7 @@ pub struct Run {
     recipe_regex: Regex,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
     pub recipe: Option<Recipe>,
-    continue_btns: Vec<Option<ContinueButton>>,
+    continue_btns: Vec<button::State>,
     pub active_recipie: Option<Vec<Step>>,
     pub state: RunState,
     required_before_inputs: Vec<RequiredInput>,
@@ -118,14 +118,6 @@ impl Run {
         let mut command = Command::none();
         match message {
             RunMessage::Step => {
-                for btn in &mut self.continue_btns {
-                    if let Some(b) = btn {
-                        b.display_value = match b.display_value.overflowing_sub(1) {
-                            (n, false) => n,
-                            (_, true) => 0,
-                        }
-                    }
-                }
                 let (recipe_state, cvar) = &*self.recipe_state;
                 let mut recipe_state = recipe_state.lock().unwrap();
                 *recipe_state = RecipeState::RecipeRunning;
@@ -245,6 +237,7 @@ impl Run {
         let ref_actions = &self.ref_actions;
         let node_map = &self.node_map;
         let current_step = &self.current_step;
+        let mut is_waiting_for_input = false;
         match self.state {
             RunState::Standard => {
                 let search: Element<_>;
@@ -400,99 +393,90 @@ impl Run {
                                     .padding(10)
                                     .width(Length::Units(200)),
                                 ),
-                            RecipeState::RequireInput => Row::new()
-                                .push(
-                                    Button::new(
-                                        &mut self.stop_btn,
-                                        Text::new("Stop")
-                                            .size(30)
-                                            .horizontal_alignment(HorizontalAlignment::Center)
-                                            .font(CQ_MONO),
+                            RecipeState::RequireInput => {
+                                is_waiting_for_input = true;
+                                Row::new()
+                                    .push(
+                                        Button::new(
+                                            &mut self.stop_btn,
+                                            Text::new("Stop")
+                                                .size(30)
+                                                .horizontal_alignment(HorizontalAlignment::Center)
+                                                .font(CQ_MONO),
+                                        )
+                                        .style(Theme::Red)
+                                        .on_press(RunMessage::RequireStopConfirm)
+                                        .padding(10)
+                                        .width(Length::Units(200)),
                                     )
-                                    .style(Theme::Red)
-                                    .on_press(RunMessage::RequireStopConfirm)
-                                    .padding(10)
-                                    .width(Length::Units(200)),
-                                )
-                                .push(Space::with_width(Length::Units(100)))
-                                .push(
-                                    Text::new("Waiting for user input")
-                                        .font(CQ_MONO)
-                                        .size(20)
-                                        .horizontal_alignment(HorizontalAlignment::Center),
-                                ),
+                                    .push(Space::with_width(Length::Units(100)))
+                                    .push(
+                                        Text::new("Waiting for user input")
+                                            .font(CQ_MONO)
+                                            .size(20)
+                                            .horizontal_alignment(HorizontalAlignment::Center),
+                                    )
+                            }
                             _ => Row::new(),
                         }
                     }
                     None => Row::new(),
                 };
-
-                let recipie: Element<_> = match self.recipe.as_mut() {
+                let recipe: Element<_> = match self.recipe.as_mut() {
                     Some(recipe) => recipe
                         .steps
                         .iter_mut()
                         .zip(self.continue_btns.iter_mut())
                         .enumerate()
                         .fold(Column::new(), |col, (i, (step, btn))| {
-                            if let Some(b) = btn {
-                                col.push(
-                                    Container::new(
-                                        Column::new()
-                                            .height(Length::Units(50))
-                                            .push(Space::with_height(Length::Fill))
-                                            .push(
-                                                Row::new()
-                                                    .width(Length::Units(500))
-                                                    .push(
-                                                        step.view()
-                                                            .map(move |_msg| RunMessage::Step),
-                                                    )
-                                                    .push(
-                                                        b.view().map(move |_msg| RunMessage::Step),
-                                                    ),
-                                            )
-                                            .push(Space::with_height(Length::Fill)),
-                                    )
-                                    .style(
-                                        match current_step {
-                                            Some(num) if i % 2 == 0 && *num == i => {
-                                                Theme::LightGrayHighlight
-                                            }
-                                            Some(num) if i % 2 != 0 && *num == i => {
-                                                Theme::LighterGrayHighlight
-                                            }
-                                            _ if i % 2 == 0 => Theme::LightGray,
-                                            _ if i % 2 != 0 => Theme::LighterGray,
-                                            _ => Theme::LightGray,
-                                        },
-                                    ),
+                            col.push(
+                                Container::new(
+                                    Column::new()
+                                        .height(Length::Units(50))
+                                        .push(Space::with_height(Length::Fill))
+                                        .push(
+                                            Row::new()
+                                                .width(Length::Units(500))
+                                                .push(step.view().map(move |_msg| RunMessage::Step))
+                                                .push(if let Some(num) = current_step {
+                                                    if *num == i && is_waiting_for_input {
+                                                        Column::new().push(
+                                                            Row::new()
+                                                                .push(Space::with_width(
+                                                                    Length::Units(25),
+                                                                ))
+                                                                .push(
+                                                                    Button::new(
+                                                                        btn,
+                                                                        attention_icon().size(30),
+                                                                    )
+                                                                    .width(Length::Units(50))
+                                                                    .padding(10)
+                                                                    .on_press(RunMessage::Step)
+                                                                    .style(Theme::Yellow),
+                                                                ),
+                                                        )
+                                                    } else {
+                                                        Column::new()
+                                                    }
+                                                } else {
+                                                    Column::new()
+                                                }),
+                                        )
+                                        .push(Space::with_height(Length::Fill)),
                                 )
-                            } else {
-                                col.push(
-                                    Container::new(
-                                        Column::new()
-                                            .height(Length::Units(50))
-                                            .push(Space::with_height(Length::Fill))
-                                            .push(Row::new().width(Length::Units(500)).push(
-                                                step.view().map(move |_msg| RunMessage::Step),
-                                            ))
-                                            .push(Space::with_height(Length::Fill)),
-                                    )
-                                    .style(
-                                        match current_step {
-                                            Some(num) if i % 2 == 0 && *num == i => {
-                                                Theme::LightGrayHighlight
-                                            }
-                                            Some(num) if i % 2 != 0 && *num == i => {
-                                                Theme::LighterGrayHighlight
-                                            }
-                                            _ if i % 2 == 0 => Theme::LightGray,
-                                            _ if i % 2 != 0 => Theme::LighterGray,
-                                            _ => Theme::LightGray,
-                                        },
-                                    ),
-                                )
-                            }
+                                .style(match current_step {
+                                    Some(num) if i % 2 == 0 && *num == i => {
+                                        Theme::LightGrayHighlight
+                                    }
+                                    Some(num) if i % 2 != 0 && *num == i => {
+                                        Theme::LighterGrayHighlight
+                                    }
+                                    _ if i % 2 == 0 => Theme::LightGray,
+                                    _ if i % 2 != 0 => Theme::LighterGray,
+                                    _ => Theme::LightGray,
+                                }),
+                            )
                         })
                         .into(),
                     None => Column::new().into(),
@@ -503,7 +487,7 @@ impl Run {
                     .spacing(20)
                     .push(search)
                     .push(run)
-                    .push(recipie)
+                    .push(recipe)
                     .align_items(Align::Center);
 
                 Scrollable::new(&mut self.scroll)
@@ -806,52 +790,6 @@ impl Step {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ContinueButtonMessage {
-    Continue,
-}
-
-struct ContinueButton {
-    display_value: usize, // keep track of what buttons have been shown and what order they are in such that only one is shown when paused.
-    recipie_state: Arc<(Mutex<RecipeState>, Condvar)>,
-    continue_btn: button::State,
-}
-
-impl ContinueButton {
-    fn new(display_value: usize, recipie_state: Arc<(Mutex<RecipeState>, Condvar)>) -> Self {
-        ContinueButton {
-            display_value,
-            recipie_state,
-            continue_btn: button::State::new(),
-        }
-    }
-
-    fn view(&mut self) -> Element<ContinueButtonMessage> {
-        if self.display_value == 1 {
-            let (recipie_state, _) = &*self.recipie_state;
-            if discriminant(&*recipie_state.lock().unwrap())
-                == discriminant(&RecipeState::RequireInput)
-            {
-                Column::new()
-                    .push(
-                        Row::new().push(Space::with_width(Length::Units(25))).push(
-                            Button::new(&mut self.continue_btn, attention_icon().size(30))
-                                .width(Length::Units(50))
-                                .padding(10)
-                                .on_press(ContinueButtonMessage::Continue)
-                                .style(Theme::Yellow),
-                        ),
-                    )
-                    .into()
-            } else {
-                Column::new().into()
-            }
-        } else {
-            Column::new().into()
-        }
-    }
-}
-
 pub async fn do_nothing() {
     ()
 }
@@ -881,19 +819,6 @@ fn update_recipe(tab: &mut Run) {
                     Vec::new()
                 },
             };
-            tab.continue_btns = Vec::with_capacity(rec.steps.len());
-            let mut count = 1;
-            for step in &rec.steps {
-                if step.wait {
-                    tab.continue_btns.push(Some(ContinueButton::new(
-                        count,
-                        Arc::clone(&tab.recipe_state),
-                    )));
-                    count += 1;
-                } else {
-                    tab.continue_btns.push(None);
-                }
-            }
             tab.required_before_inputs = rec.required_inputs.before.iter().fold(
                 Vec::with_capacity(rec.required_inputs.before.len()),
                 |mut v, input| {
@@ -908,6 +833,7 @@ fn update_recipe(tab: &mut Run) {
                     v
                 },
             );
+            tab.continue_btns = vec![button::State::new(); rec.steps.len()];
             tab.recipe = Some(rec);
         }
         // TODO: Display Error when unable to read file

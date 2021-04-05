@@ -36,6 +36,12 @@ impl Nodes {
         Nodes { node: vec![] }
     }
     pub fn add_height_nodes(&mut self) {
+        let hidden_nodes = self.node.iter().fold(Vec::new(), |mut v, n| {
+            if n.hide {
+                v.push(n.name.clone());
+            };
+            v
+        });
         let mut new_nodes: Vec<Node> = vec![];
         //let bath_iter = baths.bath.into_iter();
         for node in &mut self.node {
@@ -52,7 +58,11 @@ impl Nodes {
                         .neighbors
                         .iter()
                         .fold(vec![node.name.clone()], |mut v, n| {
-                            v.push(format!("{}_hover", n));
+                            if hidden_nodes.iter().any(|hn| hn == n) {
+                                v.push(n.clone());
+                            } else {
+                                v.push(format!("{}_hover", n));
+                            }
                             v
                         }),
                 });
@@ -70,7 +80,9 @@ impl Nodes {
                         .clone()
                         .into_iter()
                         .map(|mut n| {
-                            n.push_str("_hover");
+                            if !hidden_nodes.iter().any(|hn| *hn == n) {
+                                n.push_str("_hover");
+                            }
                             n
                         })
                         .collect()
