@@ -34,8 +34,9 @@ pub fn gen_node_paths(nodes: &Nodes, start: &Node, stop: &Node) -> Result<Nodes,
     });
     // Create map for faster node traversal
     let mut distance_map = HashMap::new();
-    for i in 0..distance_nodes.len() {
-        distance_map.insert(distance_nodes[i].node.name.clone(), i);
+    for (i, n) in distance_nodes.iter().enumerate() {
+        //println!("{}", distance_nodes[i].node.name);
+        distance_map.insert(n.node.name.clone(), i);
     }
     // Dijkstra's algorithm setup
     let mut current_index = distance_map[&start.name];

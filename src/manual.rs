@@ -3,7 +3,7 @@ use super::logger::Logger;
 use super::nodes::{Node, Nodes};
 use super::paths::gen_node_paths;
 use super::style::style::Theme;
-use crate::{RecipeState, CQ_MONO};
+use crate::{NodeTracker, RecipeState, CQ_MONO};
 use chrono::prelude::*;
 use iced::{
     button, scrollable, text_input, tooltip, Button, Checkbox, Column, Command, Container, Element,
@@ -34,7 +34,7 @@ pub struct Manual {
     pub grbl: Grbl,
     logger: Logger,
     recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
-    current_node: Arc<Mutex<Node>>,
+    node_tracker: Arc<Mutex<NodeTracker>>,
     pub unsaved_in_bathtub: bool,
 }
 
@@ -63,7 +63,7 @@ impl Manual {
         logger: Logger,
         homing_required: Rc<RefCell<bool>>,
         recipe_state: Arc<(Mutex<RecipeState>, Condvar)>,
-        current_node: Arc<Mutex<Node>>,
+        node_tracker: Arc<Mutex<NodeTracker>>,
     ) -> Self {
         Manual {
             scroll: scrollable::State::new(),
@@ -86,7 +86,7 @@ impl Manual {
             grbl,
             logger,
             recipe_state,
-            current_node,
+            node_tracker,
             unsaved_in_bathtub: false,
         }
     }
@@ -168,7 +168,7 @@ impl Manual {
         let homing_required = self.homing_required.borrow();
         let (recipe_state, _) = &*self.recipe_state;
         let recipe_state = recipe_state.lock().unwrap();
-        let current_node = self.current_node.lock().unwrap();
+        let node_tracker = self.node_tracker.lock().unwrap();
         let title = Text::new(self.status.clone())
             .width(Length::Fill)
             .size(40)
@@ -214,10 +214,10 @@ impl Manual {
         let paths_r_safe: bool;
         {
             paths_r_safe = !ref_nodes.node.iter().any(|n| {
-                if &n.name[..] == "HOME" {
+                if n.hide {
                     false
                 } else {
-                    gen_node_paths(&*ref_nodes, &*current_node, n).is_err()
+                    gen_node_paths(&*ref_nodes, &node_tracker.current, n).is_err()
                 }
             });
         }
@@ -260,9 +260,9 @@ impl Manual {
                                                 )
                                                 .style(match *recipe_state {
                                                     RecipeState::ManualRunning => {
-                                                        if current_node.name
+                                                        if node_tracker.current.name
                                                             == ref_nodes.node[nt.0].name
-                                                            || current_node.name
+                                                            || node_tracker.current.name
                                                                 == format!(
                                                                     "{}_hover",
                                                                     ref_nodes.node[nt.0].name
@@ -459,7 +459,7 @@ fn grid(rn: &Nodes) -> Vec<Vec<Option<usize>>> {
     let mut grid = build_grid.into_iter().fold(Vec::new(), |mut v, row| {
         let mut new_row = Vec::with_capacity(max_x as usize);
         let mut row_index = 0;
-        for i in 0..max_x as usize {
+        for i in 0..(max_x + 2.0) as usize {
             if row_index >= row.len()
                 || i as f32 - row[row_index].as_ref().unwrap().1.x.abs() <= 1.0
             {
