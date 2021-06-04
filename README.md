@@ -1,6 +1,7 @@
 # Bathtub - GRBL Gantry Control for Humans
 > Bathtub has been used in production to manufacture thousands of dollars of product.
-> Works on Windows and Linux (Tested on both Fedora and Pop_OS!)!
+> 
+> It works on Windows and Linux (Tested on both Fedora and Pop_OS!)!
 
 
 Most GRBL automation is done with G-Code scripts. Long text files that need to be manually edited with XYZ coordinates that are easy to mistake.
