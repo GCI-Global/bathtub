@@ -12,8 +12,8 @@ Luckily though this can all be done in a convenient interface that automatically
 ![](https://github.com/GCI-Global/bathtub/blob/readme_update/img/nodes.png?raw=true)
 ![](https://github.com/GCI-Global/bathtub/blob/readme_update/img/actions.png?raw=true)
 
-## Run
-###Now to the easy part!
+## Daily Use
+### Now to the easy part!
 Bathtub has two main modes `Manual` and `Run`. Because the destinations and relationships to nearby nodes were set in the setup Bathtub is able to
 build safe paths between any given nodes. Bathtub can generate a safe path from its current position to any destination.
 
