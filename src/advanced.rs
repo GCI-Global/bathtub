@@ -1889,6 +1889,21 @@ impl ActionTab {
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::Okay) => {
                 self.save_bar.message = "Unsaved Changes!".to_string();
                 self.config_actions[i].update(ConfigActionMessage::Okay);
+                // clone value from UI into state values
+                let index = self
+                    .modified_actions
+                    .borrow()
+                    .action
+                    .iter()
+                    .position(|a| a.name == self.config_actions[i].name)
+                    .unwrap();
+                self.modified_actions.borrow_mut().action[index].commands = self.config_actions[i]
+                    .command_inputs
+                    .iter()
+                    .fold(Vec::new(), |mut v, c| {
+                        v.push(c.value.clone());
+                        v
+                    })
             }
             ActionTabMessage::ConfigAction(i, ConfigActionMessage::Delete) => {
                 self.config_actions.remove(i);
