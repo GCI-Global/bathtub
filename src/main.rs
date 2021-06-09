@@ -929,7 +929,7 @@ impl<'a> Application for Bathtub {
                                 state.tabs.run.current_step = num;
                             }
                         }
-                        if state.grbl.is_ok() {
+                        if state.grbl.is_ok() /* to run without check for connected GRBL, replace state.grbl.is_ok() with true */ {
                             let stat = state.grbl.get_status();
                             if let Some(s) = stat {
                                 state.tabs.manual.status = format!(
