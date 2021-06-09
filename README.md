@@ -33,7 +33,7 @@ Build is great too! Rather than having to scroll through long G-Code scripts cop
 ![](https://github.com/GCI-Global/bathtub/blob/readme_update/img/build.png?raw=true)
 
 ## Logs
-Bathtub keeps detailed logs of all actions taken within the application. Time, what actions, operating system user are all saved. This is great for debugging, butalso if Bathtub is used in an environment has multiple technicains, it is possible to keep track of who did what to monitor for user error.
+Bathtub keeps detailed logs of all actions taken within the application. Time, what actions, operating system user are all saved. This is great for debugging, and if Bathtub is used in an environment has multiple technicains, it is possible to keep track of who did what to monitor for user error.
 ![](https://github.com/GCI-Global/bathtub/blob/readme_update/img/logs.png?raw=true)
 
 ## Search
