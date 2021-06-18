@@ -2436,10 +2436,10 @@ impl LogTab {
 
     pub fn update_logs(&mut self) {
         self.search_bars = vec![SearchBar::new(0)];
-        let mut log_files: Vec<_> = fs::read_dir(Path::new(LOGS))
-            .unwrap()
+        let mut log_files: Vec<_> = if Ok(files) = fs::read_dir(Path::new(LOGS)) {
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
-            .collect();
+            .collect()
+            else {Vec::new()};
         log_files.sort_by(|a, b| {
             // convert from title to sort by seconds, just sorting by name sorts by day
             let b_caps = self.date_regex.captures(&b[..]).unwrap();
