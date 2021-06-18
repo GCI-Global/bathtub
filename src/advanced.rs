@@ -2436,10 +2436,12 @@ impl LogTab {
 
     pub fn update_logs(&mut self) {
         self.search_bars = vec![SearchBar::new(0)];
-        let mut log_files: Vec<_> = if Ok(files) = fs::read_dir(Path::new(LOGS)) {
+        let mut log_files: Vec<_> = if let Ok(files) = fs::read_dir(Path::new(LOGS)) {
+            files
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
             .collect()
-            else {Vec::new()};
+        } else {Vec::new()
+        };
         log_files.sort_by(|a, b| {
             // convert from title to sort by seconds, just sorting by name sorts by day
             let b_caps = self.date_regex.captures(&b[..]).unwrap();
@@ -2517,13 +2519,15 @@ impl LogTab {
                     Command::none()
                 } else {
                     self.logs = Vec::with_capacity(LOG_MAX);
-                    self.unsearched_files = fs::read_dir(Path::new(LOGS)).unwrap().fold(
+                    self.unsearched_files = if let Ok(files) = fs::read_dir(Path::new(LOGS)) {
+                        files.fold(
                         Vec::with_capacity(LOG_MAX),
                         |mut v, file| {
                             v.push(file.unwrap().file_name().to_string_lossy().to_string());
                             v
                         },
-                    );
+                    )
+                } else {Vec::new()};
                     // Note: limit to 15 active search threads as limit on windows
                     Command::batch((0..min(15, self.unsearched_files.len())).into_iter().fold(
                         Vec::with_capacity(15),
